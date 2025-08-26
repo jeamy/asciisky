@@ -54,11 +54,7 @@ A simple web application that displays the current moon phase and position in AS
 - Frontend: HTML, CSS, JavaScript
 - Containerization: Docker, Docker Compose
 
-## Attribution
-
-This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1. Babysitting by a human in a virtual environment.
-
-### Skyfield Citation
+## Skyfield 
 
 This project uses Skyfield for astronomical calculations. If you use this software in your research, please cite Skyfield as follows:
 
@@ -76,6 +72,11 @@ Bibcode:
 Preferred citation method:
 https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 ```
+
+## Attribution
+
+This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1. Babysitting by a human in a virtual environment.
+
 
 ## License
 
