@@ -56,9 +56,10 @@ A simple web application that displays the current moon phase and position in AS
 
 ## Attribution
 
-This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1.
+This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1. Babysitting by a human in a virtual environment.
 
 ## License
 
-MIT
+This repository is released under the MIT License. See the LICENSE file for the full text.
+
 # asciisky
