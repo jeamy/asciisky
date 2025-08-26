@@ -1,12 +1,15 @@
-# ASCII Sky - Moon Tracker
+# ASCII Sky - Celestial Tracker
 
-A simple web application that displays the current moon phase and position in ASCII art, specifically for Vienna, Austria.
+A web application that displays the current positions of celestial bodies (Sun, Moon, planets) in ASCII art, specifically for Vienna, Austria.
 
 ## Features
 
-- Real-time moon position tracking (altitude and azimuth)
-- Current moon phase visualization in ASCII art
-- Distance to moon calculation
+- Real-time tracking of celestial bodies (altitude and azimuth)
+- Display of objects above and below the horizon
+- Current moon phase visualization
+- Rise, set, and transit times for all celestial objects
+- Interactive object selection with detailed information dialog
+- Distance and magnitude information for all objects
 - Auto-updates every 30 seconds
 - Responsive design
 
@@ -41,9 +44,14 @@ A simple web application that displays the current moon phase and position in AS
 
 ## Project Structure
 
-- `main.py` - FastAPI application with moon calculation logic
+- `main.py` - FastAPI application with celestial object calculation logic
 - `templates/` - HTML templates
-- `static/` - Static files (CSS, JS, images)
+- `static/js/` - JavaScript modules
+  - `constants.js` - Configuration parameters and constants
+  - `skyRenderer.js` - ASCII sky rendering and interaction logic
+  - `moon.js` - Moon phase calculations
+- `doc/` - Documentation files
+  - `plan.md` - Development plan and feature tracking
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
@@ -56,7 +64,7 @@ A simple web application that displays the current moon phase and position in AS
 
 ## Skyfield 
 
-This project uses Skyfield for astronomical calculations. If you use this software in your research, please cite Skyfield as follows:
+This project uses Skyfield for astronomical calculations.
 
 Skyfield: High precision research-grade positions for planets and Earth satellites generator
 Rhodes, Brandon
@@ -74,7 +82,7 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 
 ## Attribution
 
-This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1. Babysitting by a human in a virtual environment.
+This project was built with assistance from Windsurf (agentic AI coding assistant), Claude 3.7 Sonnet and SWE-1. Babysitting by a human in a virtual environment.
 
 
 ## License

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ASCII Sky - Celestial Tracker</title>
+    <style>
+        :root {
+            --primary-color: #00ff00;
+            --background-color: #0a0a0a;
+            --panel-bg: #111;
+            --border-color: #333;
+            --text-dim: #666;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--primary-color);
+            line-height: 1.4;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: var(--primary-color);
+            margin: 0 0 10px 0;
+        }
+        
+        .sky-container {
+            background-color: #000;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-family: monospace;
+            white-space: pre;
+            line-height: 1;
+            letter-spacing: 2px;
+            min-height: calc(100vh - 200px);
+            height: calc(100vh - 200px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+            cursor: crosshair;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .object-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .object-btn {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--primary-color);
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        
+        .object-btn:hover {
+            background: #222;
+        }
+        
+        .object-btn.active {
+            background: #004400;
+            border-color: var(--primary-color);
+        }
+        
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            color: var(--text-dim);
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+        
+        #object-dialog {
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--primary-color);
+            padding: 15px 20px;
+            color: var(--primary-color);
+            font-family: monospace;
+            white-space: pre;
+            z-index: 1000;
+            min-width: 200px;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+        
+        #object-dialog button {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: transparent;
+            border: none;
+            color: var(--primary-color);
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .sky-container {
+                font-size: 10px;
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌌 ASCII Sky Tracker - Vienna</h1>
+        <div class="status-bar">
+            <div>Click on any object for details</div>
+            <div id="last-updated">-</div>
+        </div>
+    </header>
+    
+    <div class="controls">
+        <div class="object-list" id="object-list">
+            <!-- Will be populated by JavaScript -->
+        </div>
+    </div>
+    
+    <div id="sky-container" class="sky-container">
+        Loading celestial data...
+    </div>
+    
+    <!-- Object information will be inserted here by JavaScript -->
+    
+    <!-- JavaScript Modules -->
+    <script type="module">
+        import { initializeMoonTracker } from '/static/js/moon.js';
+        import { CONFIG, OBJECT_SYMBOLS } from '/static/js/constants.js';
+        
+        let renderer;
+        
+        // Initialize the sky tracker when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialisiere den Renderer und speichere die Referenz
+            renderer = initializeMoonTracker();
+            
+            // Warte einen kurzen Moment, um sicherzustellen, dass der Renderer initialisiert ist
+            setTimeout(() => {
+                setupObjectList();
+            }, 500);
+        });
+        
+        function setupObjectList() {
+            const container = document.getElementById('object-list');
+            if (!container) return;
+            
+            // Leere den Container zuerst
+            container.innerHTML = '';
+            
+            // Verwende OBJECT_SYMBOLS direkt, nicht über CONFIG
+            Object.entries(OBJECT_SYMBOLS).forEach(([name, symbol]) => {
+                const btn = document.createElement('button');
+                btn.className = 'object-btn';
+                btn.innerHTML = `${symbol} ${name.charAt(0).toUpperCase() + name.slice(1)}`;
+                btn.onclick = () => {
+                    // Toggle selection
+                    const isSelected = btn.classList.contains('active');
+                    document.querySelectorAll('.object-btn').forEach(b => b.classList.remove('active'));
+                    
+                    if (!isSelected && renderer) {
+                        btn.classList.add('active');
+                        renderer.selectObject(name);
+                    } else if (renderer) {
+                        renderer.clearSelection();
+                    }
+                };
+                container.appendChild(btn);
+            });
+        }
+    </script>
+</body>
+</html>
