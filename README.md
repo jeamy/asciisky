@@ -54,6 +54,10 @@ A simple web application that displays the current moon phase and position in AS
 - Frontend: HTML, CSS, JavaScript
 - Containerization: Docker, Docker Compose
 
+## Attribution
+
+This project was built with assistance from Windsurf (agentic AI coding assistant) and SWE-1.
+
 ## License
 
 MIT
