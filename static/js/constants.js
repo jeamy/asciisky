@@ -1,7 +1,11 @@
 // API Endpoints
 export const API_ENDPOINTS = {
     CELESTIAL: '/api/celestial',
-    CELESTIAL_OBJECT: (id) => `/api/celestial/${id}`
+    CELESTIAL_OBJECT: '/api/celestial',  // + '/{body_id}'
+    SKY: '/api/celestial',
+    ASTEROIDS: '/api/asteroids',
+    COMETS: '/api/comets'
+    // ZODIAC endpoint removed as it's not implemented in the backend
 };
 
 // Astronomical Constants
@@ -10,7 +14,9 @@ export const ASTRO_CONSTANTS = {
     MOON_MAGNITUDE: -12.6,  // Approximate full moon magnitude
     VIENNA_LAT: 48.2082,    // Vienna latitude
     VIENNA_LON: 16.3738,    // Vienna longitude
-    VIENNA_ELEVATION: 171   // Vienna elevation in meters
+    VIENNA_ELEVATION: 171,  // Vienna elevation in meters
+    DEFAULT_ASTEROID_MAX_MAGNITUDE: 10.0,  // Default maximum magnitude for asteroids
+    DEFAULT_COMET_MAX_MAGNITUDE: 14.0     // Default maximum magnitude for comets
 };
 
 // Celestial Object Symbols - must match symbols in main.py
@@ -24,11 +30,12 @@ export const OBJECT_SYMBOLS = {
     'saturn': '♄',
     'uranus': '♅',
     'neptune': '♆'
+    // Removed asteroid and comet as they are displayed automatically
 };
 
 // Display Configuration
 export const CONFIG = {
-    UPDATE_INTERVAL_MS: 60000, // 30 seconds
+    UPDATE_INTERVAL_MS: 60000, // 60 seconds
     SKY_WIDTH: 80,
     SKY_HEIGHT: 40,
     HORIZON_ROW: 20, // Row where the horizon is drawn

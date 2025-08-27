@@ -214,5 +214,8 @@ export class LocationDialog {
         if (this.onLocationChange) {
             this.onLocationChange(this.currentLocation);
         }
+        
+        // Dialog schließen nach Übernahme der Koordinaten
+        this.removeDialog();
     }
 }

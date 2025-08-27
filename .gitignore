@@ -57,3 +57,7 @@ docker-compose.override.yml
 # Logs
 logs/
 *.log
+
+MPCORB.DAT.gz
+hip_main.dat
+CometEls.txt

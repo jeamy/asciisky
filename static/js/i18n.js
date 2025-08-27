@@ -30,6 +30,8 @@ export const i18n = {
         'uranus': 'Uranus',
         'neptune': 'Neptun',
         'pluto': 'Pluto',
+        'asteroid': 'Asteroid',
+        'comet': 'Komet',
         
         // Himmelsrichtungen
         'north': 'N',
@@ -67,6 +69,11 @@ export const i18n = {
         
         // Standort-Dialog
         'location_settings': 'Standort-Einstellungen',
+        
+        // Filter-Einstellungen
+        'asteroid_magnitude_label': 'Asteroiden max. Magnitude:',
+        'comet_magnitude_label': 'Kometen max. Magnitude:',
+        'apply_filters': 'Anwenden',
         'search_location': 'Ort suchen...',
         'search': 'Suchen',
         'searching': 'Suche',
@@ -112,6 +119,8 @@ export const i18n = {
         'uranus': 'Uranus',
         'neptune': 'Neptune',
         'pluto': 'Pluto',
+        'asteroid': 'Asteroid',
+        'comet': 'Comet',
         
         // Cardinal directions
         'north': 'N',
@@ -149,6 +158,11 @@ export const i18n = {
         
         // Location dialog
         'location_settings': 'Location Settings',
+        
+        // Filter settings
+        'asteroid_magnitude_label': 'Asteroids max. magnitude:',
+        'comet_magnitude_label': 'Comets max. magnitude:',
+        'apply_filters': 'Apply',
         'search_location': 'Search location...',
         'search': 'Search',
         'searching': 'Searching',

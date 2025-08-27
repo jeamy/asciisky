@@ -21,35 +21,18 @@ export class ZodiacRenderer {
      */
     async fetchZodiacData(location) {
         try {
-            // Check if we need to fetch new data
-            const now = Date.now();
-            if (this.lastFetchTime && (now - this.lastFetchTime < this.fetchIntervalMs)) {
-                return;
-            }
-
-            // Build URL with location parameters if provided
-            let url = API_ENDPOINTS.ZODIAC;
-            if (location) {
-                const params = new URLSearchParams();
-                if (location.lat !== undefined) params.append('lat', location.lat);
-                if (location.lon !== undefined) params.append('lon', location.lon);
-                if (location.elevation !== undefined) params.append('elevation', location.elevation);
-                url = `${url}?${params.toString()}`;
-            }
-
-            // Fetch data
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch zodiac data: ${response.status} ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            this.constellations = data.constellations;
-            this.lastFetchTime = now;
+            // Since the ZODIAC endpoint has been removed from API_ENDPOINTS,
+            // this method will do nothing but log a message
+            console.log('Zodiac functionality is not implemented in this version');
             
-            console.log(`Fetched ${this.constellations.length} zodiac constellations`);
+            // Set empty constellations array to prevent rendering errors
+            this.constellations = [];
+            this.lastFetchTime = Date.now();
+            
+            // Return early without attempting to fetch
+            return;
         } catch (error) {
-            console.error('Error fetching zodiac data:', error);
+            console.error('Error in zodiac data handling:', error);
         }
     }
 

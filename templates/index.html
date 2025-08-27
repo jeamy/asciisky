@@ -15,6 +15,30 @@
             box-sizing: border-box;
         }
         
+        .filter-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+            align-items: center;
+        }
+        
+        .magnitude-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .magnitude-filter input {
+            width: 60px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--primary-color);
+            padding: 5px;
+            border-radius: 3px;
+            font-family: inherit;
+        }
+        
         body {
             font-family: 'Courier New', monospace;
             max-width: 1000px;
@@ -221,6 +245,21 @@
         <div class="object-list" id="object-list">
             <!-- Will be populated by JavaScript -->
         </div>
+        <div class="filter-controls">
+            <div class="magnitude-filter">
+                <label for="asteroid-magnitude">
+                    <span id="asteroid-magnitude-label"></span>
+                </label>
+                <input type="number" id="asteroid-magnitude" min="1" max="20" step="0.5" value="8">
+            </div>
+            <div class="magnitude-filter">
+                <label for="comet-magnitude">
+                    <span id="comet-magnitude-label"></span>
+                </label>
+                <input type="number" id="comet-magnitude" min="1" max="20" step="0.5" value="12">
+            </div>
+            <button id="apply-filters" class="control-btn"></button>
+        </div>
     </div>
     
     <div id="sky-container" class="sky-container">
@@ -233,6 +272,7 @@
         import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
         import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
         import { LocationDialog } from './static/js/locationDialog.js';
+        import { settingsManager } from './static/js/settings.js';
         
         let renderer;
         let locationDialog;
@@ -250,6 +290,7 @@
                 setupObjectList();
                 setupLanguageButtons();
                 setupLocationButton();
+                setupMagnitudeFilters();
                 updateUITexts();
                 
                 // Lade gespeicherte Standortdaten, falls vorhanden
@@ -332,6 +373,11 @@
             // Aktualisiere den Standort-Button-Tooltip
             document.getElementById('location-btn').title = t('location_settings');
             
+            // Aktualisiere die Filter-Labels
+            document.getElementById('asteroid-magnitude-label').textContent = t('asteroid_magnitude_label');
+            document.getElementById('comet-magnitude-label').textContent = t('comet_magnitude_label');
+            document.getElementById('apply-filters').textContent = t('apply_filters');
+            
             // Aktualisiere den App-Titel mit i18n
             updateAppTitle();
         }
@@ -376,7 +422,7 @@
         }
         
         // Handler für Standortänderungen
-        function handleLocationChange(location) {
+        async function handleLocationChange(location) {
             // Aktualisiere den Titel mit dem neuen Standort und i18n-Unterstützung
             updateAppTitle(location.name);
             
@@ -389,6 +435,14 @@
             
             // Speichere den Standort im localStorage für Persistenz
             saveLocationToLocalStorage(location);
+            
+            // Speichere den Standort über den SettingsManager und synchronisiere mit dem Server
+            try {
+                await settingsManager.setLocation(location.lat, location.lon, location.elevation, location.name);
+                console.log('Location saved to server via SettingsManager');
+            } catch (error) {
+                console.error('Error saving location to server:', error);
+            }
         }
         
         // Funktion zum Speichern des Standorts im localStorage
@@ -428,6 +482,36 @@
                     }
                 };
                 container.appendChild(btn);
+            });
+        }
+        
+        // Funktion zum Einrichten der Magnitude-Filter
+        function setupMagnitudeFilters() {
+            const applyButton = document.getElementById('apply-filters');
+            const asteroidInput = document.getElementById('asteroid-magnitude');
+            const cometInput = document.getElementById('comet-magnitude');
+            
+            // Setze die Standardwerte aus den Konstanten
+            asteroidInput.value = ASTRO_CONSTANTS.DEFAULT_ASTEROID_MAX_MAGNITUDE;
+            cometInput.value = ASTRO_CONSTANTS.DEFAULT_COMET_MAX_MAGNITUDE;
+            
+            // Event-Listener für den Anwenden-Button
+            applyButton.addEventListener('click', () => {
+                const asteroidMag = parseFloat(asteroidInput.value);
+                const cometMag = parseFloat(cometInput.value);
+                
+                // Validiere die Eingaben
+                if (isNaN(asteroidMag) || isNaN(cometMag)) {
+                    console.error('Ungültige Magnitude-Werte');
+                    return;
+                }
+                
+                // Aktualisiere die Filter im Renderer
+                if (renderer && renderer.setMagnitudeFilters) {
+                    renderer.setMagnitudeFilters(asteroidMag, cometMag);
+                    // Aktualisiere den Himmel mit den neuen Filtern
+                    updateSky();
+                }
             });
         }
     </script>

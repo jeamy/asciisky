@@ -1,5 +1,6 @@
-import { API_ENDPOINTS, CONFIG, ASCII_ART } from './constants.js';
+import { API_ENDPOINTS, CONFIG, ASCII_ART, ASTRO_CONSTANTS } from './constants.js';
 import { t } from './i18n.js';
+import { settingsManager } from './settings.js';
 
 export class SkyRenderer {
     constructor(containerId) {
@@ -8,6 +9,17 @@ export class SkyRenderer {
         this.celestialData = null;
         this.selectedObject = null;
         this.skyManager = null; // Wird später gesetzt
+        
+        // Lade gespeicherte Magnitude-Einstellungen oder verwende Defaults
+        this.asteroidMaxMagnitude = settingsManager.getAsteroidMagnitude() || ASTRO_CONSTANTS.DEFAULT_ASTEROID_MAX_MAGNITUDE;
+        this.cometMaxMagnitude = settingsManager.getCometMagnitude() || ASTRO_CONSTANTS.DEFAULT_COMET_MAX_MAGNITUDE;
+        
+        // Lade gespeicherte Standortdaten
+        this.location = settingsManager.getLocation();
+        
+        console.log(`Loaded magnitude settings: Asteroids=${this.asteroidMaxMagnitude}, Comets=${this.cometMaxMagnitude}`);
+        console.log(`Loaded location settings: lat=${this.location.latitude}, lon=${this.location.longitude}, elevation=${this.location.elevation}`);
+        
         this.initSky();
         this.setupEventListeners();
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
@@ -525,42 +537,85 @@ export class SkyRenderer {
         }
     }
 
-    async update() {
+    // Methode zum Setzen der Magnitude-Filter
+    setMagnitudeFilters(asteroidMag, cometMag) {
+        this.asteroidMaxMagnitude = asteroidMag;
+        this.cometMaxMagnitude = cometMag;
+        
+        // Speichere die Einstellungen persistent
+        settingsManager.setMagnitudeFilters(asteroidMag, cometMag);
+        
+        console.log(`Magnitude filters set and saved: Asteroids=${asteroidMag}, Comets=${cometMag}`);
+        
+        // Aktualisiere die Anzeige mit den neuen Filtern
+        this.update();
+    }
+    
+    // Methode zum Laden von Asteroiden
+    async loadAsteroids() {
         try {
-            // Zeige Ladestatus an
-            this.container.textContent = t('loading');
+            // Erstelle die URL mit Standort- und Magnitude-Parametern
+            let url = API_ENDPOINTS.ASTEROIDS;
             
-            // Hole die aktuellen Standortdaten aus dem SkyManager
-            const location = this.skyManager ? this.skyManager.getCurrentLocation() : null;
+            // Verwende serverseitige Einstellungen, wenn kein lokaler Wert gesetzt ist
+            if (this.asteroidMaxMagnitude) {
+                url += `?max_magnitude=${this.asteroidMaxMagnitude}`;
+            }
             
-            // Erstelle die URL mit Standortparametern, falls vorhanden
-            let url = API_ENDPOINTS.CELESTIAL;
-            if (location) {
-                url += `?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+            // Verwende die gespeicherten Standortdaten
+            if (this.location) {
+                url += url.includes('?') ? '&' : '?';
+                url += `lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
             
             const response = await fetch(url);
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error(`HTTP error loading asteroids! status: ${response.status}`);
             }
             
             const data = await response.json();
+            console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} asteroids`);
             
-            // Debug-Ausgabe der Daten
-            console.log('Celestial data:', data);
-            if (data && data.bodies) {
-                Object.entries(data.bodies).forEach(([name, body]) => {
-                    console.log(`${name}: altitude=${body.altitude}, visible=${body.visible}`);
-                });
+            // Füge die Asteroiden zu den Himmelsdaten hinzu
+            if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
+                this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
+            }
+        } catch (error) {
+            console.error('Error loading asteroids:', error);
+        }
+    }
+    
+    // Methode zum Laden von Kometen
+    async loadComets() {
+        try {
+            // Erstelle die URL mit Standort- und Magnitude-Parametern
+            let url = API_ENDPOINTS.COMETS;
+            
+            // Verwende serverseitige Einstellungen, wenn kein lokaler Wert gesetzt ist
+            if (this.cometMaxMagnitude) {
+                url += `?max_magnitude=${this.cometMaxMagnitude}`;
             }
             
-            this.updateCelestialData(data);
+            // Verwende die gespeicherten Standortdaten
+            if (this.location) {
+                url += url.includes('?') ? '&' : '?';
+                url += `lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+            }
             
-            // Explizit render aufrufen, um sicherzustellen, dass die Daten angezeigt werden
-            this.render();
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP error loading comets! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} comets`);
+            
+            // Füge die Kometen zu den Himmelsdaten hinzu
+            if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
+                this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
+            }
         } catch (error) {
-            console.error('Error updating celestial data:', error);
-            this.container.textContent = t('error_loading');
+            console.error('Error loading comets:', error);
         }
     }
 
@@ -572,6 +627,34 @@ export class SkyRenderer {
     stopAutoUpdate() {
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
+        }
+    }
+    
+    // Methode zum Aktualisieren der Himmelsdaten
+    async update() {
+        try {
+            console.log('Updating sky data...');
+            
+            // Lade die Basisdaten (Sonne, Mond, Planeten)
+            const response = await fetch(API_ENDPOINTS.SKY);
+            if (!response.ok) {
+                throw new Error(`HTTP error loading sky data! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            this.celestialData = data;
+            
+            // Lade zusätzlich Asteroiden und Kometen mit den aktuellen Einstellungen
+            await this.loadAsteroids();
+            await this.loadComets();
+            
+            // Aktualisiere die Anzeige
+            this.render();
+            
+            console.log('Sky data updated successfully');
+        } catch (error) {
+            console.error('Error updating sky data:', error);
+            this.container.textContent = t('error_loading');
         }
     }
 }
