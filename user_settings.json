@@ -1,7 +1,7 @@
 {
-  "asteroid_max_magnitude": 11.0,
-  "comet_max_magnitude": 16.0,
-  "last_updated": "2025-08-27T16:41:44.854305",
+  "asteroid_max_magnitude": 10.0,
+  "comet_max_magnitude": 14.0,
+  "last_updated": "2025-08-27T18:13:16.711659",
   "location": {
     "latitude": 46.7632006,
     "longitude": 14.8416185,

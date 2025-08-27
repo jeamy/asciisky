@@ -5,7 +5,7 @@ import os
 import json
 import pickle
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
 import numpy as np
@@ -114,14 +114,49 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
         # Berechne Position und Helligkeit für jeden Himmelskörper
         for name, body in CELESTIAL_BODIES.items():
             try:
-                # Berechne Position
+                # Berechne Position vom Beobachter aus
                 astrometric = observer.at(t).observe(body)
                 apparent = astrometric.apparent()
                 alt, az, distance = apparent.altaz()
                 
+                # Berechne Entfernung vom Erdmittelpunkt aus
+                earth_center = eph['earth'].at(t)
+                earth_to_body = earth_center.observe(body)
+                # Entfernung in astronomischen Einheiten (AU)
+                earth_distance = earth_to_body.distance().au
+                
                 # Berechne Helligkeit (Magnitude)
-                if name in ['sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn']:
-                    mag = planetary_magnitude(astrometric)
+                # Fester Wert für die Sonne, dynamische Berechnung für den Mond
+                if name == 'sun':
+                    mag = -26.74  # Standardwert für die Sonne
+                elif name == 'moon':
+                    # Berechne die Mondphase
+                    sun_astrometric = observer.at(t).observe(eph['sun'])
+                    moon_phase = almanac.moon_phase(eph, t)
+                    moon_phase_angle = float(moon_phase.radians)
+                    
+                    # Berechne die Mond-Magnitude basierend auf der Phase
+                    # Formel: M = -12.7 + 2.5 * log10(0.5 * (1 - cos(phase_angle)))
+                    import math
+                    phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
+                    if phase_factor > 0:
+                        mag = -12.7 + 2.5 * math.log10(phase_factor)
+                    else:
+                        mag = -12.7  # Fallback für Vollmond
+                elif name in ['mercury', 'venus', 'mars', 'jupiter', 'saturn']:
+                    try:
+                        mag = planetary_magnitude(astrometric)
+                    except Exception as e:
+                        print(f"Fehler bei der Magnitude-Berechnung für {name}: {str(e)}")
+                        # Fallback-Werte für Planeten
+                        mag_fallback = {
+                            'mercury': 0.23,
+                            'venus': -4.14,
+                            'mars': 1.66,
+                            'jupiter': -2.2,
+                            'saturn': 0.46
+                        }
+                        mag = mag_fallback.get(name, 0)
                 else:
                     # Für andere Körper verwenden wir Standardwerte
                     mag_values = {
@@ -130,15 +165,73 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                     }
                     mag = mag_values.get(name, 0)
                 
+                # Berechne Auf- und Untergangszeiten
+                try:
+                    f = almanac.risings_and_settings(eph, body, location)
+                    
+                    # Suche nach dem nächsten Aufgang
+                    t1 = ts.now()
+                    # Verwende UTC für die Zeitberechnung
+                    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+                    t2 = ts.from_datetime(tomorrow)
+                    times, events = almanac.find_discrete(t1, t2, f)
+                    
+                    rise_time = None
+                    set_time = None
+                    
+                    for time, event in zip(times, events):
+                        # Konvertiere UTC zu lokaler Zeit
+                        local_time = time.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
+                        # Formatiere die Zeit als HH:MM
+                        formatted_time = local_time.strftime('%H:%M')
+                        
+                        if event == 1:  # Aufgang
+                            rise_time = formatted_time
+                        else:  # Untergang
+                            set_time = formatted_time
+                            
+                    # Berechne die Transitzeit (Kulmination)
+                    transit_time = None
+                    try:
+                        # Wenn Auf- und Untergangszeit bekannt sind, suche im Zeitraum dazwischen
+                        if rise_time and set_time:
+                            # Konvertiere Zeiten zu Datetime-Objekten
+                            now = datetime.now()
+                            rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                            set_dt = datetime.strptime(set_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                            
+                            # Wenn der Untergang vor dem Aufgang liegt, ist er am nächsten Tag
+                            if set_dt < rise_dt:
+                                set_dt += timedelta(days=1)
+                            
+                            # Berechne die Mitte zwischen Auf- und Untergang als Näherung für die Transitzeit
+                            transit_dt = rise_dt + (set_dt - rise_dt) / 2
+                            transit_time = transit_dt.strftime('%H:%M')
+                        else:
+                            # Grobe Schätzung: Transitzeit in 12 Stunden
+                            transit_dt = datetime.now() + timedelta(hours=12)
+                            transit_time = transit_dt.strftime('%H:%M')
+                    except Exception as e:
+                        print(f"Fehler bei der Berechnung der Transitzeit für {name}: {str(e)}")
+                        transit_time = None
+                except Exception as e:
+                    print(f"Fehler bei der Berechnung der Auf-/Untergangszeiten für {name}: {str(e)}")
+                    rise_time = None
+                    set_time = None
+                    transit_time = None
+                
                 # Füge Daten zum Ergebnis hinzu
                 result["bodies"][name] = {
                     "name": name,
                     "symbol": BODY_SYMBOLS.get(name, "?"),
                     "altitude": float(alt.degrees),
                     "azimuth": float(az.degrees),
-                    "distance": float(distance.au),
+                    "distance": float(earth_distance),  # Entfernung vom Erdmittelpunkt
                     "magnitude": float(mag),
-                    "visible": float(alt.degrees) > 0  # Über dem Horizont
+                    "visible": True,  # Immer sichtbar, auch unter dem Horizont
+                    "transit_time": transit_time,
+                    "rise_time": rise_time,
+                    "set_time": set_time
                 }
             except Exception as e:
                 print(f"Error calculating position for {name}: {str(e)}")
@@ -172,14 +265,52 @@ async def get_celestial_object(body_id: str, lat: float = None, lon: float = Non
         
         body = CELESTIAL_BODIES[body_id]
         
-        # Berechne Position
+        # Berechne Position vom Beobachter aus
         astrometric = observer.at(t).observe(body)
         apparent = astrometric.apparent()
         alt, az, distance = apparent.altaz()
         
+        # Berechne Entfernung vom Erdmittelpunkt aus
+        earth_center = eph['earth'].at(t)
+        earth_to_body = earth_center.observe(body)
+        # Entfernung in astronomischen Einheiten (AU)
+        earth_distance = earth_to_body.distance().au
+        
         # Berechne Helligkeit (Magnitude)
-        if body_id in ['sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn']:
-            mag = planetary_magnitude(astrometric)
+        # Fester Wert für die Sonne, dynamische Berechnung für den Mond
+        if body_id == 'sun':
+            mag = -26.74  # Standardwert für die Sonne
+        elif body_id == 'moon':
+            # Berechne die Mondphase
+            sun_astrometric = observer.at(t).observe(eph['sun'])
+            moon_phase = almanac.moon_phase(eph, t)
+            moon_phase_angle = float(moon_phase.radians)
+            
+            # Berechne die Mond-Magnitude basierend auf der Phase
+            # Formel: M = -12.7 + 2.5 * log10(0.5 * (1 - cos(phase_angle)))
+            import math
+            phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
+            if phase_factor > 0:
+                mag = -12.7 + 2.5 * math.log10(phase_factor)
+            else:
+                mag = -12.7  # Fallback für Vollmond
+                
+            # Füge die Mondphase als Prozent zum Ergebnis hinzu
+            phase_percent = (1 - phase_factor * 2) * 100  # 0% = Neumond, 100% = Vollmond
+        elif body_id in ['mercury', 'venus', 'mars', 'jupiter', 'saturn']:
+            try:
+                mag = planetary_magnitude(astrometric)
+            except Exception as e:
+                print(f"Fehler bei der Magnitude-Berechnung für {body_id}: {str(e)}")
+                # Fallback-Werte für Planeten
+                mag_fallback = {
+                    'mercury': 0.23,
+                    'venus': -4.14,
+                    'mars': 1.66,
+                    'jupiter': -2.2,
+                    'saturn': 0.46
+                }
+                mag = mag_fallback.get(body_id, 0)
         else:
             # Für andere Körper verwenden wir Standardwerte
             mag_values = {
@@ -193,17 +324,74 @@ async def get_celestial_object(body_id: str, lat: float = None, lon: float = Non
         
         # Suche nach dem nächsten Aufgang
         t1 = ts.now()
-        t2 = ts.from_datetime(datetime.now() + timedelta(days=1))
+        # Verwende UTC für die Zeitberechnung
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        t2 = ts.from_datetime(tomorrow)
         times, events = almanac.find_discrete(t1, t2, f)
         
         rise_time = None
         set_time = None
         
         for time, event in zip(times, events):
+            # Konvertiere UTC zu lokaler Zeit
+            local_time = time.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
+            # Formatiere die Zeit als HH:MM
+            formatted_time = local_time.strftime('%H:%M')
+            
             if event == 1:  # Aufgang
-                rise_time = time.utc_datetime().isoformat()
+                rise_time = formatted_time
             else:  # Untergang
-                set_time = time.utc_datetime().isoformat()
+                set_time = formatted_time
+                
+        # Berechne die Transitzeit (Kulmination)
+        transit_time = None
+        try:
+            # Finde den Zeitpunkt der höchsten Elevation
+            def culmination_at(t):
+                astrometric = observer.at(t).observe(body)
+                apparent = astrometric.apparent()
+                alt, az, distance = apparent.altaz()
+                return alt.degrees
+            
+            # Suche nach der Kulmination im Zeitraum zwischen jetzt und morgen
+            t_start = ts.now()
+            t_end = ts.from_datetime(datetime.now(timezone.utc) + timedelta(days=1))
+            
+            # Wenn Auf- und Untergangszeit bekannt sind, suche im Zeitraum dazwischen
+            if rise_time and set_time:
+                # Konvertiere Zeiten zu Datetime-Objekten
+                now = datetime.now()
+                rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                set_dt = datetime.strptime(set_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                
+                # Wenn der Untergang vor dem Aufgang liegt, ist er am nächsten Tag
+                if set_dt < rise_dt:
+                    set_dt += timedelta(days=1)
+                
+                # Berechne die Mitte zwischen Auf- und Untergang als Näherung für die Transitzeit
+                transit_dt = rise_dt + (set_dt - rise_dt) / 2
+                transit_time = transit_dt.strftime('%H:%M')
+            else:
+                # Wenn keine Auf-/Untergangszeiten bekannt sind, verwende die aktuelle Position
+                # und prüfe, ob der Körper auf- oder absteigt
+                t_now = ts.now()
+                t_later = ts.from_datetime(datetime.now(timezone.utc) + timedelta(hours=1))
+                
+                alt_now = culmination_at(t_now)
+                alt_later = culmination_at(t_later)
+                
+                # Wenn der Körper aufsteigt, liegt die Transitzeit in der Zukunft
+                if alt_later > alt_now:
+                    # Grobe Schätzung: Transitzeit in 6 Stunden
+                    transit_dt = datetime.now() + timedelta(hours=6)
+                else:
+                    # Grobe Schätzung: Transitzeit in 18 Stunden
+                    transit_dt = datetime.now() + timedelta(hours=18)
+                
+                transit_time = transit_dt.strftime('%H:%M')
+        except Exception as e:
+            print(f"Fehler bei der Berechnung der Transitzeit für {body_id}: {str(e)}")
+            transit_time = None
         
         result = {
             "id": body_id,
@@ -211,12 +399,43 @@ async def get_celestial_object(body_id: str, lat: float = None, lon: float = Non
             "symbol": BODY_SYMBOLS.get(body_id, "?"),
             "altitude": float(alt.degrees),
             "azimuth": float(az.degrees),
-            "distance": float(distance.au),
+            "distance": float(earth_distance),  # Entfernung vom Erdmittelpunkt
             "magnitude": float(mag),
-            "visible": float(alt.degrees) > 0,  # Über dem Horizont
-            "next_rise": rise_time,
-            "next_set": set_time
+            "visible": True,  # Immer sichtbar, auch unter dem Horizont
+            "transit_time": transit_time,
+            "rise_time": rise_time,
+            "set_time": set_time
         }
+        
+        # Füge Mondphase hinzu, wenn es sich um den Mond handelt
+        if body_id == 'moon':
+            # Berechne Mondphase in Prozent (0% = Neumond, 100% = Vollmond)
+            phase_percent = (1 - phase_factor * 2) * 100
+            if phase_percent < 0:
+                phase_percent = 0
+            if phase_percent > 100:
+                phase_percent = 100
+                
+            # Bestimme die Phasenbezeichnung
+            if phase_percent < 5:
+                phase_name = "new_moon"  # Neumond
+            elif phase_percent < 45:
+                phase_name = "waxing_crescent"  # zunehmender Halbmond
+            elif phase_percent < 55:
+                phase_name = "first_quarter"  # erstes Viertel
+            elif phase_percent < 95:
+                phase_name = "waxing_gibbous"  # zunehmender Mond
+            elif phase_percent < 100:
+                phase_name = "full_moon"  # Vollmond
+            elif phase_percent < 145:
+                phase_name = "waning_gibbous"  # abnehmender Mond
+            elif phase_percent < 155:
+                phase_name = "last_quarter"  # letztes Viertel
+            else:
+                phase_name = "waning_crescent"  # abnehmender Halbmond
+                
+            result["phase"] = phase_percent / 100  # Als Dezimalzahl zwischen 0 und 1
+            result["phase_name"] = phase_name
         
         return result
     except Exception as e:
@@ -399,7 +618,7 @@ async def get_asteroids(max_magnitude: float = None, lat: float = None, lon: flo
                     "name": designation,
                     "symbol": "•",  # Small dot for asteroids
                     "type": "asteroid",
-                    "visible": float(alt.degrees) > -5,  # Consider slightly below horizon as visible
+                    "visible": True,  # Immer sichtbar, auch unter dem Horizont
                     "altitude": float(alt.degrees),
                     "azimuth": float(az.degrees),
                     "distance": float(distance.km),

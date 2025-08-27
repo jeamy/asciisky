@@ -362,7 +362,7 @@ export class SkyRenderer {
                 `${obj.symbol || ''} ${displayName}`,
                 `${t('altitude')}: ${obj.altitude.toFixed(1)}°`,
                 `${t('azimuth')}: ${obj.azimuth.toFixed(1)}°`,
-                `${t('distance')}: ${(obj.distance / 149597870.691).toFixed(3)} ${t('au')}`
+                `${t('distance')}: ${obj.distance.toFixed(3)} ${t('au')}`
             ];
     
             // Zeige Auf- und Untergangszeiten an, wenn verfügbar
@@ -475,11 +475,12 @@ export class SkyRenderer {
                 if (!selectedObject) return;
                 
                 // Erstelle Informationstext
+                const displayName = t(selectedObject.name) || selectedObject.name;
                 const info = [
-                    `${selectedObject.symbol || ''} ${selectedObject.name}`,
+                    `${selectedObject.symbol || ''} ${displayName}`,
                     `${t('altitude')}: ${selectedObject.altitude.toFixed(1)}°`,
                     `${t('azimuth')}: ${selectedObject.azimuth.toFixed(1)}°`,
-                    `${t('distance')}: ${(selectedObject.distance / 149597870.691).toFixed(3)} ${t('au')}`
+                    `${t('distance')}: ${selectedObject.distance.toFixed(3)} ${t('au')}`
                 ];
                 
                 // Zeige Auf- und Untergangszeiten an, wenn verfügbar
