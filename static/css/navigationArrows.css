@@ -4,7 +4,7 @@
     display: flex;
     justify-content: space-between;
     padding: 0;
-    top: 50%;
+    top: var(--horizon-top, 50%); /* per JS gesetzte Position auf Höhe der Horizontlinie */
     transform: translateY(-50%);
     pointer-events: none; /* Damit die Pfeile nicht mit dem Klicken auf Himmelskörper interferieren */
     z-index: 9999; /* Sehr hoher z-index um sicherzustellen, dass die Pfeile über allen anderen Elementen liegen */
@@ -29,11 +29,11 @@
 }
 
 .nav-arrow-left {
-    left: 42%; /* Positionierung rechts neben W */
+    left: 8px; /* Am linken Rand, leicht eingerückt */
 }
 
 .nav-arrow-right {
-    right: 42%; /* Positionierung links neben O */
+    right: 8px; /* Am rechten Rand, leicht eingerückt */
 }
 
 .nav-arrow:hover {

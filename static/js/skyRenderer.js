@@ -149,11 +149,9 @@ export class SkyRenderer {
         // Initialisiere den Himmel neu
         this.initSky();
         
-        // Draw each celestial object
+        // Draw each celestial object (unabhängig von body.visible)
         Object.values(this.celestialData.bodies).forEach(body => {
-            if (body.visible) {
-                this.drawCelestialObject(body);
-            }
+            this.drawCelestialObject(body);
         });
         
         // Convert 2D array to string and display
@@ -192,13 +190,20 @@ export class SkyRenderer {
         arrowsDiv.id = 'navigation-arrows';
         arrowsDiv.className = 'navigation-arrows';
         
+        // Positioniere die Pfeile vertikal auf Höhe der Horizontlinie
+        const horizonRow = CONFIG.HORIZON_ROW;
+        const totalRows = CONFIG.SKY_HEIGHT - 1;
+        const horizonYPercent = (horizonRow / totalRows) * 100;
+        // Setze CSS-Variable, Styling verbleibt in externer CSS
+        arrowsDiv.style.setProperty('--horizon-top', `${horizonYPercent}%`);
+        
         // Linker Pfeil (rechts neben West)
         const leftArrow = document.createElement('button');
         leftArrow.id = 'nav-left';
         leftArrow.className = 'nav-arrow nav-arrow-left';
         leftArrow.title = t('shift_left');
         leftArrow.innerHTML = '&#9664;';
-        leftArrow.addEventListener('click', () => this.shiftHorizonLeft());
+        leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonLeft(); });
         
         // Rechter Pfeil (links neben Ost)
         const rightArrow = document.createElement('button');
@@ -206,7 +211,7 @@ export class SkyRenderer {
         rightArrow.className = 'nav-arrow nav-arrow-right';
         rightArrow.title = t('shift_right');
         rightArrow.innerHTML = '&#9654;';
-        rightArrow.addEventListener('click', () => this.shiftHorizonRight());
+        rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonRight(); });
         
         arrowsDiv.appendChild(leftArrow);
         arrowsDiv.appendChild(rightArrow);
@@ -237,18 +242,9 @@ export class SkyRenderer {
         
         // Berechne die Spalte basierend auf dem Azimut (0° bis 360°) mit horizontaler Verschiebung
         // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
-        // Wir zeigen nur den Bereich von 90° (Ost) bis 270° (West) an
-        // Die horizontale Verschiebung verschiebt den sichtbaren Bereich
-        
-        // Berechne den effektiven Azimut mit Verschiebung
-        const normalizedAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
-        
-        // Wir mappen den Bereich 90°-270° auf die gesamte Breite
-        // Prüfe, ob der Azimut im sichtbaren Bereich liegt
-        const isVisible = normalizedAzimuth >= 90 && normalizedAzimuth <= 270;
-        
-        // Berechne die Spalte basierend auf dem effektiven Azimut
-        const col = Math.round(((normalizedAzimuth - 90) / 180) * (width - 2)) + 1;
+        // Nutze den vollen Bereich 0°–360° über die gesamte Breite
+        const effectiveAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
+        const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
         
         // Speichere die Position des Objekts für spätere Verwendung
         obj.displayRow = row;
@@ -345,21 +341,8 @@ export class SkyRenderer {
 
     clearSelection() {
         this.selectedObject = null;
-        
-        // Redraw the sky without calling render() directly
-        // to avoid potential recursion
-        this.initSky();
-        if (this.celestialData) {
-            Object.values(this.celestialData.bodies).forEach(body => {
-                if (body.visible) {
-                    this.drawCelestialObject(body);
-                }
-            });
-            
-            // Update display
-            const skyText = this.sky.map(row => row.join('')).join('\n');
-            this.container.textContent = skyText;
-        }
+        // Nutze den normalen Renderpfad, damit auch die Pfeile erhalten bleiben
+        this.render();
     }
 
     setupEventListeners() {
@@ -390,23 +373,24 @@ export class SkyRenderer {
                 const maxDistance = isOverlappingSymbol ? 0.5 : 5; // Kleinere Distanz für überlappende Objekte
                 
                 // Prüfe, ob der Klick im Menübereich war
-                const isMenuClick = document.getElementById('objectList')?.contains(e.target);
+                const isMenuClick = document.getElementById('object-list')?.contains(e.target);
                 if (isMenuClick) {
                     console.log('Click detected in menu area, not showing dialog');
                     return; // Beende die Funktion, wenn im Menü geklickt wurde
                 }
                 
                 for (const [name, obj] of Object.entries(this.celestialData.bodies)) {
-                    if (obj.visible) {
+                    // Berücksichtige Sichtbarkeit basierend auf Höhe und Konfiguration
+                    if (CONFIG.SHOW_BELOW_HORIZON || obj.altitude >= 0) {
                         // Verwende die gespeicherte Position, wenn vorhanden
                         const objRow = obj.displayRow !== undefined ? obj.displayRow : 
                             (obj.altitude >= 0) ? 
                                 Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
                                 Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
                         
-                        const normalizedAzimuth = obj.azimuth % 360;
+                        const effectiveAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
                         const objCol = obj.displayCol !== undefined ? obj.displayCol :
-                            Math.round((normalizedAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
+                            Math.round((effectiveAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
                         
                         // Berechne Distanz zum Klick
                         const distance = Math.sqrt(Math.pow(row - objRow, 2) + Math.pow(col - objCol, 2));
