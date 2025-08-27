@@ -202,7 +202,7 @@ export class SkyRenderer {
         leftArrow.id = 'nav-left';
         leftArrow.className = 'nav-arrow nav-arrow-left';
         leftArrow.title = t('shift_left');
-        leftArrow.innerHTML = '&#9664;';
+        leftArrow.innerHTML = '&#9665;';
         leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonLeft(); });
         
         // Rechter Pfeil (links neben Ost)
@@ -210,7 +210,7 @@ export class SkyRenderer {
         rightArrow.id = 'nav-right';
         rightArrow.className = 'nav-arrow nav-arrow-right';
         rightArrow.title = t('shift_right');
-        rightArrow.innerHTML = '&#9654;';
+        rightArrow.innerHTML = '&#9655;';
         rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonRight(); });
         
         arrowsDiv.appendChild(leftArrow);

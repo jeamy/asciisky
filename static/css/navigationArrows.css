@@ -11,21 +11,23 @@
 }
 
 .nav-arrow {
-    font-size: 20px;
-    background-color: rgba(0, 0, 0, 0.5);
-    border: 1px solid #00ff00;
-    color: #00ff00;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
+    font-size: 16px;
+    background-color: transparent; /* nur Pfeile, keine Box */
+    border: none; /* kein Border */
+    color: rgba(0, 255, 0, 0.85);
+    border-radius: 0;
+    width: auto;
+    height: auto;
+    padding: 4px; /* unsichtbare Klickfläche */
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    opacity: 0.5;
-    transition: opacity 0.3s;
+    opacity: 0.95;
+    transition: color 0.15s ease-in-out;
     pointer-events: auto; /* Damit die Pfeile klickbar sind */
     position: absolute;
+    margin-top: -16px;
 }
 
 .nav-arrow-left {
@@ -36,20 +38,13 @@
     right: 8px; /* Am rechten Rand, leicht eingerückt */
 }
 
-.nav-arrow:hover {
-    background-color: rgba(0, 34, 0, 0.8);
-    transform: scale(1.1);
-    opacity: 1;
-}
+.nav-arrow:hover { color: rgba(0, 255, 0, 1); }
 
-.nav-arrow:active {
-    transform: scale(0.95);
-}
+.nav-arrow:active { color: rgba(0, 255, 0, 0.9); }
 
 @media (max-width: 768px) {
     .nav-arrow {
-        font-size: 18px;
-        width: 30px;
-        height: 30px;
+        font-size: 14px;
+        padding: 3px;
     }
 }
