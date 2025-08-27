@@ -1,0 +1,67 @@
+.multi-object-dialog, #object-dialog {
+    max-width: 300px;
+    min-width: 250px;
+    background-color: var(--bg-color);
+    border: 1px solid var(--primary-color);
+    color: var(--text-color);
+    padding: 10px;
+    font-family: monospace;
+    position: absolute;
+}
+
+.object-list {
+    margin-bottom: 10px;
+}
+
+.object-list-item {
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    line-height: 0.3;
+}
+
+.object-list-item:hover {
+    color: var(--primary-color);
+}
+
+.object-list-item.active {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+.dialog-divider {
+    margin: 10px 0;
+    border: none;
+    border-top: 1px solid var(--primary-color);
+    opacity: 0.5;
+}
+
+.object-data {
+    white-space: pre-line;
+    min-height: 100px;
+}
+
+.dialog-header {
+    margin-bottom: 10px;
+    position: relative;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--primary-color);
+}
+
+.dialog-header h3 {
+    margin: 0;
+    padding: 0;
+    font-size: 1.1em;
+    color: var(--primary-color);
+}
+
+#dialog-close {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: transparent;
+    border: none;
+    color: var(--primary-color);
+    cursor: pointer;
+    font-weight: bold;
+}

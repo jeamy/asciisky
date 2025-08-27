@@ -1,4 +1,5 @@
 import { API_ENDPOINTS, CONFIG, ASCII_ART } from './constants.js';
+import { t } from './i18n.js';
 
 export class SkyRenderer {
     constructor(containerId) {
@@ -41,24 +42,25 @@ export class SkyRenderer {
         const directions = CONFIG.CARDINAL_DIRECTIONS;
         
         // Positionen für die vier Hauptrichtungen entlang des Horizonts
-        // Blickrichtung nach Süden: Osten links, Westen rechts
+        // Azimut-Mapping: 0°=Nord, 90°=Ost, 180°=Süd, 270°=West
+        // Spalten entsprechend dem Azimut-Mapping
         const positions = [
-            { dir: 'N', col: Math.round(width / 2) },
-            { dir: 'O', col: 5 },                 // Osten links
-            { dir: 'S', col: Math.round(width / 2) },
-            { dir: 'W', col: width - 5 }          // Westen rechts
+            { dir: 'N', col: Math.round((0 / 360) * (width - 2)) + 1 },     // 0° Azimut
+            { dir: 'O', col: Math.round((90 / 360) * (width - 2)) + 1 },    // 90° Azimut  
+            { dir: 'S', col: Math.round((180 / 360) * (width - 2)) + 1 },   // 180° Azimut
+            { dir: 'W', col: Math.round((270 / 360) * (width - 2)) + 1 }    // 270° Azimut
         ];
         
         positions.forEach(pos => {
             // Alle Himmelsrichtungen am Horizont anzeigen
             if (pos.dir === 'N') {
-                this.sky[horizonRow][pos.col] = 'N';
+                this.sky[horizonRow][pos.col] = t('north');
             } else if (pos.dir === 'S') {
-                this.sky[horizonRow][pos.col] = 'S';
+                this.sky[horizonRow][pos.col] = t('south');
             } else if (pos.dir === 'O') {
-                this.sky[horizonRow][pos.col] = 'O';
+                this.sky[horizonRow][pos.col] = t('east');
             } else if (pos.dir === 'W') {
-                this.sky[horizonRow][pos.col] = 'W';
+                this.sky[horizonRow][pos.col] = t('west');
             }
         });
         
@@ -129,18 +131,42 @@ export class SkyRenderer {
         }
         
         // Berechne die Spalte basierend auf dem Azimut (0° bis 360°)
-        // Spiegeln des Azimuts für Blickrichtung nach Süden (Osten links, Westen rechts)
-        const adjustedAzimuth = (360 - obj.azimuth) % 360;
-        const col = Math.round((adjustedAzimuth / 360) * (width - 2)) + 1;
+        // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
+        // Für korrekte Darstellung: Ost (90°) links, West (270°) rechts
+        // Direkte Mapping ohne Rotation - Azimut direkt auf Spalte mappen
+        const normalizedAzimuth = obj.azimuth % 360;
+        const col = Math.round((normalizedAzimuth / 360) * (width - 2)) + 1;
+        
+        // Speichere die Position des Objekts für spätere Verwendung
+        obj.displayRow = row;
+        obj.displayCol = col;
         
         // Nur zeichnen, wenn innerhalb der Grenzen
         if (row >= 0 && row < height && col >= 0 && col < width) {
             // Prüfe, ob dies das ausgewählte Objekt ist
             const isSelected = this.selectedObject && this.selectedObject.name === obj.name;
             
-            // Wähle Symbol basierend auf Auswahl
-            const symbol = isSelected ? ASCII_ART.SELECTED_OBJECT : 
-                          (CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★');
+            // Prüfe, ob an dieser Position bereits ein Objekt gezeichnet wurde
+            const existingContent = this.sky[row][col];
+            const isOccupied = existingContent !== ' ' && 
+                              existingContent !== ASCII_ART.HORIZON && 
+                              existingContent !== 'N' && 
+                              existingContent !== 'S' && 
+                              existingContent !== 'O' && 
+                              existingContent !== 'W';
+            
+            // Wähle Symbol basierend auf Auswahl und Überlappung
+            let symbol;
+            if (isSelected) {
+                symbol = ASCII_ART.SELECTED_OBJECT;
+            } else if (isOccupied) {
+                // Wenn bereits ein Objekt an dieser Position ist, verwende ein spezielles Symbol für Überlappung
+                symbol = '*';
+                // Markiere, dass hier mehrere Objekte sind
+                obj.isOverlapping = true;
+            } else {
+                symbol = CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+            }
             
             this.sky[row][col] = symbol;
             
@@ -188,6 +214,19 @@ export class SkyRenderer {
         console.log(`Object ${objectName} not found in celestial data`);
         return false;
     }
+    
+    highlightObject(objectName) {
+        // Setze das ausgewählte Objekt, ohne einen Dialog anzuzeigen
+        this.selectObject(objectName, false);
+    }
+    
+    removeDialog() {
+        // Entferne vorhandenen Dialog, falls vorhanden
+        const existingDialog = document.getElementById('object-dialog');
+        if (existingDialog) {
+            existingDialog.remove();
+        }
+    }
 
     clearSelection() {
         this.selectedObject = null;
@@ -226,10 +265,14 @@ export class SkyRenderer {
             console.log(`Click at position: row=${row}, col=${col}`);
             console.log(`Sky content at position: ${this.sky[row]?.[col]}`);
             
+            // Prüfe, ob der Klick auf ein überlappendes Symbol (*) erfolgte
+            const isOverlappingSymbol = this.sky[row]?.[col] === '*';
+            
             // Direkter Zugriff auf die Himmelskörper und Prüfung der Nähe zum Klick
             if (this.celestialData) {
-                let closestObject = null;
-                let minDistance = 5; // Maximale Klickdistanz (in Zellen)
+                // Sammle alle Objekte in der Nähe des Klicks
+                const nearbyObjects = [];
+                const maxDistance = isOverlappingSymbol ? 0.5 : 5; // Kleinere Distanz für überlappende Objekte
                 
                 // Prüfe, ob der Klick im Menübereich war
                 const isMenuClick = document.getElementById('objectList')?.contains(e.target);
@@ -240,35 +283,47 @@ export class SkyRenderer {
                 
                 for (const [name, obj] of Object.entries(this.celestialData.bodies)) {
                     if (obj.visible) {
-                        // Berechne die Position des Objekts basierend auf Höhe und Azimut
-                        let objRow;
-                        if (obj.altitude >= 0) {
-                            objRow = Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW));
-                        } else {
-                            objRow = Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
-                        }
-                        // Spiegeln des Azimuts für Blickrichtung nach Süden (Osten links, Westen rechts)
-                        const adjustedAzimuth = (360 - obj.azimuth) % 360;
-                        const objCol = Math.round((adjustedAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
+                        // Verwende die gespeicherte Position, wenn vorhanden
+                        const objRow = obj.displayRow !== undefined ? obj.displayRow : 
+                            (obj.altitude >= 0) ? 
+                                Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
+                                Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
+                        
+                        const normalizedAzimuth = obj.azimuth % 360;
+                        const objCol = obj.displayCol !== undefined ? obj.displayCol :
+                            Math.round((normalizedAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
                         
                         // Berechne Distanz zum Klick
                         const distance = Math.sqrt(Math.pow(row - objRow, 2) + Math.pow(col - objCol, 2));
                         console.log(`Distance to ${name}: ${distance} (at row=${objRow}, col=${objCol})`);
                         
-                        // Wenn näher als bisher gefundene Objekte und innerhalb der Toleranz
-                        // Priorisiere Uranus, wenn die Distanz ähnlich ist
-                        if (distance < minDistance || 
-                            (name === 'uranus' && Math.abs(distance - minDistance) < 0.5)) {
-                            minDistance = distance;
-                            closestObject = name;
+                        // Bei überlappenden Objekten oder wenn die Distanz klein genug ist
+                        if (distance <= maxDistance || 
+                            (isOverlappingSymbol && objRow === row && objCol === col)) {
+                            nearbyObjects.push({
+                                name,
+                                obj,
+                                distance
+                            });
                         }
                     }
                 }
                 
-                if (closestObject) {
-                    console.log(`Closest object found: ${closestObject} at distance ${minDistance}`);
-                    this.selectObject(closestObject, true); // true = Dialog anzeigen
-                    return; // Früher beenden, da wir ein Objekt gefunden haben
+                // Sortiere nach Distanz
+                nearbyObjects.sort((a, b) => a.distance - b.distance);
+                
+                if (nearbyObjects.length > 0) {
+                    console.log(`Found ${nearbyObjects.length} nearby objects:`, 
+                        nearbyObjects.map(item => item.name).join(', '));
+                    
+                    if (nearbyObjects.length === 1) {
+                        // Nur ein Objekt gefunden
+                        this.selectObject(nearbyObjects[0].name, true);
+                    } else {
+                        // Mehrere Objekte gefunden - zeige Dialog mit allen Objekten
+                        this.showMultiObjectDialog(nearbyObjects.map(item => item.obj));
+                    }
+                    return;
                 }
             }
             
@@ -288,126 +343,191 @@ export class SkyRenderer {
                 existingDialog.remove();
             }
             
-            // Create new dialog - direkt im DOM einfügen
-            const dialogHTML = `
-                <div id="object-dialog" style="
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    background: #111;
-                    border: 2px solid #0f0;
-                    padding: 15px;
-                    color: #0f0;
-                    font-family: monospace;
-                    white-space: pre;
-                    z-index: 9999;
-                    min-width: 250px;
-                    box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
-                ">
-                    <button id="dialog-close" style="
-                        position: absolute;
-                        top: 5px;
-                        right: 5px;
-                        background: transparent;
-                        border: none;
-                        color: #0f0;
-                        cursor: pointer;
-                        font-size: 16px;
-                        font-weight: bold;
-                    ">X</button>
-                    <div id="dialog-content"></div>
-                </div>
-            `;
-            
-            // Dialog zum DOM hinzufügen
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = dialogHTML;
-            document.body.appendChild(tempDiv.firstElementChild);
-            
-            // Dialog-Referenz holen
-            const dialog = document.getElementById('object-dialog');
-            const closeBtn = document.getElementById('dialog-close');
-            const contentDiv = document.getElementById('dialog-content');
-            
-            // Close-Button-Event hinzufügen
-            closeBtn.addEventListener('click', () => {
-                dialog.remove();
-                this.clearSelection();
-            });
-            
             // Dialog-Inhalt erstellen
+            const displayName = t(obj.name) || obj.name;
             const info = [
-                `${obj.symbol || ''} ${obj.name}`,
-                `Altitude: ${obj.altitude.toFixed(1)}°`,
-                `Azimuth: ${obj.azimuth.toFixed(1)}°`,
-                `Distance: ${(obj.distance / 149597870.691).toFixed(3)} AU`
+                `${obj.symbol || ''} ${displayName}`,
+                `${t('altitude')}: ${obj.altitude.toFixed(1)}°`,
+                `${t('azimuth')}: ${obj.azimuth.toFixed(1)}°`,
+                `${t('distance')}: ${(obj.distance / 149597870.691).toFixed(3)} ${t('au')}`
             ];
     
             // Zeige Auf- und Untergangszeiten an, wenn verfügbar
             if (obj.rise_time) {
-                info.push(`Aufgang: ${obj.rise_time} Uhr`);
+                info.push(`${t('rise_time')}: ${obj.rise_time} ${t('hour')}`);
             }
             
             if (obj.set_time) {
-                info.push(`Untergang: ${obj.set_time} Uhr`);
+                info.push(`${t('set_time')}: ${obj.set_time} ${t('hour')}`);
             }
             
             if (obj.transit_time) {
-                info.push(`Höchststand: ${obj.transit_time} Uhr`);
+                info.push(`${t('transit_time')}: ${obj.transit_time} ${t('hour')}`);
             }
     
             if (obj.phase !== undefined) {
-                info.push(`Phase: ${(obj.phase * 100).toFixed(1)}% ${obj.phase_name || ''}`);
+                const phaseName = obj.phase_name ? t(obj.phase_name) : '';
+                info.push(`${t('phase')}: ${(obj.phase * 100).toFixed(1)}% ${phaseName}`);
             }
             
             if (obj.magnitude !== undefined) {
-                info.push(`Magnitude: ${obj.magnitude.toFixed(1)}`);
+                info.push(`${t('magnitude')}: ${obj.magnitude.toFixed(1)}`);
             }
     
-            // Inhalt zum Dialog hinzufügen
-            contentDiv.textContent = info.join('\n');
+            // Erstelle den Dialog
+            const dialog = document.createElement('div');
+            dialog.id = 'object-dialog';
+            dialog.innerHTML = `
+                <button id="dialog-close">${t('close')}</button>
+                <div id="dialog-content">${info.join('\n')}</div>
+            `;
             
-            // Optional: Dialog nach 2 Sekunden an die richtige Position verschieben
-            setTimeout(() => {
-                try {
-                    const rect = this.container.getBoundingClientRect();
-                    // Spiegeln des Azimuts für Blickrichtung nach Süden (Osten links, Westen rechts)
-                    const adjustedAzimuth = (360 - obj.azimuth) % 360;
-                    const azimuth = adjustedAzimuth / 360 * rect.width;
-                    const altitude = (1 - obj.altitude / 90) * (rect.height / 2);
-                    
-                    // Berechne die Position und stelle sicher, dass der Dialog nicht abgeschnitten wird
-                    let leftPos = rect.left + azimuth - 100;
-                    
-                    // Stelle sicher, dass der Dialog nicht links aus dem Bildschirm ragt
-                    if (leftPos < 10) {
-                        leftPos = 10; // Mindestens 10px vom linken Rand
-                    }
-                    
-                    // Stelle sicher, dass der Dialog nicht rechts aus dem Bildschirm ragt
-                    if (leftPos + 250 > window.innerWidth) {
-                        leftPos = window.innerWidth - 260;
-                    }
-                    
-                    dialog.style.position = 'absolute';
-                    dialog.style.transform = 'none';
-                    dialog.style.left = `${leftPos}px`;
-                    dialog.style.top = `${rect.top + altitude}px`;
-                } catch (posError) {
-                    console.error('Error positioning dialog:', posError);
-                }
-            }, 100);
+            // Füge den Dialog zum Body hinzu
+            document.body.appendChild(dialog);
+            
+            // Positioniere den Dialog neben der oberen rechten Ecke der Himmelsansicht
+            const skyRect = this.container.getBoundingClientRect();
+            dialog.style.top = `${skyRect.top}px`;
+            dialog.style.left = `${skyRect.right + 10}px`; // 10px Abstand zur rechten Kante
+            
+            // Close-Button-Event hinzufügen
+            document.getElementById('dialog-close').addEventListener('click', () => {
+                dialog.remove();
+                this.clearSelection();
+            });
         } catch (error) {
-            console.error('Error creating dialog:', error);
-            alert(`Info for ${obj.name}: Alt=${obj.altitude.toFixed(1)}°, Az=${obj.azimuth.toFixed(1)}°`);
+            console.error('Error showing object info:', error);
+        }
+    }
+    
+    showMultiObjectDialog(objects) {
+        if (!objects || objects.length === 0) return;
+        
+        try {
+            // Entferne vorherige Dialoge
+            this.removeDialog();
+            
+            // Erstelle einen neuen Dialog
+            const dialog = document.createElement('div');
+            dialog.className = 'object-dialog multi-object-dialog';
+            dialog.id = 'object-dialog';
+            
+            // Dialog-Header mit Titel und Close-Button
+            let dialogContent = `<div class="dialog-header"><h3>${t('multiple_objects_found')}</h3><button id="dialog-close">${t('close')}</button></div>`;
+            
+            // Füge Liste der Objekte hinzu
+            dialogContent += '<div class="object-list">';
+            objects.forEach((obj, index) => {
+                const displayName = t(obj.name) || obj.name;
+                dialogContent += `<div class="object-list-item" data-object-name="${obj.name}">${obj.symbol || ''} ${displayName}</div>`;
+            });
+            dialogContent += '</div>';
+            
+            // Füge Trennlinie hinzu
+            dialogContent += '<hr class="dialog-divider">';
+            
+            // Füge Datenbereich hinzu
+            dialogContent += '<div class="object-data"></div>';
+            
+            dialog.innerHTML = dialogContent;
+            
+            // Füge den Dialog zum Body hinzu
+            document.body.appendChild(dialog);
+            
+            // Positioniere den Dialog neben der oberen rechten Ecke der Himmelsansicht
+            const skyRect = this.container.getBoundingClientRect();
+            dialog.style.top = `${skyRect.top}px`;
+            dialog.style.left = `${skyRect.right + 10}px`;
+            
+            // Lade die externen Styles für den Dialog
+            const linkElem = document.createElement('link');
+            linkElem.rel = 'stylesheet';
+            linkElem.href = '/static/js/dialogStyles.css';
+            document.head.appendChild(linkElem);
+            
+            // Event-Listener für den Close-Button
+            const closeButton = dialog.querySelector('#dialog-close');
+            closeButton.addEventListener('click', () => {
+                this.removeDialog();
+            });
+            
+            // Event-Listener für die Objektliste
+            const listItems = dialog.querySelectorAll('.object-list-item');
+            const dataContainer = dialog.querySelector('.object-data');
+            
+            // Funktion zum Anzeigen der Objektdaten
+            const showObjectData = (objectName) => {
+                // Finde das ausgewählte Objekt
+                const selectedObject = objects.find(obj => obj.name === objectName);
+                if (!selectedObject) return;
+                
+                // Erstelle Informationstext
+                const info = [
+                    `${selectedObject.symbol || ''} ${selectedObject.name}`,
+                    `${t('altitude')}: ${selectedObject.altitude.toFixed(1)}°`,
+                    `${t('azimuth')}: ${selectedObject.azimuth.toFixed(1)}°`,
+                    `${t('distance')}: ${(selectedObject.distance / 149597870.691).toFixed(3)} ${t('au')}`
+                ];
+                
+                // Zeige Auf- und Untergangszeiten an, wenn verfügbar
+                if (selectedObject.rise_time) {
+                    info.push(`${t('rise_time')}: ${selectedObject.rise_time} ${t('hour')}`);
+                }
+                
+                if (selectedObject.set_time) {
+                    info.push(`${t('set_time')}: ${selectedObject.set_time} ${t('hour')}`);
+                }
+                
+                if (selectedObject.transit_time) {
+                    info.push(`${t('transit_time')}: ${selectedObject.transit_time} ${t('hour')}`);
+                }
+        
+                if (selectedObject.phase !== undefined) {
+                    const phaseName = selectedObject.phase_name ? t(selectedObject.phase_name) : '';
+                    info.push(`${t('phase')}: ${(selectedObject.phase * 100).toFixed(1)}% ${phaseName}`);
+                }
+                
+                if (selectedObject.magnitude !== undefined) {
+                    info.push(`${t('magnitude')}: ${selectedObject.magnitude.toFixed(1)}`);
+                }
+                
+                // Aktualisiere den Datenbereich
+                dataContainer.innerHTML = info.join('\n');
+                
+                // Hebe das entsprechende Objekt im Himmel hervor
+                this.highlightObject(objectName);
+                
+                // Markiere das ausgewählte Element in der Liste
+                listItems.forEach(item => {
+                    if (item.getAttribute('data-object-name') === objectName) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            };
+            
+            // Füge Event-Listener zu den Listeneinträgen hinzu
+            listItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    const objectName = item.getAttribute('data-object-name');
+                    showObjectData(objectName);
+                });
+            });
+            
+            // Zeige das erste Objekt standardmäßig an
+            if (objects.length > 0) {
+                showObjectData(objects[0].name);
+            }
+        } catch (error) {
+            console.error('Error showing multi-object dialog:', error);
         }
     }
 
     async update() {
         try {
             // Zeige Ladestatus an
-            this.container.textContent = 'Loading celestial data...';
+            this.container.textContent = t('loading');
             
             const response = await fetch(API_ENDPOINTS.CELESTIAL);
             if (!response.ok) {
@@ -430,7 +550,7 @@ export class SkyRenderer {
             this.render();
         } catch (error) {
             console.error('Error updating celestial data:', error);
-            this.container.textContent = 'Error loading sky data. Please refresh the page.';
+            this.container.textContent = t('error_loading');
         }
     }
 

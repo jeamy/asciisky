@@ -41,6 +41,9 @@
 - ✅ Added proper symbol mapping for celestial objects
 - ✅ Enhanced object dialog with rise, set, and transit times
 - ✅ Improved positioning of objects below the horizon
+- ✅ Implemented internationalization (i18n) with German as default language
+- ✅ Improved multi-object dialog with minimalist design and better spacing
+- ✅ Moved dialog CSS to external file for better maintainability
 
 ### Code Organization
 - ✅ Moved all constants to constants.js

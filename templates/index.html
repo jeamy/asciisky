@@ -52,6 +52,21 @@
             justify-content: center;
             overflow: auto;
             cursor: crosshair;
+            position: relative; /* Für die relative Positionierung des Dialogs */
+        }
+        
+        #object-dialog {
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--primary-color);
+            padding: 15px 20px;
+            color: var(--primary-color);
+            font-family: monospace;
+            white-space: pre;
+            z-index: 1000;
+            min-width: 200px;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+            max-width: 300px;
         }
         
         .controls {
@@ -84,6 +99,34 @@
         }
         
         .object-btn.active {
+            background: #004400;
+            border-color: var(--primary-color);
+        }
+        
+        .language-selector {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .lang-btn {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--primary-color);
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+        }
+        
+        .lang-btn:hover {
+            background: #222;
+        }
+        
+        .lang-btn.active {
             background: #004400;
             border-color: var(--primary-color);
         }
@@ -139,8 +182,12 @@
 <body>
     <header>
         <h1>🌌 ASCII Sky Tracker - Vienna</h1>
+        <div class="language-selector">
+            <button id="lang-de" class="lang-btn active">DE</button>
+            <button id="lang-en" class="lang-btn">EN</button>
+        </div>
         <div class="status-bar">
-            <div>Click on any object for details</div>
+            <div id="click-info">Click on any object for details</div>
             <div id="last-updated">-</div>
         </div>
     </header>
@@ -155,25 +202,72 @@
         Loading celestial data...
     </div>
     
-    <!-- Object information will be inserted here by JavaScript -->
-    
     <!-- JavaScript Modules -->
     <script type="module">
-        import { initializeMoonTracker } from '/static/js/moon.js';
+        import { initializeSkyTracker } from '/static/js/skyManager.js';
         import { CONFIG, OBJECT_SYMBOLS } from '/static/js/constants.js';
+        import { setLanguage, getCurrentLanguage, t } from '/static/js/i18n.js';
         
         let renderer;
         
         // Initialize the sky tracker when the DOM is fully loaded
         document.addEventListener('DOMContentLoaded', () => {
             // Initialisiere den Renderer und speichere die Referenz
-            renderer = initializeMoonTracker();
+            renderer = initializeSkyTracker();
             
             // Warte einen kurzen Moment, um sicherzustellen, dass der Renderer initialisiert ist
             setTimeout(() => {
                 setupObjectList();
+                setupLanguageButtons();
+                updateUITexts();
             }, 500);
         });
+        
+        // Funktion zum Einrichten der Sprachauswahl-Buttons
+        function setupLanguageButtons() {
+            const btnDE = document.getElementById('lang-de');
+            const btnEN = document.getElementById('lang-en');
+            
+            btnDE.addEventListener('click', () => {
+                setLanguage('de');
+                updateLanguageButtons();
+                updateUITexts();
+                if (renderer) renderer.updateSky();
+            });
+            
+            btnEN.addEventListener('click', () => {
+                setLanguage('en');
+                updateLanguageButtons();
+                updateUITexts();
+                if (renderer) renderer.updateSky();
+            });
+            
+            // Initialen Zustand setzen
+            updateLanguageButtons();
+        }
+        
+        // Aktualisiert die Sprachbuttons basierend auf der aktuellen Sprache
+        function updateLanguageButtons() {
+            const currentLang = getCurrentLanguage();
+            document.getElementById('lang-de').classList.toggle('active', currentLang === 'de');
+            document.getElementById('lang-en').classList.toggle('active', currentLang === 'en');
+        }
+        
+        // Aktualisiert alle UI-Texte basierend auf der aktuellen Sprache
+        function updateUITexts() {
+            document.getElementById('click-info').textContent = t('click_info');
+            
+            // Aktualisiere die Objektnamen in der Objektliste
+            document.querySelectorAll('.object-btn').forEach(btn => {
+                const name = btn.dataset.objectName;
+                if (name) {
+                    const displayName = t(name) || name.charAt(0).toUpperCase() + name.slice(1);
+                    // Erhalte das Symbol und füge es wieder hinzu
+                    const symbol = OBJECT_SYMBOLS[name] || '';
+                    btn.innerHTML = `${symbol} ${displayName}`;
+                }
+            });
+        }
         
         function setupObjectList() {
             const container = document.getElementById('object-list');
@@ -186,7 +280,9 @@
             Object.entries(OBJECT_SYMBOLS).forEach(([name, symbol]) => {
                 const btn = document.createElement('button');
                 btn.className = 'object-btn';
-                btn.innerHTML = `${symbol} ${name.charAt(0).toUpperCase() + name.slice(1)}`;
+                btn.dataset.objectName = name; // Speichere den originalen Namen als Datensatz
+                const displayName = t(name) || name.charAt(0).toUpperCase() + name.slice(1);
+                btn.innerHTML = `${symbol} ${displayName}`;
                 btn.onclick = () => {
                     // Toggle selection
                     const isSelected = btn.classList.contains('active');

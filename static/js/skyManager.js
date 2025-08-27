@@ -4,7 +4,7 @@ import { CONFIG } from './constants.js';
 // Deklariere skyRenderer als exportierte Variable
 export let skyRenderer;
 
-export function initializeMoonTracker() {
+export function initializeSkyTracker() {
     // Initialize the sky renderer
     skyRenderer = new SkyRenderer('sky-container');
     

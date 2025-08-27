@@ -12,6 +12,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Distance and magnitude information for all objects
 - Auto-updates every 30 seconds
 - Responsive design
+- Internationalization (i18n) with German as default language
+- Minimalist UI design with optimized space usage
 
 ## Prerequisites
 
@@ -49,7 +51,9 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - `static/js/` - JavaScript modules
   - `constants.js` - Configuration parameters and constants
   - `skyRenderer.js` - ASCII sky rendering and interaction logic
-  - `moon.js` - Moon phase calculations
+  - `skyManager.js` - Sky rendering initialization and update management
+  - `i18n.js` - Internationalization module with translations
+  - `dialogStyles.css` - CSS styles for object dialogs
 - `doc/` - Documentation files
   - `plan.md` - Development plan and feature tracking
 - `Dockerfile` - Docker configuration
