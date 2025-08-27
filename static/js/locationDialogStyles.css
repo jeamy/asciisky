@@ -1,0 +1,129 @@
+.location-dialog {
+    width: 400px;
+    max-width: 90vw;
+}
+
+.location-dialog .dialog-content {
+    padding: 10px 0;
+}
+
+.location-search {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 15px;
+}
+
+.location-search input {
+    flex: 1;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 5px;
+    border-radius: 3px;
+}
+
+.location-search button {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.location-search button:hover {
+    background: #222;
+}
+
+.location-results {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.location-result-item {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 5px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.location-result-item:hover {
+    background: #222;
+}
+
+.location-name {
+    font-weight: bold;
+    margin-bottom: 3px;
+}
+
+.location-coords {
+    font-size: 0.9em;
+    color: var(--text-dim);
+}
+
+.current-location, .manual-coordinates {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+}
+
+.current-location h4, .manual-coordinates h4 {
+    margin: 0 0 10px 0;
+    color: var(--primary-color);
+}
+
+#current-location-display {
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.coordinate-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.input-group:last-child {
+    grid-column: span 2;
+}
+
+.input-group input {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 5px;
+    border-radius: 3px;
+}
+
+#apply-coordinates-button {
+    background: var(--panel-bg);
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-top: 5px;
+}
+
+#apply-coordinates-button:hover {
+    background: #004400;
+}
+
+.loading, .error, .no-results {
+    padding: 10px;
+    text-align: center;
+}
+
+.error {
+    color: #ff5555;
+}

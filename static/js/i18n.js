@@ -6,6 +6,7 @@ export const i18n = {
         'loading': 'Lade Himmelsdaten...',
         'error_loading': 'Fehler beim Laden der Himmelsdaten. Bitte Seite neu laden.',
         'click_info': 'Klicke auf ein Objekt für Details',
+        'app_title': 'ASCII Sky Tracker',
         
         // Himmelsobjekte
         'sun': 'Sonne',
@@ -62,7 +63,23 @@ export const i18n = {
         
         // Zeiteinheiten
         'hour': 'Uhr',
-        'au': 'AE' // Astronomische Einheit
+        'au': 'AE', // Astronomische Einheit
+        
+        // Standort-Dialog
+        'location_settings': 'Standort-Einstellungen',
+        'search_location': 'Ort suchen...',
+        'search': 'Suchen',
+        'searching': 'Suche',
+        'search_error': 'Fehler bei der Suche',
+        'no_results_found': 'Keine Ergebnisse gefunden',
+        'current_location': 'Aktueller Standort',
+        'manual_coordinates': 'Manuelle Koordinaten',
+        'latitude': 'Breitengrad',
+        'longitude': 'Längengrad',
+        'elevation': 'Höhe (m)',
+        'location_name': 'Ortsname',
+        'apply': 'Übernehmen',
+        'invalid_coordinates': 'Ungültige Koordinaten'
     },
     
     // Englisch als Fallback
@@ -71,6 +88,7 @@ export const i18n = {
         'loading': 'Loading celestial data...',
         'error_loading': 'Error loading sky data. Please refresh the page.',
         'click_info': 'Click on any object for details',
+        'app_title': 'ASCII Sky Tracker',
         
         // Celestial objects
         'sun': 'Sun',
@@ -127,7 +145,23 @@ export const i18n = {
         
         // Time units
         'hour': '',
-        'au': 'AU' // Astronomical Unit
+        'au': 'AU', // Astronomical Unit
+        
+        // Location dialog
+        'location_settings': 'Location Settings',
+        'search_location': 'Search location...',
+        'search': 'Search',
+        'searching': 'Searching',
+        'search_error': 'Search error',
+        'no_results_found': 'No results found',
+        'current_location': 'Current Location',
+        'manual_coordinates': 'Manual Coordinates',
+        'latitude': 'Latitude',
+        'longitude': 'Longitude',
+        'elevation': 'Elevation (m)',
+        'location_name': 'Location Name',
+        'apply': 'Apply',
+        'invalid_coordinates': 'Invalid coordinates'
     }
 };
 

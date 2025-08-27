@@ -7,6 +7,7 @@ export class SkyRenderer {
         this.sky = [];
         this.celestialData = null;
         this.selectedObject = null;
+        this.skyManager = null; // Wird später gesetzt
         this.initSky();
         this.setupEventListeners();
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
@@ -529,7 +530,16 @@ export class SkyRenderer {
             // Zeige Ladestatus an
             this.container.textContent = t('loading');
             
-            const response = await fetch(API_ENDPOINTS.CELESTIAL);
+            // Hole die aktuellen Standortdaten aus dem SkyManager
+            const location = this.skyManager ? this.skyManager.getCurrentLocation() : null;
+            
+            // Erstelle die URL mit Standortparametern, falls vorhanden
+            let url = API_ENDPOINTS.CELESTIAL;
+            if (location) {
+                url += `?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+            }
+            
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }

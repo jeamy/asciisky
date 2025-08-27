@@ -10,7 +10,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Rise, set, and transit times for all celestial objects
 - Interactive object selection with detailed information dialog
 - Distance and magnitude information for all objects
-- Auto-updates every 30 seconds
+- Auto-updates every 60 seconds
 - Responsive design
 - Internationalization (i18n) with German as default language
 - Minimalist UI design with optimized space usage

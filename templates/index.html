@@ -103,12 +103,34 @@
             border-color: var(--primary-color);
         }
         
-        .language-selector {
+        .header-controls {
             position: absolute;
             top: 20px;
             right: 20px;
             display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .language-selector {
+            display: flex;
             gap: 5px;
+        }
+        
+        .control-btn {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--primary-color);
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .control-btn:hover {
+            background: #222;
         }
         
         .lang-btn {
@@ -181,10 +203,13 @@
 </head>
 <body>
     <header>
-        <h1>🌌 ASCII Sky Tracker - Vienna</h1>
-        <div class="language-selector">
-            <button id="lang-de" class="lang-btn active">DE</button>
-            <button id="lang-en" class="lang-btn">EN</button>
+        <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
+        <div class="header-controls">
+            <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
+            <div class="language-selector">
+                <button id="lang-de" class="lang-btn active">DE</button>
+                <button id="lang-en" class="lang-btn">EN</button>
+            </div>
         </div>
         <div class="status-bar">
             <div id="click-info">Click on any object for details</div>
@@ -199,29 +224,65 @@
     </div>
     
     <div id="sky-container" class="sky-container">
-        Loading celestial data...
+        <!-- Sky will be rendered here -->
     </div>
     
-    <!-- JavaScript Modules -->
     <script type="module">
-        import { initializeSkyTracker } from '/static/js/skyManager.js';
-        import { CONFIG, OBJECT_SYMBOLS } from '/static/js/constants.js';
-        import { setLanguage, getCurrentLanguage, t } from '/static/js/i18n.js';
+        import { SkyRenderer } from './static/js/skyRenderer.js';
+        import { initializeSkyTracker, updateSky } from './static/js/skyManager.js';
+        import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
+        import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
+        import { LocationDialog } from './static/js/locationDialog.js';
         
         let renderer;
+        let locationDialog;
         
         // Initialize the sky tracker when the DOM is fully loaded
         document.addEventListener('DOMContentLoaded', () => {
             // Initialisiere den Renderer und speichere die Referenz
             renderer = initializeSkyTracker();
             
+            // Initialisiere den Standort-Dialog
+            locationDialog = new LocationDialog(handleLocationChange);
+            
             // Warte einen kurzen Moment, um sicherzustellen, dass der Renderer initialisiert ist
             setTimeout(() => {
                 setupObjectList();
                 setupLanguageButtons();
+                setupLocationButton();
                 updateUITexts();
+                
+                // Lade gespeicherte Standortdaten, falls vorhanden
+                loadSavedLocation();
             }, 500);
         });
+        
+        // Funktion zum Laden gespeicherter Standortdaten
+        function loadSavedLocation() {
+            try {
+                const savedLocationJson = localStorage.getItem('asciisky_location');
+                if (savedLocationJson) {
+                    const savedLocation = JSON.parse(savedLocationJson);
+                    console.log('Loaded saved location:', savedLocation);
+                    
+                    // Aktualisiere den Titel mit dem gespeicherten Standort
+                    updateAppTitle(savedLocation.name);
+                    
+                    // Aktualisiere den Standort im SkyManager
+                    if (renderer && renderer.skyManager) {
+                        renderer.skyManager.setLocation(savedLocation.lat, savedLocation.lon);
+                        updateSky();
+                    }
+                    
+                    // Aktualisiere auch den LocationDialog
+                    if (locationDialog) {
+                        locationDialog.currentLocation = savedLocation;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading saved location:', error);
+            }
+        }
         
         // Funktion zum Einrichten der Sprachauswahl-Buttons
         function setupLanguageButtons() {
@@ -267,6 +328,77 @@
                     btn.innerHTML = `${symbol} ${displayName}`;
                 }
             });
+            
+            // Aktualisiere den Standort-Button-Tooltip
+            document.getElementById('location-btn').title = t('location_settings');
+            
+            // Aktualisiere den App-Titel mit i18n
+            updateAppTitle();
+        }
+        
+        // Funktion zum Aktualisieren des App-Titels
+        function updateAppTitle(locationName) {
+            const appTitle = document.getElementById('app-title');
+            if (locationName) {
+                appTitle.textContent = `🌌 ${t('app_title')} - ${locationName}`;
+            } else {
+                appTitle.textContent = `🌌 ${t('app_title')}`;
+            }
+        }
+        
+        // Funktion zum Einrichten des Standort-Buttons
+        function setupLocationButton() {
+            const locationBtn = document.getElementById('location-btn');
+            locationBtn.addEventListener('click', () => {
+                // Lade die CSS-Datei für den Standort-Dialog
+                loadCSSFile('./static/js/dialogStyles.css');
+                // Zeige den Dialog an
+                locationDialog.show();
+            });
+        }
+        
+        // Funktion zum Laden einer CSS-Datei
+        function loadCSSFile(url) {
+            // Prüfe, ob die CSS-Datei bereits geladen wurde
+            const links = document.getElementsByTagName('link');
+            for (let i = 0; i < links.length; i++) {
+                if (links[i].href.includes(url)) {
+                    return; // CSS bereits geladen
+                }
+            }
+            
+            // Füge die CSS-Datei hinzu
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.type = 'text/css';
+            link.href = url;
+            document.head.appendChild(link);
+        }
+        
+        // Handler für Standortänderungen
+        function handleLocationChange(location) {
+            // Aktualisiere den Titel mit dem neuen Standort und i18n-Unterstützung
+            updateAppTitle(location.name);
+            
+            // Aktualisiere die Koordinaten im SkyManager
+            if (renderer && renderer.skyManager) {
+                renderer.skyManager.setLocation(location.lat, location.lon, location.elevation);
+                // Aktualisiere den Himmel mit der exportierten updateSky-Funktion
+                updateSky();
+            }
+            
+            // Speichere den Standort im localStorage für Persistenz
+            saveLocationToLocalStorage(location);
+        }
+        
+        // Funktion zum Speichern des Standorts im localStorage
+        function saveLocationToLocalStorage(location) {
+            try {
+                localStorage.setItem('asciisky_location', JSON.stringify(location));
+                console.log('Location saved to localStorage:', location);
+            } catch (error) {
+                console.error('Error saving location to localStorage:', error);
+            }
         }
         
         function setupObjectList() {

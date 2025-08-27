@@ -4,6 +4,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 import math
 from datetime import datetime, timedelta
+import pytz
+import os
+import re
 from skyfield.api import load, wgs84, Topos, Star
 from skyfield import almanac
 from skyfield.data import mpc
@@ -268,12 +271,26 @@ async def get_celestial_body(body_id: CelestialBody):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get(API_ENDPOINT_CELESTIAL)
-async def get_all_celestial_bodies():
+async def get_all_celestial_bodies(lat: float = None, lon: float = None, elevation: float = None):
     """Get positions for all celestial bodies."""
     try:
         print("Getting data for all celestial bodies")
         t = ts.now()
-        observer = eph['earth'] + VIENNA
+        
+        # Verwende die übergebenen Koordinaten oder die Standardwerte für Wien
+        if lat is not None and lon is not None:
+            # Wenn Elevation nicht angegeben wurde, verwende den Standardwert
+            if elevation is None:
+                elevation = 0
+            # Erstelle einen neuen Topos mit den übergebenen Koordinaten
+            location = wgs84.latlon(lat, lon, elevation_m=elevation)
+            observer = eph['earth'] + location
+            print(f"Using custom location: lat={lat}, lon={lon}, elevation={elevation}")
+        else:
+            # Verwende die Standardkoordinaten für Wien
+            observer = eph['earth'] + VIENNA
+            print(f"Using default location (Vienna)")
+            
         print(f"Observer: {observer}")
         
         result = {
@@ -339,6 +356,10 @@ def get_cardinal_direction(azimuth: float) -> str:
 def calculate_rise_set_times(body_name, t, observer):
     """Calculate rise, set, and transit times for a celestial body."""
     try:
+        # Import skyfield modules
+        import skyfield
+        from skyfield.vectorlib import VectorSum
+        
         # Lokale Zeitzone für Wien
         vienna_tz = pytz.timezone('Europe/Vienna')
         
@@ -350,8 +371,40 @@ def calculate_rise_set_times(body_name, t, observer):
         t0 = ts.from_datetime(today_utc)
         t1 = ts.from_datetime(tomorrow_utc)
         
-        # Verwende Topos direkt für den Observer, nicht den zusammengesetzten Vektor
-        topos_observer = VIENNA
+        # Vereinfachter Ansatz: Verwende direkt den VIENNA-Topos für die Berechnung
+        # der Auf- und Untergangszeiten
+        # Dies ist ein Workaround, da die Extraktion der Koordinaten aus dem Observer kompliziert ist
+        # und die Struktur des VectorSum-Objekts sich geändert haben könnte
+        
+        # Extrahiere die Koordinaten aus dem Observer-String
+        try:
+            observer_str = str(observer)
+            # Extrahiere die Koordinaten aus dem String mit einem Regex-Pattern
+            lat_match = re.search(r'latitude ([+-]?\d+\.\d+)', observer_str)
+            lon_match = re.search(r'longitude ([+-]?\d+\.\d+)', observer_str)
+            elev_match = re.search(r'elevation ([+-]?\d+\.\d+)', observer_str)
+            
+            if lat_match and lon_match:
+                lat = float(lat_match.group(1))
+                lon = float(lon_match.group(1))
+                elevation = float(elev_match.group(1)) if elev_match else VIENNA.elevation.m
+                
+                # Erstelle einen neuen Topos mit den extrahierten Koordinaten
+                topos_observer = wgs84.latlon(lat, lon, elevation_m=elevation)
+                print(f"Using extracted coordinates for rise/set: lat={lat}, lon={lon}, elevation={elevation}")
+            else:
+                # Fallback auf Wien
+                topos_observer = VIENNA
+                print("Falling back to Vienna coordinates for rise/set (no match in regex)")
+        except Exception as e:
+            print(f"Error extracting coordinates from observer string: {e}")
+            # Fallback auf Wien
+            topos_observer = VIENNA
+            print("Falling back to Vienna coordinates for rise/set (exception)")
+        
+        
+        print(f"Using topos for rise/set calculations: {topos_observer}")
+        
         
         # Funktion für Auf- und Untergang
         if body_name == 'sun':

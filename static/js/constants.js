@@ -28,7 +28,7 @@ export const OBJECT_SYMBOLS = {
 
 // Display Configuration
 export const CONFIG = {
-    UPDATE_INTERVAL_MS: 30000, // 30 seconds
+    UPDATE_INTERVAL_MS: 60000, // 30 seconds
     SKY_WIDTH: 80,
     SKY_HEIGHT: 40,
     HORIZON_ROW: 20, // Row where the horizon is drawn
