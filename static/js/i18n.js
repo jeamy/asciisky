@@ -70,6 +70,10 @@ export const i18n = {
         // Standort-Dialog
         'location_settings': 'Standort-Einstellungen',
         
+        // Navigationspfeile
+        'shift_left': 'Horizont nach links verschieben',
+        'shift_right': 'Horizont nach rechts verschieben',
+        
         // Filter-Einstellungen
         'asteroid_magnitude_label': 'Asteroiden max. Magnitude:',
         'comet_magnitude_label': 'Kometen max. Magnitude:',
@@ -158,6 +162,10 @@ export const i18n = {
         
         // Location dialog
         'location_settings': 'Location Settings',
+        
+        // Navigation arrows
+        'shift_left': 'Shift horizon to the left',
+        'shift_right': 'Shift horizon to the right',
         
         // Filter settings
         'asteroid_magnitude_label': 'Asteroids max. magnitude:',

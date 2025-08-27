@@ -10,6 +10,10 @@ export class SkyRenderer {
         this.selectedObject = null;
         this.skyManager = null; // Wird später gesetzt
         
+        // Horizontale Verschiebung aus den Einstellungen laden
+        this.horizontalShift = settingsManager.getHorizontalShift(); 
+        console.log(`Loaded horizontal shift: ${this.horizontalShift}°`);
+        
         // Lade gespeicherte Magnitude-Einstellungen oder verwende Defaults
         this.asteroidMaxMagnitude = settingsManager.getAsteroidMagnitude() || ASTRO_CONSTANTS.DEFAULT_ASTEROID_MAX_MAGNITUDE;
         this.cometMaxMagnitude = settingsManager.getCometMagnitude() || ASTRO_CONSTANTS.DEFAULT_COMET_MAX_MAGNITUDE;
@@ -34,6 +38,30 @@ export class SkyRenderer {
         this.drawHorizon();
         // Don't call render() here to avoid recursion
     }
+    
+    // Methode zum Verschieben des Horizonts nach links
+    shiftHorizonLeft() {
+        // Verschiebe um 5 Grad nach links
+        this.horizontalShift -= 5;
+        
+        // Speichere die aktuelle Verschiebung
+        settingsManager.setHorizontalShift(this.horizontalShift);
+        
+        // Aktualisiere die Anzeige
+        this.render();
+    }
+    
+    // Methode zum Verschieben des Horizonts nach rechts
+    shiftHorizonRight() {
+        // Verschiebe um 5 Grad nach rechts
+        this.horizontalShift += 5;
+        
+        // Speichere die aktuelle Verschiebung
+        settingsManager.setHorizontalShift(this.horizontalShift);
+        
+        // Aktualisiere die Anzeige
+        this.render();
+    }
 
     drawHorizon() {
         const horizonRow = CONFIG.HORIZON_ROW;
@@ -56,24 +84,36 @@ export class SkyRenderer {
         
         // Positionen für die vier Hauptrichtungen entlang des Horizonts
         // Azimut-Mapping: 0°=Nord, 90°=Ost, 180°=Süd, 270°=West
-        // Spalten entsprechend dem Azimut-Mapping
+        // Spalten entsprechend dem Azimut-Mapping mit horizontaler Verschiebung
         const positions = [
-            { dir: 'N', col: Math.round((0 / 360) * (width - 2)) + 1 },     // 0° Azimut
-            { dir: 'O', col: Math.round((90 / 360) * (width - 2)) + 1 },    // 90° Azimut  
-            { dir: 'S', col: Math.round((180 / 360) * (width - 2)) + 1 },   // 180° Azimut
-            { dir: 'W', col: Math.round((270 / 360) * (width - 2)) + 1 }    // 270° Azimut
+            { dir: 'N', azimuth: 0 },     // 0° Azimut
+            { dir: 'O', azimuth: 90 },    // 90° Azimut  
+            { dir: 'S', azimuth: 180 },   // 180° Azimut
+            { dir: 'W', azimuth: 270 }    // 270° Azimut
         ];
         
-        positions.forEach(pos => {
-            // Alle Himmelsrichtungen am Horizont anzeigen
-            if (pos.dir === 'N') {
-                this.sky[horizonRow][pos.col] = t('north');
-            } else if (pos.dir === 'S') {
-                this.sky[horizonRow][pos.col] = t('south');
-            } else if (pos.dir === 'O') {
-                this.sky[horizonRow][pos.col] = t('east');
-            } else if (pos.dir === 'W') {
-                this.sky[horizonRow][pos.col] = t('west');
+        // Alle Himmelsrichtungen anzeigen, unabhängig von der Verschiebung
+        const visibleDirections = positions;
+        
+        // Zeichne die sichtbaren Himmelsrichtungen
+        visibleDirections.forEach(pos => {
+            // Berechne den effektiven Azimut mit Verschiebung
+            const effectiveAzimuth = (pos.azimuth - this.horizontalShift + 360) % 360;
+            // Berechne die Spalte basierend auf dem effektiven Azimut
+            // Wir verwenden den gesamten Bereich von 0° bis 360°
+            const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
+            
+            // Nur zeichnen, wenn die Spalte im sichtbaren Bereich liegt
+            if (col >= 0 && col < width) {
+                if (pos.dir === 'N') {
+                    this.sky[horizonRow][col] = t('north');
+                } else if (pos.dir === 'S') {
+                    this.sky[horizonRow][col] = t('south');
+                } else if (pos.dir === 'O') {
+                    this.sky[horizonRow][col] = t('east');
+                } else if (pos.dir === 'W') {
+                    this.sky[horizonRow][col] = t('west');
+                }
             }
         });
         
@@ -118,7 +158,59 @@ export class SkyRenderer {
         
         // Convert 2D array to string and display
         const skyText = this.sky.map(row => row.join('')).join('\n');
-        this.container.textContent = skyText;
+        
+        // Erstelle ein temporäres div für den Himmelstext
+        const skyTextDiv = document.createElement('div');
+        skyTextDiv.className = 'sky-text';
+        skyTextDiv.style.whiteSpace = 'pre';
+        skyTextDiv.style.fontFamily = 'monospace';
+        skyTextDiv.textContent = skyText;
+        
+        // Speichere die vorhandenen Navigationspfeile
+        const existingArrows = document.getElementById('navigation-arrows');
+        
+        // Leere den Container
+        this.container.innerHTML = '';
+        
+        // Füge den Himmelstext hinzu
+        this.container.appendChild(skyTextDiv);
+        
+        // Füge immer neue Navigationspfeile hinzu
+        this.addNavigationArrows();
+    }
+
+    addNavigationArrows() {
+        // Füge Navigationspfeile hinzu
+        // Entferne zuerst alle vorhandenen Navigationspfeile
+        const existingArrows = document.getElementById('navigation-arrows');
+        if (existingArrows) {
+            existingArrows.remove();
+        }
+        
+        // Erstelle neue Navigationspfeile
+        const arrowsDiv = document.createElement('div');
+        arrowsDiv.id = 'navigation-arrows';
+        arrowsDiv.className = 'navigation-arrows';
+        
+        // Linker Pfeil (rechts neben West)
+        const leftArrow = document.createElement('button');
+        leftArrow.id = 'nav-left';
+        leftArrow.className = 'nav-arrow nav-arrow-left';
+        leftArrow.title = t('shift_left');
+        leftArrow.innerHTML = '&#9664;';
+        leftArrow.addEventListener('click', () => this.shiftHorizonLeft());
+        
+        // Rechter Pfeil (links neben Ost)
+        const rightArrow = document.createElement('button');
+        rightArrow.id = 'nav-right';
+        rightArrow.className = 'nav-arrow nav-arrow-right';
+        rightArrow.title = t('shift_right');
+        rightArrow.innerHTML = '&#9654;';
+        rightArrow.addEventListener('click', () => this.shiftHorizonRight());
+        
+        arrowsDiv.appendChild(leftArrow);
+        arrowsDiv.appendChild(rightArrow);
+        this.container.appendChild(arrowsDiv);
     }
 
     drawCelestialObject(obj) {
@@ -143,12 +235,20 @@ export class SkyRenderer {
             row = Math.round(horizonRow + (Math.abs(obj.altitude) / 90 * (height - horizonRow - 1)));
         }
         
-        // Berechne die Spalte basierend auf dem Azimut (0° bis 360°)
+        // Berechne die Spalte basierend auf dem Azimut (0° bis 360°) mit horizontaler Verschiebung
         // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
-        // Für korrekte Darstellung: Ost (90°) links, West (270°) rechts
-        // Direkte Mapping ohne Rotation - Azimut direkt auf Spalte mappen
-        const normalizedAzimuth = obj.azimuth % 360;
-        const col = Math.round((normalizedAzimuth / 360) * (width - 2)) + 1;
+        // Wir zeigen nur den Bereich von 90° (Ost) bis 270° (West) an
+        // Die horizontale Verschiebung verschiebt den sichtbaren Bereich
+        
+        // Berechne den effektiven Azimut mit Verschiebung
+        const normalizedAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
+        
+        // Wir mappen den Bereich 90°-270° auf die gesamte Breite
+        // Prüfe, ob der Azimut im sichtbaren Bereich liegt
+        const isVisible = normalizedAzimuth >= 90 && normalizedAzimuth <= 270;
+        
+        // Berechne die Spalte basierend auf dem effektiven Azimut
+        const col = Math.round(((normalizedAzimuth - 90) / 180) * (width - 2)) + 1;
         
         // Speichere die Position des Objekts für spätere Verwendung
         obj.displayRow = row;
@@ -178,7 +278,9 @@ export class SkyRenderer {
                 // Markiere, dass hier mehrere Objekte sind
                 obj.isOverlapping = true;
             } else {
-                symbol = CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
+                const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
+                symbol = backendSymbol || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
             }
             
             this.sky[row][col] = symbol;
@@ -455,7 +557,7 @@ export class SkyRenderer {
             // Lade die externen Styles für den Dialog
             const linkElem = document.createElement('link');
             linkElem.rel = 'stylesheet';
-            linkElem.href = '/static/js/dialogStyles.css';
+            linkElem.href = '/static/css/dialogStyles.css';
             document.head.appendChild(linkElem);
             
             // Event-Listener für den Close-Button

@@ -86,6 +86,21 @@ export class SettingsManager {
         };
     }
     
+    // Horizontale Verschiebung speichern
+    setHorizontalShift(shift) {
+        if (!this.settings.display) {
+            this.settings.display = {};
+        }
+        this.settings.display.horizontalShift = shift;
+        this.saveSettings();
+        return shift;
+    }
+    
+    // Horizontale Verschiebung abrufen
+    getHorizontalShift() {
+        return this.settings.display?.horizontalShift || 0;
+    }
+    
     // Standortdaten setzen und mit Server synchronisieren
     async setLocation(latitude, longitude, elevation, locationName) {
         this.settings.location = {

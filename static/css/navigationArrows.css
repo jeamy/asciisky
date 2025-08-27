@@ -1,0 +1,55 @@
+.navigation-arrows {
+    position: absolute;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none; /* Damit die Pfeile nicht mit dem Klicken auf Himmelskörper interferieren */
+    z-index: 9999; /* Sehr hoher z-index um sicherzustellen, dass die Pfeile über allen anderen Elementen liegen */
+}
+
+.nav-arrow {
+    font-size: 20px;
+    background-color: rgba(0, 0, 0, 0.5);
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.3s;
+    pointer-events: auto; /* Damit die Pfeile klickbar sind */
+    position: absolute;
+}
+
+.nav-arrow-left {
+    left: 42%; /* Positionierung rechts neben W */
+}
+
+.nav-arrow-right {
+    right: 42%; /* Positionierung links neben O */
+}
+
+.nav-arrow:hover {
+    background-color: rgba(0, 34, 0, 0.8);
+    transform: scale(1.1);
+    opacity: 1;
+}
+
+.nav-arrow:active {
+    transform: scale(0.95);
+}
+
+@media (max-width: 768px) {
+    .nav-arrow {
+        font-size: 18px;
+        width: 30px;
+        height: 30px;
+    }
+}

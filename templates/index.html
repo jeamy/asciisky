@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>ASCII Sky - Celestial Tracker</title>
+    <link rel="stylesheet" href="./static/css/navigationArrows.css">
     <style>
         :root {
             --primary-color: #00ff00;
@@ -291,6 +292,7 @@
                 setupLanguageButtons();
                 setupLocationButton();
                 setupMagnitudeFilters();
+                setupNavigationArrows();
                 updateUITexts();
                 
                 // Lade gespeicherte Standortdaten, falls vorhanden
@@ -397,7 +399,7 @@
             const locationBtn = document.getElementById('location-btn');
             locationBtn.addEventListener('click', () => {
                 // Lade die CSS-Datei für den Standort-Dialog
-                loadCSSFile('./static/js/dialogStyles.css');
+                loadCSSFile('./static/css/dialogStyles.css');
                 // Zeige den Dialog an
                 locationDialog.show();
             });
@@ -483,6 +485,12 @@
                 };
                 container.appendChild(btn);
             });
+        }
+        
+        // Funktion zum Einrichten der Navigationspfeile - nicht mehr benötigt, da im SkyRenderer implementiert
+        function setupNavigationArrows() {
+            // Leere Funktion, da die Pfeile jetzt im SkyRenderer erstellt werden
+            console.log('Navigation arrows are now created in SkyRenderer');
         }
         
         // Funktion zum Einrichten der Magnitude-Filter
