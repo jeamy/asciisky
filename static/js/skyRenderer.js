@@ -14,14 +14,9 @@ export class SkyRenderer {
         this.horizontalShift = settingsManager.getHorizontalShift(); 
         console.log(`Loaded horizontal shift: ${this.horizontalShift}°`);
         
-        // Lade gespeicherte Magnitude-Einstellungen oder verwende Defaults
-        this.asteroidMaxMagnitude = settingsManager.getAsteroidMagnitude() || ASTRO_CONSTANTS.DEFAULT_ASTEROID_MAX_MAGNITUDE;
-        this.cometMaxMagnitude = settingsManager.getCometMagnitude() || ASTRO_CONSTANTS.DEFAULT_COMET_MAX_MAGNITUDE;
-        
         // Lade gespeicherte Standortdaten
         this.location = settingsManager.getLocation();
         
-        console.log(`Loaded magnitude settings: Asteroids=${this.asteroidMaxMagnitude}, Comets=${this.cometMaxMagnitude}`);
         console.log(`Loaded location settings: lat=${this.location.latitude}, lon=${this.location.longitude}, elevation=${this.location.elevation}`);
         
         this.initSky();
@@ -641,35 +636,17 @@ export class SkyRenderer {
         }
     }
 
-    // Methode zum Setzen der Magnitude-Filter
-    setMagnitudeFilters(asteroidMag, cometMag) {
-        this.asteroidMaxMagnitude = asteroidMag;
-        this.cometMaxMagnitude = cometMag;
-        
-        // Speichere die Einstellungen persistent
-        settingsManager.setMagnitudeFilters(asteroidMag, cometMag);
-        
-        console.log(`Magnitude filters set and saved: Asteroids=${asteroidMag}, Comets=${cometMag}`);
-        
-        // Aktualisiere die Anzeige mit den neuen Filtern
-        this.update();
-    }
+    // Methode zum Setzen der Magnitude-Filter wurde entfernt
     
     // Methode zum Laden von Asteroiden
     async loadAsteroids() {
         try {
-            // Erstelle die URL mit Standort- und Magnitude-Parametern
+            // Erstelle die URL mit Standortparametern
             let url = API_ENDPOINTS.ASTEROIDS;
-            
-            // Verwende serverseitige Einstellungen, wenn kein lokaler Wert gesetzt ist
-            if (this.asteroidMaxMagnitude) {
-                url += `?max_magnitude=${this.asteroidMaxMagnitude}`;
-            }
             
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
-                url += url.includes('?') ? '&' : '?';
-                url += `lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+                url += `?lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
             
             const response = await fetch(url);
@@ -692,18 +669,12 @@ export class SkyRenderer {
     // Methode zum Laden von Kometen
     async loadComets() {
         try {
-            // Erstelle die URL mit Standort- und Magnitude-Parametern
+            // Erstelle die URL mit Standortparametern
             let url = API_ENDPOINTS.COMETS;
-            
-            // Verwende serverseitige Einstellungen, wenn kein lokaler Wert gesetzt ist
-            if (this.cometMaxMagnitude) {
-                url += `?max_magnitude=${this.cometMaxMagnitude}`;
-            }
             
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
-                url += url.includes('?') ? '&' : '?';
-                url += `lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+                url += `?lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
             
             const response = await fetch(url);

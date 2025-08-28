@@ -246,21 +246,7 @@
         <div class="object-list" id="object-list">
             <!-- Will be populated by JavaScript -->
         </div>
-        <div class="filter-controls">
-            <div class="magnitude-filter">
-                <label for="asteroid-magnitude">
-                    <span id="asteroid-magnitude-label"></span>
-                </label>
-                <input type="number" id="asteroid-magnitude" min="1" max="20" step="0.5" value="8">
-            </div>
-            <div class="magnitude-filter">
-                <label for="comet-magnitude">
-                    <span id="comet-magnitude-label"></span>
-                </label>
-                <input type="number" id="comet-magnitude" min="1" max="20" step="0.5" value="12">
-            </div>
-            <button id="apply-filters" class="control-btn"></button>
-        </div>
+        <!-- Magnitude-Filter wurden entfernt -->
     </div>
     
     <div id="sky-container" class="sky-container">
@@ -375,11 +361,6 @@
             // Aktualisiere den Standort-Button-Tooltip
             document.getElementById('location-btn').title = t('location_settings');
             
-            // Aktualisiere die Filter-Labels
-            document.getElementById('asteroid-magnitude-label').textContent = t('asteroid_magnitude_label');
-            document.getElementById('comet-magnitude-label').textContent = t('comet_magnitude_label');
-            document.getElementById('apply-filters').textContent = t('apply_filters');
-            
             // Aktualisiere den App-Titel mit i18n
             updateAppTitle();
         }
@@ -493,34 +474,10 @@
             console.log('Navigation arrows are now created in SkyRenderer');
         }
         
-        // Funktion zum Einrichten der Magnitude-Filter
+        // Funktion für Magnitude-Filter wurde entfernt
         function setupMagnitudeFilters() {
-            const applyButton = document.getElementById('apply-filters');
-            const asteroidInput = document.getElementById('asteroid-magnitude');
-            const cometInput = document.getElementById('comet-magnitude');
-            
-            // Setze die Standardwerte aus den Konstanten
-            asteroidInput.value = ASTRO_CONSTANTS.DEFAULT_ASTEROID_MAX_MAGNITUDE;
-            cometInput.value = ASTRO_CONSTANTS.DEFAULT_COMET_MAX_MAGNITUDE;
-            
-            // Event-Listener für den Anwenden-Button
-            applyButton.addEventListener('click', () => {
-                const asteroidMag = parseFloat(asteroidInput.value);
-                const cometMag = parseFloat(cometInput.value);
-                
-                // Validiere die Eingaben
-                if (isNaN(asteroidMag) || isNaN(cometMag)) {
-                    console.error('Ungültige Magnitude-Werte');
-                    return;
-                }
-                
-                // Aktualisiere die Filter im Renderer
-                if (renderer && renderer.setMagnitudeFilters) {
-                    renderer.setMagnitudeFilters(asteroidMag, cometMag);
-                    // Aktualisiere den Himmel mit den neuen Filtern
-                    updateSky();
-                }
-            });
+            // Leere Funktion, da die Magnitude-Filter entfernt wurden
+            console.log('Magnitude filters have been removed');
         }
     </script>
 </body>

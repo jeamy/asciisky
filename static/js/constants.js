@@ -14,9 +14,7 @@ export const ASTRO_CONSTANTS = {
     MOON_MAGNITUDE: -12.6,  // Approximate full moon magnitude
     VIENNA_LAT: 48.2082,    // Vienna latitude
     VIENNA_LON: 16.3738,    // Vienna longitude
-    VIENNA_ELEVATION: 171,  // Vienna elevation in meters
-    DEFAULT_ASTEROID_MAX_MAGNITUDE: 10.0,  // Default maximum magnitude for asteroids
-    DEFAULT_COMET_MAX_MAGNITUDE: 14.0     // Default maximum magnitude for comets
+    VIENNA_ELEVATION: 171   // Vienna elevation in meters
 };
 
 // Celestial Object Symbols - must match symbols in main.py

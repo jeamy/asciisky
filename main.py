@@ -547,17 +547,11 @@ async def startup_event():
     settings.load_settings()
 
 @app.get(API_ENDPOINT_ASTEROIDS)
-async def get_asteroids(max_magnitude: float = None, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_settings: bool = False, save_location: bool = False):
+async def get_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible asteroids."""
     try:
-        # Verwende die gespeicherte Einstellung, wenn kein Wert übergeben wurde
-        if max_magnitude is None:
-            max_magnitude = settings.get_asteroid_magnitude()
-        
-        # Speichere die Einstellung, wenn gewünscht
-        if save_settings:
-            settings.set_asteroid_magnitude(max_magnitude)
-            print(f"Saved asteroid magnitude setting: {max_magnitude}")
+        # Verwende einen festen Wert für die maximale Magnitude
+        max_magnitude = 9.0  # Fester Wert für Asteroiden
         
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()
@@ -647,17 +641,11 @@ async def get_asteroids(max_magnitude: float = None, lat: float = None, lon: flo
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(API_ENDPOINT_COMETS)
-async def get_comets(max_magnitude: float = None, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_settings: bool = False, save_location: bool = False):
+async def get_comets(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible comets."""
     try:
-        # Verwende die gespeicherte Einstellung, wenn kein Wert übergeben wurde
-        if max_magnitude is None:
-            max_magnitude = settings.get_comet_magnitude()
-        
-        # Speichere die Einstellung, wenn gewünscht
-        if save_settings:
-            settings.set_comet_magnitude(max_magnitude)
-            print(f"Saved comet magnitude setting: {max_magnitude}")
+        # Verwende einen festen Wert für die maximale Magnitude
+        max_magnitude = 12.0  # Fester Wert für Kometen
         
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()

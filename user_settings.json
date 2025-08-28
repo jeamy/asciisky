@@ -1,11 +1,9 @@
 {
-  "asteroid_max_magnitude": 10.0,
-  "comet_max_magnitude": 14.0,
-  "last_updated": "2025-08-27T18:13:16.711659",
+  "last_updated": "2025-08-28T18:42:58.000000",
   "location": {
     "latitude": 46.7632006,
     "longitude": 14.8416185,
     "elevation": 400.0,
-    "name": "St.\u202fAndr\u00e4 im Lavanttal"
+    "name": "St. Andrä im Lavanttal"
   }
 }
