@@ -98,9 +98,13 @@ export class SkyRenderer {
         // Zeichne die sichtbaren Himmelsrichtungen
         visibleDirections.forEach(pos => {
             // Berechne den effektiven Azimut mit Verschiebung
-            const effectiveAzimuth = (pos.azimuth - this.horizontalShift + 360) % 360;
-            // Berechne die Spalte basierend auf dem effektiven Azimut
-            // Wir verwenden den gesamten Bereich von 0° bis 360°
+            let effectiveAzimuth = pos.azimuth - this.horizontalShift;
+            
+            // Normalisiere den Azimut auf den Bereich 0-360
+            while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+            while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
+            
+            // Berechne die Spalte basierend auf dem normalisierten Azimut
             const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
             
             // Nur zeichnen, wenn die Spalte im sichtbaren Bereich liegt
@@ -243,7 +247,15 @@ export class SkyRenderer {
         // Berechne die Spalte basierend auf dem Azimut (0° bis 360°) mit horizontaler Verschiebung
         // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
         // Nutze den vollen Bereich 0°–360° über die gesamte Breite
-        const effectiveAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
+        
+        // Berechne den effektiven Azimut mit Verschiebung
+        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
+        
+        // Normalisiere den Azimut auf den Bereich 0-360
+        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
+        
+        // Berechne die Spalte basierend auf dem normalisierten Azimut
         const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
         
         // Speichere die Position des Objekts für spätere Verwendung
@@ -388,7 +400,12 @@ export class SkyRenderer {
                                 Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
                                 Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
                         
-                        const effectiveAzimuth = (obj.azimuth - this.horizontalShift + 360) % 360;
+                        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
+                        
+                        // Normalisiere den Azimut auf den Bereich 0-360
+                        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+                        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
+                        
                         const objCol = obj.displayCol !== undefined ? obj.displayCol :
                             Math.round((effectiveAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
                         
