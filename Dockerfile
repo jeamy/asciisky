@@ -2,11 +2,16 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and configure timezone
 RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Set timezone to Europe/Berlin (MESZ/CEST)
+ENV TZ=Europe/Berlin
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Install Python dependencies
 COPY requirements.txt .

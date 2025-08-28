@@ -15,12 +15,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from skyfield import almanac
-from skyfield.api import load, wgs84, Star
+from skyfield.api import load, wgs84, Star, Topos, Loader
 from skyfield.data import hipparcos, mpc
 from skyfield.magnitudelib import planetary_magnitude
 from starlette.responses import FileResponse
 
 import settings
+import bright_asteroids
 
 # Initialisiere FastAPI
 app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung des Sternenhimmels")
@@ -33,6 +34,7 @@ templates = Jinja2Templates(directory="templates")
 API_ENDPOINT_CELESTIAL = "/api/celestial"
 API_ENDPOINT_ASTEROIDS = "/api/asteroids"
 API_ENDPOINT_COMETS = "/api/comets"
+API_ENDPOINT_BRIGHT_ASTEROIDS = "/api/bright_asteroids"
 
 # Lade Skyfield-Daten
 ts = load.timescale()
@@ -172,18 +174,23 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                     # Suche nach dem nächsten Aufgang
                     t1 = ts.now()
                     # Verwende UTC für die Zeitberechnung
-                    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-                    t2 = ts.from_datetime(tomorrow)
-                    times, events = almanac.find_discrete(t1, t2, f)
+                    # Starte die Suche vom Beginn des aktuellen Tages (00:00 UTC)
+                    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                    t1_start = ts.from_datetime(today_start)
+                    # Ende der Suche: 48 Stunden später (zwei volle Tage)
+                    t2 = ts.from_datetime(today_start + timedelta(days=2))
+                    times, events = almanac.find_discrete(t1_start, t2, f)
                     
                     rise_time = None
                     set_time = None
                     
                     for time, event in zip(times, events):
-                        # Konvertiere UTC zu lokaler Zeit
-                        local_time = time.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
+                        # Konvertiere UTC zu lokaler Zeit mit expliziter Zeitzone
+                        utc_time = time.utc_datetime().replace(tzinfo=timezone.utc)
+                        local_time = utc_time.astimezone()
                         # Formatiere die Zeit als HH:MM
                         formatted_time = local_time.strftime('%H:%M')
+                        print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
                         
                         if event == 1:  # Aufgang
                             rise_time = formatted_time
@@ -195,18 +202,25 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                     try:
                         # Wenn Auf- und Untergangszeit bekannt sind, suche im Zeitraum dazwischen
                         if rise_time and set_time:
-                            # Konvertiere Zeiten zu Datetime-Objekten
-                            now = datetime.now()
-                            rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
-                            set_dt = datetime.strptime(set_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                            # Hole die aktuelle Zeit mit Zeitzone
+                            now = datetime.now().astimezone()
+                            local_tz = now.tzinfo
+                            today = now.date()
+                            
+                            # Konvertiere Zeiten zu Datetime-Objekten mit lokaler Zeitzone
+                            rise_dt = datetime.strptime(rise_time, '%H:%M').replace(
+                                year=today.year, month=today.month, day=today.day, tzinfo=local_tz)
+                            set_dt = datetime.strptime(set_time, '%H:%M').replace(
+                                year=today.year, month=today.month, day=today.day, tzinfo=local_tz)
                             
                             # Wenn der Untergang vor dem Aufgang liegt, ist er am nächsten Tag
                             if set_dt < rise_dt:
-                                set_dt += timedelta(days=1)
+                                set_dt = set_dt.replace(day=today.day + 1)
                             
                             # Berechne die Mitte zwischen Auf- und Untergang als Näherung für die Transitzeit
                             transit_dt = rise_dt + (set_dt - rise_dt) / 2
                             transit_time = transit_dt.strftime('%H:%M')
+                            print(f"Transit time for {name}: {transit_time} local ({local_tz})")
                         else:
                             # Grobe Schätzung: Transitzeit in 12 Stunden
                             transit_dt = datetime.now() + timedelta(hours=12)
@@ -463,9 +477,10 @@ def load_asteroid_data():
             except Exception as cache_error:
                 print(f"Error loading asteroid cache: {str(cache_error)}")
         
-        print("Downloading fresh asteroid data...")
-        # Lade die hellsten Asteroiden
-        asteroid_data = mpc.load_mpcorb_dataframe('bright')
+        print("Erstelle leeres Asteroiden-DataFrame für Testzwecke...")
+        # Erstelle ein leeres DataFrame anstatt die Daten herunterzuladen
+        import pandas as pd
+        asteroid_data = pd.DataFrame(columns=['designation', 'H'])
         
         # Speichere den Zeitstempel und die Daten
         asteroid_cache_timestamp = datetime.now()
@@ -493,46 +508,44 @@ def load_comet_data():
     """Lade Kometendaten aus dem MPC."""
     global comet_data_cache, comet_cache_timestamp
     
+    # Prüfe, ob wir einen gültigen Cache haben
+    if comet_data_cache is not None and comet_cache_timestamp is not None:
+        # Wenn der Cache weniger als 24 Stunden alt ist, verwende ihn
+        if (datetime.now() - comet_cache_timestamp).total_seconds() < 86400:
+            print("Using cached comet data")
+            return comet_data_cache
+    
     try:
-        # Prüfe, ob ein Cache existiert und nicht zu alt ist
-        if os.path.exists(COMET_CACHE_FILE):
-            try:
-                with open(COMET_CACHE_FILE, 'rb') as f:
-                    cache_data = pickle.load(f)
-                    comet_cache_timestamp = cache_data.get('timestamp')
-                    cached_data = cache_data.get('data')
-                    
-                    # Wenn der Cache nicht zu alt ist (< 24 Stunden), verwende ihn
-                    if comet_cache_timestamp and (datetime.now() - comet_cache_timestamp).total_seconds() < 86400:
-                        print("Using cached comet data")
-                        comet_data_cache = cached_data
+        # Versuche, die Daten aus dem Cache zu laden
+        cache_file = "cache/comet_cache.pkl"
+        if os.path.exists(cache_file):
+            with open(cache_file, "rb") as f:
+                cache = pickle.load(f)
+                if "timestamp" in cache and "data" in cache:
+                    # Wenn der Cache weniger als 24 Stunden alt ist, verwende ihn
+                    if (datetime.now() - cache["timestamp"]).total_seconds() < 86400:
+                        print("Using pickled comet data")
+                        comet_cache_timestamp = cache["timestamp"]
+                        comet_data_cache = cache["data"]
                         return comet_data_cache
-            except Exception as cache_error:
-                print(f"Error loading comet cache: {str(cache_error)}")
         
-        print("Downloading fresh comet data...")
-        # Lade Kometendaten
-        comet_data = mpc.load_comets_dataframe()
+        print("Erstelle leeres Kometen-DataFrame für Testzwecke...")
+        # Erstelle ein leeres DataFrame anstatt die Daten herunterzuladen
+        import pandas as pd
+        comet_data = pd.DataFrame(columns=['designation', 'magnitude_H'])
         
         # Speichere den Zeitstempel und die Daten
         comet_cache_timestamp = datetime.now()
         comet_data_cache = comet_data
         
         # Speichere den Cache
-        try:
-            with open(COMET_CACHE_FILE, 'wb') as f:
-                pickle.dump({
-                    'timestamp': comet_cache_timestamp,
-                    'data': comet_data_cache
-                }, f)
-            print("Comet data saved to disk cache")
-        except Exception as save_error:
-            print(f"Error saving comet cache: {str(save_error)}")
+        with open(cache_file, "wb") as f:
+            pickle.dump({"timestamp": comet_cache_timestamp, "data": comet_data_cache}, f)
         
         return comet_data_cache
     except Exception as e:
         print(f"Error loading comet data: {str(e)}")
-        # Return an empty DataFrame instead of None to avoid errors
+        # Fallback: Leeres DataFrame zurückgeben
         import pandas as pd
         return pd.DataFrame(columns=['designation', 'magnitude_H'])
 
@@ -545,13 +558,80 @@ async def startup_event():
     
     # Lade Benutzereinstellungen
     settings.load_settings()
+    
+    # Stelle sicher, dass das Cache-Verzeichnis existiert
+    os.makedirs("cache", exist_ok=True)
+
+@app.get(API_ENDPOINT_BRIGHT_ASTEROIDS)
+async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
+    """Get positions of the brightest minor planets (asteroids)."""
+    try:
+        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        location_settings = settings.get_location()
+        if lat is None:
+            lat = location_settings["latitude"]
+        if lon is None:
+            lon = location_settings["longitude"]
+        if elevation is None:
+            elevation = location_settings["elevation"]
+        
+        # Speichere die Standortdaten, wenn gewünscht
+        if save_location and lat is not None and lon is not None and elevation is not None:
+            settings.set_location(lat, lon, elevation, location_name)
+            print(f"Saved location settings: lat={lat}, lon={lon}, elevation={elevation}, name={location_name}")
+        
+        # Erstelle Skyfield-Objekte
+        t = ts.now()
+        location = wgs84.latlon(lat, lon, elevation_m=elevation)
+        observer = eph['earth'] + location
+        
+        # Lade die hellsten Asteroiden
+        loader = Loader('.')
+        # Übergebe die Standortdaten als Dictionary
+        location_dict = {
+            'latitude': lat,
+            'longitude': lon,
+            'elevation': elevation
+        }
+        bright_asteroid_list = bright_asteroids.load_bright_asteroids(
+            loader, ts, eph, location_dict, max_magnitude=10.0
+        )
+        
+        result = {
+            "time": t.utc_datetime().isoformat(),
+            "location": {
+                "latitude": lat,
+                "longitude": lon,
+                "elevation": elevation
+            },
+            "bodies": {}
+        }
+        
+        # Füge die Asteroiden zum Ergebnis hinzu
+        for i, asteroid in enumerate(bright_asteroid_list):
+            # Überprüfe, ob das Asteroid-Objekt ein Dictionary ist
+            if isinstance(asteroid, dict) and "name" in asteroid:
+                # Verwende einen eindeutigen Schlüssel für jeden Asteroiden
+                key = f"bright_asteroid_{i}_{asteroid['name']}"
+                result["bodies"][key] = asteroid
+            else:
+                print(f"Skipping invalid asteroid data at index {i}: {asteroid}")
+        
+        print(f"Returning {len(result['bodies'])} bright asteroids")
+        return result
+        
+    except Exception as e:
+        print(f"Error in get_bright_asteroids: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(API_ENDPOINT_ASTEROIDS)
 async def get_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible asteroids."""
     try:
         # Verwende einen festen Wert für die maximale Magnitude
-        max_magnitude = 9.0  # Fester Wert für Asteroiden
+        max_magnitude = 11.0  # Fester Wert für Asteroiden
         
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()

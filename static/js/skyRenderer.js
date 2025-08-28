@@ -705,13 +705,60 @@ export class SkyRenderer {
         }
     }
     
+    // Lade Himmelsdaten und aktualisiere die Anzeige
+    async updateSkyData() {
+        try {
+            // Hole die aktuellen Standortdaten
+            const location = settingsManager.getLocation();
+            
+            // Hole die Himmelsdaten vom Server
+            const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            
+            // Speichere die Daten
+            this.skyData = data;
+            
+            // Hole Asteroidendaten
+            const asteroidResponse = await fetch(`${API_ENDPOINTS.ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
+            if (asteroidResponse.ok) {
+                const asteroidData = await asteroidResponse.json();
+                // Füge Asteroiden zu den Himmelskörpern hinzu
+                this.skyData.bodies = { ...this.skyData.bodies, ...asteroidData.bodies };
+            }
+            
+            // Hole Kometendaten
+            const cometResponse = await fetch(`${API_ENDPOINTS.COMETS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
+            if (cometResponse.ok) {
+                const cometData = await cometResponse.json();
+                // Füge Kometen zu den Himmelskörpern hinzu
+                this.skyData.bodies = { ...this.skyData.bodies, ...cometData.bodies };
+            }
+            
+            // Hole die hellsten Asteroiden (Minor Planets)
+            const brightAsteroidResponse = await fetch(`${API_ENDPOINTS.BRIGHT_ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
+            if (brightAsteroidResponse.ok) {
+                const brightAsteroidData = await brightAsteroidResponse.json();
+                // Füge die hellsten Asteroiden zu den Himmelskörpern hinzu
+                this.skyData.bodies = { ...this.skyData.bodies, ...brightAsteroidData.bodies };
+            }
+        } catch (error) {
+            console.error('Error updating sky data:', error);
+        }
+    }
+
     // Methode zum Aktualisieren der Himmelsdaten
     async update() {
         try {
             console.log('Updating sky data...');
             
+            // Hole die aktuellen Standortdaten
+            const location = settingsManager.getLocation();
+            
             // Lade die Basisdaten (Sonne, Mond, Planeten)
-            const response = await fetch(API_ENDPOINTS.SKY);
+            const response = await fetch(`${API_ENDPOINTS.SKY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
             if (!response.ok) {
                 throw new Error(`HTTP error loading sky data! status: ${response.status}`);
             }
@@ -722,6 +769,15 @@ export class SkyRenderer {
             // Lade zusätzlich Asteroiden und Kometen mit den aktuellen Einstellungen
             await this.loadAsteroids();
             await this.loadComets();
+            
+            // Lade die hellsten Asteroiden
+            const brightAsteroidResponse = await fetch(`${API_ENDPOINTS.BRIGHT_ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`);
+            if (brightAsteroidResponse.ok) {
+                const brightAsteroidData = await brightAsteroidResponse.json();
+                // Füge die hellsten Asteroiden zu den Himmelskörpern hinzu
+                this.celestialData.bodies = { ...this.celestialData.bodies, ...brightAsteroidData.bodies };
+                console.log('Bright asteroids loaded successfully:', Object.keys(brightAsteroidData.bodies).length);
+            }
             
             // Aktualisiere die Anzeige
             this.render();
