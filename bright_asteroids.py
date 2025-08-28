@@ -6,11 +6,11 @@ from skyfield import almanac
 import numpy as np
 import os
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import gzip
 import urllib.request
-import urllib.request
 from skyfield.data import mpc
+import math
 
 # Konstanten für Cache-Dateien
 ASTEROID_CACHE_FILE = 'cache/asteroid_cache.pkl'
@@ -27,21 +27,48 @@ os.makedirs("cache", exist_ok=True)
 
 def download_mpcorb_file():
     """
-    Lädt die MPCORB.DAT.gz-Datei herunter, wenn sie nicht existiert
+    Lädt die MPCORB.DAT.gz-Datei von der Minor Planet Center-Website herunter
     """
-    if not os.path.exists(MPCORB_FILE):
+    try:
         print(f"Downloading MPCORB.DAT.gz from {MPCORB_URL}...")
-        try:
-            os.makedirs(os.path.dirname(MPCORB_FILE), exist_ok=True)
-            urllib.request.urlretrieve(MPCORB_URL, MPCORB_FILE)
-            print(f"Downloaded MPCORB.DAT.gz to {MPCORB_FILE}")
+        # Stelle sicher, dass das Verzeichnis existiert
+        os.makedirs(os.path.dirname(MPCORB_FILE), exist_ok=True)
+        
+        # Datei herunterladen mit Fortschrittsanzeige
+        print("Starting download...")
+        with urllib.request.urlopen(MPCORB_URL) as response, open(MPCORB_FILE, 'wb') as out_file:
+            file_size = int(response.info().get('Content-Length', 0))
+            print(f"File size: {file_size / (1024*1024):.1f} MB")
+            
+            downloaded = 0
+            block_size = 8192
+            while True:
+                buffer = response.read(block_size)
+                if not buffer:
+                    break
+                    
+                downloaded += len(buffer)
+                out_file.write(buffer)
+                
+                # Fortschritt alle 1MB anzeigen
+                if downloaded % (1024*1024) < block_size:
+                    print(f"Downloaded: {downloaded / (1024*1024):.1f} MB ({downloaded * 100 / file_size:.1f}%)")
+        
+        print(f"Download complete. File saved to {MPCORB_FILE}")
+        
+        # Überprüfe, ob die Datei korrekt heruntergeladen wurde
+        if os.path.exists(MPCORB_FILE) and os.path.getsize(MPCORB_FILE) > 0:
+            print(f"File size: {os.path.getsize(MPCORB_FILE) / (1024*1024):.1f} MB")
             return True
-        except Exception as e:
-            print(f"Error downloading MPCORB.DAT.gz: {e}")
+        else:
+            print("Download failed: File is empty or does not exist")
             return False
+    except Exception as e:
+        print(f"Error downloading MPCORB.DAT.gz: {e}")
+        return False
     return True
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=11.0, use_cache=True):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=12.0, use_cache=True):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     
@@ -88,8 +115,15 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=11.0
         if cache_age.total_seconds() > CACHE_VALIDITY_HOURS * 3600:
             print(f"Cache is too old ({cache_age.total_seconds() / 3600:.1f} hours), not using it")
             use_cache = False
+        else:
+            print(f"Cache is valid (age: {cache_age.total_seconds() / 3600:.1f} hours)")
     else:
         print("No cache file found or cache disabled")
+        use_cache = False
+        
+    # Wenn MPCORB_FILE nicht existiert, erzwinge das Herunterladen, unabhängig vom Cache
+    if not os.path.exists(MPCORB_FILE):
+        print(f"MPCORB.DAT.gz file not found at {MPCORB_FILE}, forcing download")
         use_cache = False
     
     asteroid_list = []
@@ -126,141 +160,103 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=11.0
             print(f"MPCORB.DAT.gz file not found at {MPCORB_FILE}")
             if not download_mpcorb_file():
                 print("Failed to download MPCORB.DAT.gz")
+                # Keine Demo-Daten verwenden, stattdessen leere Liste zurückgeben
                 return []
         
         try:
             print(f"Loading asteroid data from {MPCORB_FILE}...")
-            
-            # Begrenze die Anzahl der zu ladenden Asteroiden
+            # Begrenze die Anzahl der zu verarbeitenden Asteroiden
             max_asteroids = 100
             asteroid_list = []
             count = 0
-            
-            with gzip.open(MPCORB_FILE, 'rt') as f:
-                # Überspringe den Header
-                for line in f:
-                    if line.startswith('00001'):
-                        break
-                
-                # Parse die Daten für die hellsten Asteroiden
-                for line in f:
-                    if count >= max_asteroids:
-                        break
-                    
+
+            # Lade das MPCORB-DataFrame mit Skyfield – gzipped Datei im Binärmodus öffnen (bytes)
+            with gzip.open(MPCORB_FILE, 'rb') as f:
+                df = mpc.load_mpcorb_dataframe(f)
+
+            # Filtere gültige Einträge mit H und sortiere nach Helligkeit (kleiner = heller)
+            if 'H' in df.columns:
+                df = df.dropna(subset=['H']).sort_values(by='H')
+            else:
+                print("MPCORB dataframe missing 'H' column; returning empty list")
+                return []
+
+            # Verarbeite die hellsten Einträge
+            for idx, row in df.iterrows():
+                if count >= max_asteroids:
+                    break
+                try:
+                    # Skyfield-Orbit für das Objekt
+                    asteroid_obj = mpc.mpcorb_orbit(row, ts, eph)
+
+                    # Beobachtete Position und Alt/Az
+                    apparent = observer.at(t).observe(asteroid_obj).apparent()
+                    alt, az, distance = apparent.altaz()
+
+                    # Distanzen in AU
+                    delta_au = float(distance.au)
+                    r_au = float(sun.at(t).observe(asteroid_obj).distance().au)
+
+                    # Magnitude (vereinfachtes HG0-Modell ohne Phasenfunktion)
+                    h_mag = float(row['H'])
+                    apparent_magnitude = h_mag + 5.0 * np.log10(max(r_au * delta_au, 1e-6))
+
+                    # Auf-/Untergang berechnen (lokale Zeiten HH:MM)
+                    rise_time = None
+                    set_time = None
+                    transit_time = None
                     try:
-                        # Parse die Zeile nach dem MPC-Format
-                        number = line[0:7].strip()  # Asteroid-Nummer
-                        name = line[166:194].strip()  # Name des Asteroiden
-                        
-                        # Wenn kein Name vorhanden ist, verwende die provisorische Bezeichnung
-                        if not name:
-                            name = line[8:18].strip()
-                        
-                        # Absolute Magnitude (H)
-                        h_mag = float(line[8:13].strip())
-                        
-                        # Nur Asteroiden mit einer Magnitude unter einem bestimmten Wert laden
-                        if h_mag > 12.0:  # Nur die hellsten Asteroiden laden
-                            continue
-                        
-                        # Parse die Bahnelemente
-                        epoch = line[20:25].strip()
-                        mean_anomaly = float(line[26:35].strip())
-                        argument_of_perihelion = float(line[37:46].strip())
-                        longitude_of_ascending_node = float(line[48:57].strip())
-                        inclination = float(line[59:68].strip())
-                        eccentricity = float(line[70:79].strip())
-                        semimajor_axis = float(line[92:103].strip())
-                        
-                        # Berechne die Position mit vereinfachten Annahmen
-                        # Dies ist eine Approximation, da die vollständige Berechnung komplex ist
-                        
-                        # Berechne die mittlere Anomalie zum aktuellen Zeitpunkt
-                        # Vereinfachte Annahme: Epoche ist J2000.0
-                        days_since_j2000 = t.tt - 2451545.0
-                        mean_motion = 0.9856076686 / (semimajor_axis ** 1.5)  # Grad pro Tag
-                        current_mean_anomaly = (mean_anomaly + mean_motion * days_since_j2000) % 360
-                        
-                        # Vereinfachte Berechnung der Position in der Bahnebene
-                        # Wir verwenden die mittlere Anomalie als Näherung für die wahre Anomalie
-                        true_anomaly = current_mean_anomaly * np.pi / 180.0
-                        
-                        # Berechne die Position in der Bahnebene
-                        r = semimajor_axis * (1 - eccentricity**2) / (1 + eccentricity * np.cos(true_anomaly))
-                        
-                        # Berechne die Position im ekliptischen Koordinatensystem
-                        x = r * (np.cos(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) - 
-                              np.sin(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
-                        y = r * (np.sin(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) + 
-                              np.cos(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
-                        z = r * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.sin(inclination * np.pi/180)
-                        
-                        # Konvertiere in äquatoriale Koordinaten
-                        # Vereinfachte Annahme: Ekliptik-Neigung ist 23.4 Grad
-                        epsilon = 23.4 * np.pi / 180.0
-                        xeq = x
-                        yeq = y * np.cos(epsilon) - z * np.sin(epsilon)
-                        zeq = y * np.sin(epsilon) + z * np.cos(epsilon)
-                        
-                        # Berechne Rektaszension und Deklination
-                        ra_rad = np.arctan2(yeq, xeq)
-                        if ra_rad < 0:
-                            ra_rad += 2 * np.pi
-                        ra_deg = ra_rad * 180.0 / np.pi
-                        
-                        dec_rad = np.arcsin(zeq / np.sqrt(xeq**2 + yeq**2 + zeq**2))
-                        dec_deg = dec_rad * 180.0 / np.pi
-                        
-                        # Berechne die Entfernung
-                        distance_au = np.sqrt(xeq**2 + yeq**2 + zeq**2)
-                        
-                        # Berechne die scheinbare Magnitude
-                        apparent_magnitude = h_mag + 5 * np.log10(distance_au)
-                        
-                        # Berechne Aufgangs-, Untergangs- und Transitzeiten
-                        # Vereinfachte Berechnung
-                        hour_angle = (t.gmst.hours * 15 - ra_deg) % 360
-                        if hour_angle > 180:
-                            hour_angle -= 360
-                        
-                        # Berechne die Stunden bis zum Transit
-                        hours_to_transit = -hour_angle / 15
-                        if hours_to_transit < -12:
-                            hours_to_transit += 24
-                        if hours_to_transit > 12:
-                            hours_to_transit -= 24
-                        
-                        # Berechne die Transit-, Aufgangs- und Untergangszeiten
-                        transit_time = t.utc_datetime() + timedelta(hours=hours_to_transit)
-                        rise_time = transit_time - timedelta(hours=6)
-                        set_time = transit_time + timedelta(hours=6)
-                        
-                        # Füge den Asteroiden zur Liste hinzu
-                        asteroid_data = {
-                            "name": name if name else f"Asteroid {number}",
-                            "number": number,
-                            "magnitude": apparent_magnitude,
-                            "ra": ra_deg,
-                            "dec": dec_deg,
-                            "distance": distance_au,
-                            "rise_time": rise_time.isoformat(),
-                            "set_time": set_time.isoformat(),
-                            "transit_time": transit_time.isoformat(),
-                            "type": "asteroid"
-                        }
-                        
-                        asteroid_list.append(asteroid_data)
-                        count += 1
-                        
-                        if count % 10 == 0:
-                            print(f"Processed {count} asteroids...")
-                        
+                        f_rs = almanac.risings_and_settings(eph, asteroid_obj, topos)
+                        # Suche vom heutigen 00:00 UTC bis +2 Tage
+                        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                        t1 = ts.from_datetime(today_start)
+                        t2 = ts.from_datetime(today_start + timedelta(days=2))
+                        times, events = almanac.find_discrete(t1, t2, f_rs)
+                        for time_i, event in zip(times, events):
+                            local_time = time_i.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
+                            formatted = local_time.strftime('%H:%M')
+                            if event == 1:
+                                rise_time = formatted
+                            else:
+                                set_time = formatted
+                        # Transit als Mitte zwischen Auf- und Untergang (falls beide vorhanden)
+                        if rise_time and set_time:
+                            now_local = datetime.now().astimezone()
+                            today = now_local.date()
+                            rt = datetime.strptime(rise_time, '%H:%M').replace(year=today.year, month=today.month, day=today.day, tzinfo=now_local.tzinfo)
+                            st = datetime.strptime(set_time, '%H:%M').replace(year=today.year, month=today.month, day=today.day, tzinfo=now_local.tzinfo)
+                            if st < rt:
+                                st += timedelta(days=1)
+                            transit_dt = rt + (st - rt) / 2
+                            transit_time = transit_dt.strftime('%H:%M')
                     except Exception as e:
-                        print(f"Error parsing asteroid line: {e}")
-                        continue
-            
+                        # Zeiten sind optional; bei Fehlern weiterfahren
+                        pass
+
+                    name = str(row.get('designation', '')).strip() or str(row.get('name', '')).strip() or f"Asteroid_{idx}"
+                    asteroid_data = {
+                        "name": name,
+                        "symbol": "\u2022",
+                        "type": "asteroid",
+                        "magnitude": float(apparent_magnitude),
+                        "altitude": float(alt.degrees),
+                        "azimuth": float(az.degrees),
+                        "distance": float(delta_au),
+                        "rise_time": rise_time,
+                        "set_time": set_time,
+                        "transit_time": transit_time
+                    }
+                    asteroid_list.append(asteroid_data)
+                    count += 1
+
+                    if count % 10 == 0:
+                        print(f"Processed {count} asteroids...")
+                except Exception as e:
+                    print(f"Error processing asteroid row {idx}: {e}")
+                    continue
+
             print(f"Loaded {len(asteroid_list)} asteroids from MPCORB.DAT.gz")
-            
+        
         except Exception as e:
             print(f"Error loading asteroid data from MPCORB.DAT.gz: {e}")
             print("Failed to load asteroid data, returning empty list")

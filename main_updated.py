@@ -410,8 +410,8 @@ async def get_asteroids(max_magnitude: float = None, lat: float = None, lon: flo
                 result["bodies"][f"asteroid_{designation}"] = asteroid_data
                 count += 1
                 
-                # Limit to 50 asteroids for performance
-                if count >= 50:
+                # Limit to 100 asteroids for performance
+                if count >= 100:
                     break
                     
             except Exception as e:
