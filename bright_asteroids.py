@@ -18,13 +18,28 @@ COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
+# Maximale absolute Magnitude für Asteroiden (kleinere Werte = hellere Objekte)
 MAX_ASTEROIDS_MAGNITUDE = 8.0
+# Gravitationskonstante der Sonne für Skyfield
+GM_SUN = 1.32712440041e20
 
 # Cache-Gültigkeitsdauer in Stunden
 CACHE_VALIDITY_HOURS = 6
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
+
+def format_time(dt):
+    """
+    Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM Uhr'
+    Gibt None zurück, wenn dt None ist
+    """
+    if dt is None:
+        return None
+    
+    # Konvertiere zu lokalem Zeitformat
+    local_time = dt.astimezone()
+    return f"{local_time.hour:02d}:{local_time.minute:02d} Uhr"
 
 def download_mpcorb_file():
     """
@@ -217,139 +232,162 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                         eccentricity = float(line[70:79].strip())
                         semimajor_axis = float(line[92:103].strip())
                         
-                        # Berechne die Position mit vereinfachten Annahmen
-                        # Dies ist eine Approximation, da die vollständige Berechnung komplex ist
+                        # Verwende Skyfield für präzise Berechnungen der Asteroiden-Position
+                        try:
+                            # Erstelle ein Orbit-Objekt mit Skyfield für den Asteroiden
+                            asteroid_data = {
+                                'designation': name,
+                                'name': name,
+                                'H': h_mag,
+                                'G': 0.15,  # Standardwert für den Steigungsparameter
+                                'epoch': epoch,
+                                'M': mean_anomaly,
+                                'peri': argument_of_perihelion,
+                                'node': longitude_of_ascending_node,
+                                'incl': inclination,
+                                'e': eccentricity,
+                                'a': semimajor_axis,
+                                'epoch_year': 2000.0  # J2000.0 Epoche
+                            }
+                            
+                            # Erstelle ein Orbit-Objekt mit Skyfield
+                            asteroid_orbit = mpc.mpcorb_orbit(asteroid_data, ts, GM_SUN)
+                            
+                            # Berechne die Position des Asteroiden relativ zur Sonne
+                            sun = eph['sun']
+                            asteroid = sun + asteroid_orbit
+                            
+                            # Beobachte den Asteroiden von der Erde aus
+                            # Berücksichtigt automatisch die Lichtlaufzeit
+                            astrometric = observer.at(t).observe(asteroid)
+                            
+                            # Berechne die scheinbare Position (mit Aberration und Lichtablenkung)
+                            apparent = astrometric.apparent()
+                            
+                            # Berechne Rektaszension und Deklination
+                            ra, dec, distance = apparent.radec()
+                            ra_deg = ra.hours * 15.0  # Umrechnung von Stunden in Grad
+                            dec_deg = dec.degrees
+                            
+                            # Berechne die Entfernung in AU und runde auf 3 Dezimalstellen
+                            distance_au = round(distance.au, 3)
+                            
+                            # Berechne die scheinbare Helligkeit
+                            # Korrekte Formel für scheinbare Magnitude:
+                            # m = H + 5*log10(r*d) - 2.5*log10((1-G)*phi1 + G*phi2)
+                            
+                            # Berechne die Entfernung zur Sonne
+                            sun_distance = np.sqrt(asteroid_orbit.xyz_au(t)[0]**2 + 
+                                                  asteroid_orbit.xyz_au(t)[1]**2 + 
+                                                  asteroid_orbit.xyz_au(t)[2]**2)
+                            
+                            # Berechne den Phasenwinkel (Winkel Sonne-Asteroid-Erde)
+                            earth_pos = earth.at(t).position.au
+                            asteroid_pos = asteroid.at(t).position.au
+                            sun_pos = sun.at(t).position.au
+                            
+                            # Vektoren berechnen
+                            earth_to_asteroid = asteroid_pos - earth_pos
+                            sun_to_asteroid = asteroid_pos - sun_pos
+                            
+                            # Normalisieren
+                            earth_to_asteroid_norm = earth_to_asteroid / np.linalg.norm(earth_to_asteroid)
+                            sun_to_asteroid_norm = sun_to_asteroid / np.linalg.norm(sun_to_asteroid)
+                            
+                            # Phasenwinkel berechnen
+                            phase_angle = np.arccos(np.dot(earth_to_asteroid_norm, sun_to_asteroid_norm))
+                            phase_angle_deg = phase_angle * 180.0 / np.pi
+                            
+                            # Berechne die Phasenfunktionen
+                            G = 0.15  # Standardwert für den Steigungsparameter
+                            phi1 = np.exp(-3.33 * np.tan(phase_angle/2)**0.63)
+                            phi2 = np.exp(-1.87 * np.tan(phase_angle/2)**1.22)
+                            
+                            # Berechne die scheinbare Magnitude
+                            apparent_magnitude = round(h_mag + 5 * np.log10(distance_au * sun_distance) - 
+                                                      2.5 * np.log10((1-G)*phi1 + G*phi2), 1)
+                        except Exception as e:
+                            print(f"Fehler bei der Berechnung für Asteroid {name}: {str(e)}")
+                            # Setze Standardwerte bei Fehler
+                            ra_deg = 0
+                            dec_deg = 0
+                            distance_au = 0
+                            apparent_magnitude = 99.9  # Sehr dunkel (nicht sichtbar)
                         
-                        # Berechne die mittlere Anomalie zum aktuellen Zeitpunkt
-                        # Vereinfachte Annahme: Epoche ist J2000.0
-                        days_since_j2000 = t.tt - 2451545.0
-                        mean_motion = 0.9856076686 / (semimajor_axis ** 1.5)  # Grad pro Tag
-                        current_mean_anomaly = (mean_anomaly + mean_motion * days_since_j2000) % 360
-                        
-                        # Vereinfachte Berechnung der Position in der Bahnebene
-                        # Wir verwenden die mittlere Anomalie als Näherung für die wahre Anomalie
-                        true_anomaly = current_mean_anomaly * np.pi / 180.0
-                        
-                        # Berechne die Position in der Bahnebene
-                        r = semimajor_axis * (1 - eccentricity**2) / (1 + eccentricity * np.cos(true_anomaly))
-                        
-                        # Berechne die Position im ekliptischen Koordinatensystem
-                        x = r * (np.cos(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) - 
-                              np.sin(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
-                        y = r * (np.sin(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) + 
-                              np.cos(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
-                        z = r * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.sin(inclination * np.pi/180)
-                        
-                        # Konvertiere in äquatoriale Koordinaten
-                        # Vereinfachte Annahme: Ekliptik-Neigung ist 23.4 Grad
-                        epsilon = 23.4 * np.pi / 180.0
-                        xeq = x
-                        yeq = y * np.cos(epsilon) - z * np.sin(epsilon)
-                        zeq = y * np.sin(epsilon) + z * np.cos(epsilon)
-                        
-                        # Berechne Rektaszension und Deklination
-                        ra_rad = np.arctan2(yeq, xeq)
-                        if ra_rad < 0:
-                            ra_rad += 2 * np.pi
-                        ra_deg = ra_rad * 180.0 / np.pi
-                        
-                        dec_rad = np.arcsin(zeq / np.sqrt(xeq**2 + yeq**2 + zeq**2))
-                        dec_deg = dec_rad * 180.0 / np.pi
-                        
-                        # Berechne die Entfernung
-                        # Konvertiere in AU (Astronomische Einheiten) und runde auf 3 Dezimalstellen
-                        distance_au = round(np.sqrt(xeq**2 + yeq**2 + zeq**2), 3)
-                        
-                        # Berechne die scheinbare Magnitude
-                        # Korrekte Formel: m = H + 5*log10(r*d) - 2.5*log10((1-G)*phi1 + G*phi2)
-                        # Vereinfachte Version: m = H + 5*log10(r*d)
-                        # Wobei r = Entfernung zum Asteroiden, d = Entfernung zur Sonne
-                        # G ist der Steigungsparameter (typischerweise 0.15)
-                        # Für eine bessere Approximation berücksichtigen wir die Phasenwinkel-Effekte
-                        
-                        # Vereinfachte Berechnung der scheinbaren Magnitude
-                        phase_angle_correction = 0.0  # Vereinfachte Annahme
-                        apparent_magnitude = round(h_mag + 5 * np.log10(distance_au) - phase_angle_correction, 1)
-                        
-                        # Berechne Aufgangs-, Untergangs- und Transitzeiten
-                        # Vereinfachte Berechnung
-                        # t.gmst ist ein numerischer Wert in Stunden, kein Objekt mit hours-Attribut
-                        hour_angle = (t.gmst * 15 - ra_deg) % 360
-                        if hour_angle > 180:
-                            hour_angle -= 360
-                        
-                        # Berechne die Stunden bis zum Transit
-                        hours_to_transit = -hour_angle / 15
-                        if hours_to_transit < -12:
-                            hours_to_transit += 24
-                        if hours_to_transit > 12:
-                            hours_to_transit -= 24
-                        
-                        # Berechne die Transit-, Aufgangs- und Untergangszeiten
-                        transit_time = t.utc_datetime() + timedelta(hours=hours_to_transit)
-                        
-                        # Berechne Aufgangs- und Untergangszeiten basierend auf der Deklination
-                        # Für Objekte nahe dem Äquator ist die Zeit vom Aufgang bis zum Transit etwa 6 Stunden
-                        # Für Objekte weiter nördlich oder südlich variiert diese Zeit
-                        
-                        # Berechne den Kosinus des Stundenwinkels beim Aufgang/Untergang
-                        lat_rad = lat * math.pi / 180.0
-                        cos_ha = -math.tan(lat_rad) * math.tan(dec_rad)
-                        
-                        # Begrenze den Wert auf [-1, 1] für den Fall, dass das Objekt zirkumpolar ist
-                        cos_ha = max(-1.0, min(1.0, cos_ha))
-                        
-                        # Berechne den Stundenwinkel in Stunden
-                        ha_hours_at_horizon = math.acos(cos_ha) * 12.0 / math.pi
-                        
-                        # Berechne Aufgangs- und Untergangszeiten
-                        rise_time = transit_time - timedelta(hours=ha_hours_at_horizon)
-                        set_time = transit_time + timedelta(hours=ha_hours_at_horizon)
-                        
-                        # Berechne Altitude und Azimuth für den Beobachterstandort
-                        # Konvertiere RA/Dec zu Altitude/Azimuth
-                        
-                        # Konvertiere RA/Dec zu Stunden/Winkel
-                        ra_hours = ra_deg / 15.0
-                        dec_rad = dec_deg * math.pi / 180.0
-                        
-                        # Berechne den Stundenwinkel direkt ohne GMST
-                        # Vereinfachte Berechnung des Stundenwinkels
-                        current_time = t.utc_datetime()
-                        hours_since_midnight = current_time.hour + current_time.minute/60.0 + current_time.second/3600.0
-                        local_sidereal_time = (hours_since_midnight + lon/15.0) % 24
-                        ha_hours = (local_sidereal_time - ra_hours) % 24
-                        if ha_hours > 12:
-                            ha_hours -= 24
-                        ha_deg = ha_hours * 15.0
-                        ha_rad = ha_deg * math.pi / 180.0
-                        
-                        # Konvertiere Breite zu Radiant
-                        lat_rad = lat * math.pi / 180.0
-                        
-                        # Berechne Altitude
-                        sin_alt = math.sin(dec_rad) * math.sin(lat_rad) + math.cos(dec_rad) * math.cos(lat_rad) * math.cos(ha_rad)
-                        alt_rad = math.asin(sin_alt)
-                        alt_deg = alt_rad * 180.0 / math.pi
-                        
-                        # Berechne Azimuth
-                        cos_az = (math.sin(dec_rad) - math.sin(alt_rad) * math.sin(lat_rad)) / (math.cos(alt_rad) * math.cos(lat_rad))
-                        cos_az = max(-1.0, min(1.0, cos_az))  # Begrenze auf [-1, 1]
-                        az_rad = math.acos(cos_az)
-                        
-                        # Korrigiere den Quadranten für Azimuth
-                        if math.sin(ha_rad) >= 0:
-                            az_rad = 2 * math.pi - az_rad
-                        
-                        az_deg = az_rad * 180.0 / math.pi
-                        
-                        # Füge den Asteroiden zur Liste hinzu
-                        # Formatiere die Zeiten für die Anzeige
-                        # Format: "HH:MM Uhr" für die lokale Zeit
-                        def format_time(dt):
-                            # Konvertiere zu lokalem Zeitformat ohne Zeitzone und ISO-Format
-                            local_time = dt.astimezone()
-                            return f"{local_time.hour:02d}:{local_time.minute:02d} Uhr"
+                            # Berechne Aufgangs-, Untergangs- und Transitzeiten mit Skyfield
+                            # Erstelle ein Zeitfenster für die Berechnung (24 Stunden)
+                            start_time = t.utc_datetime()
+                            start = ts.utc(start_time.year, start_time.month, start_time.day, 
+                                          start_time.hour, start_time.minute, start_time.second)
+                            end = ts.utc(start_time.year, start_time.month, start_time.day + 1, 
+                                        start_time.hour, start_time.minute, start_time.second)
+                            
+                            # Erstelle eine Zeitreihe mit 5-Minuten-Intervallen
+                            time_range = ts.utc(start.utc_datetime() + 
+                                              np.arange(0, 24*60, 5) * timedelta(minutes=1))
+                            
+                            # Berechne die Höhe des Asteroiden über dem Horizont für jede Zeit
+                            altitude_at_times = []
+                            for time_i in time_range:
+                                pos = observer.at(time_i).observe(asteroid).apparent()
+                                alt, az, _ = pos.altaz()
+                                altitude_at_times.append((time_i, alt.degrees))
+                            
+                            # Finde Aufgang, Untergang und Transit
+                            rise_time = None
+                            set_time = None
+                            transit_time = None
+                            max_alt = -90
+                            
+                            # Suche nach Aufgang (Übergang von unter zu über dem Horizont)
+                            for i in range(1, len(altitude_at_times)):
+                                prev_alt = altitude_at_times[i-1][1]
+                                curr_alt = altitude_at_times[i][1]
+                                
+                                # Aufgang: von unter zu über dem Horizont
+                                if prev_alt < 0 and curr_alt >= 0:
+                                    # Lineare Interpolation für genauere Zeit
+                                    fraction = -prev_alt / (curr_alt - prev_alt)
+                                    minutes_diff = 5 * fraction
+                                    rise_time = altitude_at_times[i-1][0].utc_datetime() + timedelta(minutes=minutes_diff)
+                                
+                                # Untergang: von über zu unter dem Horizont
+                                if prev_alt >= 0 and curr_alt < 0:
+                                    # Lineare Interpolation für genauere Zeit
+                                    fraction = prev_alt / (prev_alt - curr_alt)
+                                    minutes_diff = 5 * fraction
+                                    set_time = altitude_at_times[i-1][0].utc_datetime() + timedelta(minutes=minutes_diff)
+                                
+                                # Höchststand: höchste Altitude
+                                if curr_alt > max_alt:
+                                    max_alt = curr_alt
+                                    transit_time = altitude_at_times[i][0].utc_datetime()
+                            
+                            # Fallback für zirkumpolare Objekte oder Objekte, die nie aufgehen
+                            if rise_time is None:
+                                if max_alt >= 0:  # Zirkumpolar (immer über dem Horizont)
+                                    rise_time = start.utc_datetime()
+                                else:  # Nie über dem Horizont
+                                    rise_time = None
+                            
+                            if set_time is None:
+                                if max_alt >= 0:  # Zirkumpolar (immer über dem Horizont)
+                                    set_time = end.utc_datetime()
+                                else:  # Nie über dem Horizont
+                                    set_time = None
+                            
+                            if transit_time is None:
+                                transit_time = start.utc_datetime() + timedelta(hours=12)  # Fallback
+                                
+                            # Berechne Altitude und Azimuth mit Skyfield
+                            try:
+                                alt, az, _ = apparent.altaz()
+                                alt_deg = alt.degrees
+                                az_deg = az.degrees
+                            except Exception as e:
+                                print(f"Fehler bei der Berechnung von Alt/Az für Asteroid {name}: {str(e)}")
+                                alt_deg = 0
+                                az_deg = 0
                         
                         asteroid_data = {
                             "name": name if name else f"Asteroid {number}",
