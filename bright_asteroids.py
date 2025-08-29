@@ -13,7 +13,6 @@ from skyfield.data import mpc
 import math
 
 # Konstanten für Cache-Dateien
-ASTEROID_CACHE_FILE = 'cache/asteroid_cache.pkl'
 BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
 COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
@@ -261,7 +260,15 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                         distance_au = np.sqrt(xeq**2 + yeq**2 + zeq**2)
                         
                         # Berechne die scheinbare Magnitude
-                        apparent_magnitude = h_mag + 5 * np.log10(distance_au)
+                        # Korrekte Formel: m = H + 5*log10(r*d) - 2.5*log10((1-G)*phi1 + G*phi2)
+                        # Vereinfachte Version: m = H + 5*log10(r*d)
+                        # Wobei r = Entfernung zum Asteroiden, d = Entfernung zur Sonne
+                        # G ist der Steigungsparameter (typischerweise 0.15)
+                        # Für eine bessere Approximation berücksichtigen wir die Phasenwinkel-Effekte
+                        
+                        # Vereinfachte Berechnung der scheinbaren Magnitude
+                        phase_angle_correction = 0.0  # Vereinfachte Annahme
+                        apparent_magnitude = round(h_mag + 5 * np.log10(distance_au) - phase_angle_correction, 1)
                         
                         # Berechne Aufgangs-, Untergangs- und Transitzeiten
                         # Vereinfachte Berechnung

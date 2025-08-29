@@ -679,7 +679,7 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
             'elevation': elevation
         }
         bright_asteroid_list = bright_asteroids.load_bright_asteroids(
-            loader, ts, eph, location_dict, max_magnitude=10.0
+            loader, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_ASTEROIDS_MAGNITUDE
         )
         
         result = {
