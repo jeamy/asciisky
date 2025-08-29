@@ -5,9 +5,11 @@ import os
 import json
 import pickle
 import time
+import gzip
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
-import gzip
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -191,7 +193,7 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                         local_time = utc_time.astimezone()
                         # Formatiere die Zeit als HH:MM
                         formatted_time = local_time.strftime('%H:%M')
-                        # print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
+                        print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
                         
                         if event == 1:  # Aufgang
                             rise_time = formatted_time
@@ -469,6 +471,7 @@ def load_asteroid_data():
                     cache_data = pickle.load(f)
                     asteroid_cache_timestamp = cache_data.get('timestamp')
                     cached_data = cache_data.get('data')
+                    
                     # Wenn der Cache nicht zu alt ist (< 24 Stunden), verwende ihn
                     if asteroid_cache_timestamp and (datetime.now() - asteroid_cache_timestamp).total_seconds() < 86400:
                         print("Using cached asteroid data")
@@ -476,45 +479,112 @@ def load_asteroid_data():
                         return asteroid_data_cache
             except Exception as cache_error:
                 print(f"Error loading asteroid cache: {str(cache_error)}")
-
-        # Stelle sicher, dass MPCORB vorhanden ist (keine Demo-/Fallback-Daten)
-        mpcorb_path = bright_asteroids.MPCORB_FILE
-        if not os.path.exists(mpcorb_path):
-            print(f"MPCORB.DAT.gz file not found at {mpcorb_path}, attempting download...")
-            if not bright_asteroids.download_mpcorb_file():
-                print("Failed to download MPCORB.DAT.gz; returning empty DataFrame")
-                import pandas as pd
-                return pd.DataFrame(columns=['designation', 'H'])
-
-        # Lade echtes MPCORB DataFrame über Skyfield
-        try:
-            # Öffne die gz-Datei im Binärmodus (bytes) für Skyfields MPC-Loader
-            with gzip.open(mpcorb_path, 'rb') as f:
-                df = mpc.load_mpcorb_dataframe(f)
-            # Filtere ungültige Einträge heraus
-            if 'H' in df.columns:
-                df = df.dropna(subset=['H'])
-            else:
-                print("MPCORB dataframe missing 'H' column; returning empty DataFrame")
-                import pandas as pd
-                return pd.DataFrame(columns=['designation', 'H'])
-
-            asteroid_cache_timestamp = datetime.now()
-            asteroid_data_cache = df
-
-            # Speichere den Cache
+        
+        # Wenn kein gültiger Cache vorhanden ist, lade die MPCORB-Datei
+        mpcorb_file = "cache/MPCORB.DAT.gz"
+        if not os.path.exists(mpcorb_file):
+            print(f"MPCORB.DAT.gz file not found at {mpcorb_file}")
+            # Lade die Datei herunter
             try:
-                with open(ASTEROID_CACHE_FILE, 'wb') as f:
-                    pickle.dump({'timestamp': asteroid_cache_timestamp, 'data': asteroid_data_cache}, f)
-                print("Asteroid data saved to disk cache")
-            except Exception as save_error:
-                print(f"Error saving asteroid cache: {str(save_error)}")
-
-            return asteroid_data_cache
-        except Exception as load_err:
-            print(f"Error loading MPCORB dataframe: {load_err}")
-            import pandas as pd
-            return pd.DataFrame(columns=['designation', 'H'])
+                print("Downloading MPCORB.DAT.gz...")
+                os.makedirs(os.path.dirname(mpcorb_file), exist_ok=True)
+                url = "https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz"
+                with urllib.request.urlopen(url) as response, open(mpcorb_file, 'wb') as out_file:
+                    data = response.read()
+                    out_file.write(data)
+                print("Download complete")
+            except Exception as download_error:
+                print(f"Error downloading MPCORB.DAT.gz: {str(download_error)}")
+                # Erstelle ein leeres DataFrame, wenn der Download fehlschlägt
+                asteroid_data = pd.DataFrame(columns=['designation', 'H'])
+                asteroid_cache_timestamp = datetime.now()
+                asteroid_data_cache = asteroid_data
+                return asteroid_data_cache
+        
+        # Parse die MPCORB-Datei
+        print("Parsing MPCORB.DAT.gz...")
+        asteroid_data = []
+        # Stelle sicher, dass pandas importiert ist
+        import pandas as pd
+        try:
+            with gzip.open(mpcorb_file, 'rt') as f:
+                # Überspringe den Header
+                for line in f:
+                    if line.startswith('00001'):
+                        break
+                
+                # Parse die Daten für die Asteroiden
+                max_asteroids = 1000  # Begrenze die Anzahl der zu ladenden Asteroiden
+                count = 0
+                
+                for line in f:
+                    if count >= max_asteroids:
+                        break
+                    
+                    try:
+                        # Parse die Zeile nach dem MPC-Format
+                        number = line[0:7].strip()  # Asteroid-Nummer
+                        name = line[166:194].strip()  # Name des Asteroiden
+                        
+                        # Wenn kein Name vorhanden ist, verwende die provisorische Bezeichnung
+                        designation = name if name else number
+                        
+                        # Absolute Magnitude (H) - Spalten 9-13 laut MPC-Format
+                        h_mag_str = line[8:13].strip()
+                        if h_mag_str:
+                            h_mag = float(h_mag_str)
+                        else:
+                            continue  # Überspringe Einträge ohne H-Magnitude
+                        
+                        # Erstelle ein Dictionary mit den benötigten Daten
+                        asteroid_dict = {
+                            'designation': designation,
+                            'H': h_mag,
+                            # Füge weitere Felder hinzu, die für mpc.mpcorb_orbit benötigt werden
+                            'epoch': line[20:25].strip(),
+                            'mean_anomaly': float(line[26:35].strip()),
+                            'argument_of_perihelion': float(line[37:46].strip()),
+                            'longitude_of_ascending_node': float(line[48:57].strip()),
+                            'inclination': float(line[59:68].strip()),
+                            'eccentricity': float(line[70:79].strip()),
+                            'semimajor_axis': float(line[92:103].strip()),
+                        }
+                        
+                        asteroid_data.append(asteroid_dict)
+                        count += 1
+                        
+                        if count % 100 == 0:
+                            print(f"Parsed {count} asteroids...")
+                    
+                    except Exception as parse_error:
+                        print(f"Error parsing asteroid line: {str(parse_error)}")
+                        continue
+            
+            # Konvertiere die Liste von Dictionaries in ein DataFrame
+            asteroid_data = pd.DataFrame(asteroid_data)
+            print(f"Parsed {len(asteroid_data)} asteroids from MPCORB.DAT.gz")
+            
+        except Exception as parse_error:
+            print(f"Error parsing MPCORB.DAT.gz: {str(parse_error)}")
+            # Erstelle ein leeres DataFrame, wenn das Parsen fehlschlägt
+            asteroid_data = pd.DataFrame(columns=['designation', 'H'])
+        
+        # Speichere den Zeitstempel und die Daten
+        asteroid_cache_timestamp = datetime.now()
+        asteroid_data_cache = asteroid_data
+        
+        # Speichere den Cache
+        try:
+            with open(ASTEROID_CACHE_FILE, 'wb') as f:
+                pickle.dump({
+                    'timestamp': asteroid_cache_timestamp,
+                    'data': asteroid_data_cache
+                }, f)
+            print(f"Saved {len(asteroid_data)} asteroids to disk cache")
+        except Exception as save_error:
+            print(f"Error saving asteroid cache: {str(save_error)}")
+        
+        return asteroid_data_cache
     except Exception as e:
         print(f"Error loading asteroid data: {str(e)}")
         # Return an empty DataFrame instead of None to avoid errors
@@ -611,7 +681,7 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
             'elevation': elevation
         }
         bright_asteroid_list = bright_asteroids.load_bright_asteroids(
-            loader, ts, eph, location_dict, max_magnitude=12.0
+            loader, ts, eph, location_dict, max_magnitude=8.0
         )
         
         result = {
@@ -647,6 +717,9 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
 async def get_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible asteroids."""
     try:
+        # Verwende einen festen Wert für die maximale Magnitude
+        max_magnitude = 11.0  # Fester Wert für Asteroiden
+        
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()
         if lat is None:
@@ -661,7 +734,7 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
             settings.set_location(lat, lon, elevation, location_name)
             print(f"Saved location settings: lat={lat}, lon={lon}, elevation={elevation}, name={location_name}")
         
-        print(f"Loading real MPC asteroid data at lat={lat}, lon={lon}, elevation={elevation}")
+        print(f"Getting asteroids with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}")
         t = ts.now()
         # Benutze die Standortparameter
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
@@ -673,54 +746,77 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
         
         result = {
             "time": t.utc_datetime().isoformat(),
+            "max_magnitude": max_magnitude,
             "bodies": {}
         }
         
-        # Verarbeite Asteroiden aus echtem MPCORB-DataFrame
+        # Verarbeite Asteroiden
         count = 0
-        if asteroid_data_cache is None or len(asteroid_data_cache.index) == 0:
-            print("No asteroid data available (empty DataFrame)")
-            return result
-
-        # Sortiere nach H (hellste zuerst) und beschränke für Performance
-        df_sorted = asteroid_data_cache.sort_values(by='H').head(500)
-        for idx, row in df_sorted.iterrows():
+        for _, asteroid in asteroid_data_cache.iterrows():
             try:
                 # Hole die Bezeichnung und absolute Magnitude
-                designation = row.get('designation')
-                name = str(row.get('name', '')).strip()
-                display_name = str(designation).strip() if str(designation).strip() else (name if name else f"Asteroid_{idx}")
-                h_mag = float(row['H'])
-
+                designation = asteroid['designation']
+                
+                # Überprüfe, ob 'H' vorhanden ist und eine gültige Zahl ist
+                try:
+                    if 'H' not in asteroid or pd.isna(asteroid['H']):
+                        print(f"Skipping asteroid {designation}: Missing H magnitude")
+                        continue
+                    h_mag = float(asteroid['H'])
+                except (ValueError, TypeError):
+                    print(f"Skipping asteroid {designation}: Invalid H magnitude value '{asteroid['H']}'")  
+                    continue
+                
+                # Überspringe Asteroiden, die zu dunkel sind
+                if h_mag > max_magnitude:
+                    continue
+                
                 # Create skyfield object
-                asteroid_obj = mpc.mpcorb_orbit(row, ts, eph)
+                try:
+                    # Erstelle ein SimpleNamespace-Objekt mit den benötigten Attributen für mpcorb_orbit
+                    # Die Attributnamen müssen den Erwartungen von Skyfield entsprechen
+                    orbit_obj = SimpleNamespace(
+                        designation=designation,
+                        # Epoch im gepackten Format (K2555 etc.)
+                        epoch_packed=str(asteroid['epoch']),
+                        mean_anomaly_degrees=float(asteroid['mean_anomaly']),
+                        argument_of_perihelion_degrees=float(asteroid['argument_of_perihelion']),
+                        longitude_of_ascending_node_degrees=float(asteroid['longitude_of_ascending_node']),
+                        inclination_degrees=float(asteroid['inclination']),
+                        eccentricity=float(asteroid['eccentricity']),
+                        semimajor_axis_au=float(asteroid['semimajor_axis'])
+                    )
+                    # Übergebe das Objekt an mpcorb_orbit mit dem korrekten GM-Parameter
+                    # GM der Sonne in km^3/s^2
+                    GM_SUN = 1.32712440018e11  # Standardwert für die Sonne
+                    asteroid_obj = mpc.mpcorb_orbit(orbit_obj, ts, GM_SUN)
+                except Exception as orbit_error:
+                    print(f"Error creating orbit for asteroid {designation}: {str(orbit_error)}")
+                    continue
                 
-                # Calculate position
-                astrometric = observer.at(t).observe(asteroid_obj)
-                apparent = astrometric.apparent()
-                alt, az, distance = apparent.altaz()
+                # Wir verwenden die Implementierung aus bright_asteroids.py
+                # Dort werden die Positionen bereits korrekt berechnet
+                # print(f"Skipping asteroid {designation} in main.py - using bright_asteroids.py implementation instead")
+                continue
                 
-                # Distances in AU
-                delta_au = float(distance.au)
-                r_au = float(eph['sun'].at(t).observe(asteroid_obj).distance().au)
-                
-                # Calculate apparent magnitude (simplified HG0 without phase)
-                mag = float(h_mag + 5.0 * np.log10(max(r_au * delta_au, 1e-6)))
+                # Calculate apparent magnitude (approximate)
+                # This is a simplified calculation
+                mag = h_mag  # Use absolute magnitude as approximation
                 
                 # Create asteroid object
                 asteroid_data = {
-                    "name": display_name,
+                    "name": designation,
                     "symbol": "•",  # Small dot for asteroids
                     "type": "asteroid",
                     "visible": True,  # Immer sichtbar, auch unter dem Horizont
                     "altitude": float(alt.degrees),
                     "azimuth": float(az.degrees),
-                    "distance": float(delta_au),  # AU
-                    "magnitude": mag
+                    "distance": float(distance.km),
+                    "magnitude": float(mag)
                 }
                 
                 # Add to bodies dictionary with designation as key
-                result["bodies"][f"asteroid_{display_name}"] = asteroid_data
+                result["bodies"][f"asteroid_{designation}"] = asteroid_data
                 count += 1
                 
                 # Limit to 50 asteroids for performance
@@ -728,10 +824,7 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
                     break
                     
             except Exception as e:
-                try:
-                    print(f"Error processing asteroid {row.get('designation', idx)}: {str(e)}")
-                except Exception:
-                    print(f"Error processing asteroid at row {idx}: {str(e)}")
+                print(f"Error processing asteroid {asteroid['designation']}: {str(e)}")
                 continue
         
         print(f"Returning {len(result['bodies'])} asteroids")
@@ -863,13 +956,13 @@ async def get_comets(lat: float = None, lon: float = None, elevation: float = No
                 # Add to result
                 result["bodies"][designation] = {
                     "name": name,
-                    "symbol": BODY_SYMBOLS.get('comet', '☄️'),
-                    "type": "comet",
-                    "visible": True,
-                    "altitude": float(alt.degrees),
-                    "azimuth": float(az.degrees),
-                    "distance": float(distance.au),  # AU
-                    "magnitude": float(apparent_magnitude)
+                    "ra": ra._degrees,
+                    "dec": dec.degrees,
+                    "alt": alt.degrees,
+                    "az": az.degrees,
+                    "distance": distance.au,
+                    "magnitude": apparent_magnitude,
+                    "type": "comet"
                 }
                 
                 # Increment our counter

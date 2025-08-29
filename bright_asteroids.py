@@ -6,7 +6,7 @@ from skyfield import almanac
 import numpy as np
 import os
 import pickle
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import gzip
 import urllib.request
 from skyfield.data import mpc
@@ -18,6 +18,7 @@ BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
 COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
+MAX_ASTEROIDS = 5000
 
 # Cache-Gültigkeitsdauer in Stunden
 CACHE_VALIDITY_HOURS = 24
@@ -68,7 +69,7 @@ def download_mpcorb_file():
         return False
     return True
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=12.0, use_cache=True):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0, use_cache=True):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     
@@ -165,98 +166,186 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=12.0
         
         try:
             print(f"Loading asteroid data from {MPCORB_FILE}...")
-            # Begrenze die Anzahl der zu verarbeitenden Asteroiden
-            max_asteroids = 100
+            
+            # Begrenze die Anzahl der zu ladenden Asteroiden
+            max_asteroids = MAX_ASTEROIDS
             asteroid_list = []
             count = 0
-
-            # Lade das MPCORB-DataFrame mit Skyfield – gzipped Datei im Binärmodus öffnen (bytes)
-            with gzip.open(MPCORB_FILE, 'rb') as f:
-                df = mpc.load_mpcorb_dataframe(f)
-
-            # Filtere gültige Einträge mit H und sortiere nach Helligkeit (kleiner = heller)
-            if 'H' in df.columns:
-                df = df.dropna(subset=['H']).sort_values(by='H')
-            else:
-                print("MPCORB dataframe missing 'H' column; returning empty list")
-                return []
-
-            # Verarbeite die hellsten Einträge
-            for idx, row in df.iterrows():
-                if count >= max_asteroids:
-                    break
-                try:
-                    # Skyfield-Orbit für das Objekt
-                    asteroid_obj = mpc.mpcorb_orbit(row, ts, eph)
-
-                    # Beobachtete Position und Alt/Az
-                    apparent = observer.at(t).observe(asteroid_obj).apparent()
-                    alt, az, distance = apparent.altaz()
-
-                    # Distanzen in AU
-                    delta_au = float(distance.au)
-                    r_au = float(sun.at(t).observe(asteroid_obj).distance().au)
-
-                    # Magnitude (vereinfachtes HG0-Modell ohne Phasenfunktion)
-                    h_mag = float(row['H'])
-                    apparent_magnitude = h_mag + 5.0 * np.log10(max(r_au * delta_au, 1e-6))
-
-                    # Auf-/Untergang berechnen (lokale Zeiten HH:MM)
-                    rise_time = None
-                    set_time = None
-                    transit_time = None
+            
+            with gzip.open(MPCORB_FILE, 'rt') as f:
+                # Überspringe den Header
+                for line in f:
+                    if line.startswith('00001'):
+                        break
+                
+                # Parse die Daten für die hellsten Asteroiden
+                for line in f:
+                    if count >= max_asteroids:
+                        break
+                    
                     try:
-                        f_rs = almanac.risings_and_settings(eph, asteroid_obj, topos)
-                        # Suche vom heutigen 00:00 UTC bis +2 Tage
-                        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-                        t1 = ts.from_datetime(today_start)
-                        t2 = ts.from_datetime(today_start + timedelta(days=2))
-                        times, events = almanac.find_discrete(t1, t2, f_rs)
-                        for time_i, event in zip(times, events):
-                            local_time = time_i.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
-                            formatted = local_time.strftime('%H:%M')
-                            if event == 1:
-                                rise_time = formatted
+                        # Parse die Zeile nach dem MPC-Format
+                        number = line[0:7].strip()  # Asteroid-Nummer
+                        name = line[166:194].strip()  # Name des Asteroiden
+                        
+                        # Wenn kein Name vorhanden ist, verwende die provisorische Bezeichnung
+                        if not name:
+                            name = line[8:18].strip()
+                        
+                        # Absolute Magnitude (H) - Spalten 9-13 laut MPC-Format
+                        try:
+                            h_mag_str = line[8:13].strip()
+                            if h_mag_str:
+                                h_mag = float(h_mag_str)
                             else:
-                                set_time = formatted
-                        # Transit als Mitte zwischen Auf- und Untergang (falls beide vorhanden)
-                        if rise_time and set_time:
-                            now_local = datetime.now().astimezone()
-                            today = now_local.date()
-                            rt = datetime.strptime(rise_time, '%H:%M').replace(year=today.year, month=today.month, day=today.day, tzinfo=now_local.tzinfo)
-                            st = datetime.strptime(set_time, '%H:%M').replace(year=today.year, month=today.month, day=today.day, tzinfo=now_local.tzinfo)
-                            if st < rt:
-                                st += timedelta(days=1)
-                            transit_dt = rt + (st - rt) / 2
-                            transit_time = transit_dt.strftime('%H:%M')
+                                print(f"Skipping asteroid {name or number}: Missing H magnitude")
+                                continue
+                        except (ValueError, IndexError) as e:
+                            print(f"Skipping asteroid {name or number}: Invalid H magnitude - {str(e)}")
+                            continue
+                        
+                        # Nur Asteroiden mit einer Magnitude unter einem bestimmten Wert laden
+                        if h_mag > 10.0:  # Nur die hellsten Asteroiden laden
+                            continue
+                        
+                        # Parse die Bahnelemente
+                        epoch = line[20:25].strip()
+                        mean_anomaly = float(line[26:35].strip())
+                        argument_of_perihelion = float(line[37:46].strip())
+                        longitude_of_ascending_node = float(line[48:57].strip())
+                        inclination = float(line[59:68].strip())
+                        eccentricity = float(line[70:79].strip())
+                        semimajor_axis = float(line[92:103].strip())
+                        
+                        # Berechne die Position mit vereinfachten Annahmen
+                        # Dies ist eine Approximation, da die vollständige Berechnung komplex ist
+                        
+                        # Berechne die mittlere Anomalie zum aktuellen Zeitpunkt
+                        # Vereinfachte Annahme: Epoche ist J2000.0
+                        days_since_j2000 = t.tt - 2451545.0
+                        mean_motion = 0.9856076686 / (semimajor_axis ** 1.5)  # Grad pro Tag
+                        current_mean_anomaly = (mean_anomaly + mean_motion * days_since_j2000) % 360
+                        
+                        # Vereinfachte Berechnung der Position in der Bahnebene
+                        # Wir verwenden die mittlere Anomalie als Näherung für die wahre Anomalie
+                        true_anomaly = current_mean_anomaly * np.pi / 180.0
+                        
+                        # Berechne die Position in der Bahnebene
+                        r = semimajor_axis * (1 - eccentricity**2) / (1 + eccentricity * np.cos(true_anomaly))
+                        
+                        # Berechne die Position im ekliptischen Koordinatensystem
+                        x = r * (np.cos(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) - 
+                              np.sin(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
+                        y = r * (np.sin(longitude_of_ascending_node * np.pi/180) * np.cos(true_anomaly + argument_of_perihelion * np.pi/180) + 
+                              np.cos(longitude_of_ascending_node * np.pi/180) * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.cos(inclination * np.pi/180))
+                        z = r * np.sin(true_anomaly + argument_of_perihelion * np.pi/180) * np.sin(inclination * np.pi/180)
+                        
+                        # Konvertiere in äquatoriale Koordinaten
+                        # Vereinfachte Annahme: Ekliptik-Neigung ist 23.4 Grad
+                        epsilon = 23.4 * np.pi / 180.0
+                        xeq = x
+                        yeq = y * np.cos(epsilon) - z * np.sin(epsilon)
+                        zeq = y * np.sin(epsilon) + z * np.cos(epsilon)
+                        
+                        # Berechne Rektaszension und Deklination
+                        ra_rad = np.arctan2(yeq, xeq)
+                        if ra_rad < 0:
+                            ra_rad += 2 * np.pi
+                        ra_deg = ra_rad * 180.0 / np.pi
+                        
+                        dec_rad = np.arcsin(zeq / np.sqrt(xeq**2 + yeq**2 + zeq**2))
+                        dec_deg = dec_rad * 180.0 / np.pi
+                        
+                        # Berechne die Entfernung
+                        distance_au = np.sqrt(xeq**2 + yeq**2 + zeq**2)
+                        
+                        # Berechne die scheinbare Magnitude
+                        apparent_magnitude = h_mag + 5 * np.log10(distance_au)
+                        
+                        # Berechne Aufgangs-, Untergangs- und Transitzeiten
+                        # Vereinfachte Berechnung
+                        # t.gmst ist ein numerischer Wert in Stunden, kein Objekt mit hours-Attribut
+                        hour_angle = (t.gmst * 15 - ra_deg) % 360
+                        if hour_angle > 180:
+                            hour_angle -= 360
+                        
+                        # Berechne die Stunden bis zum Transit
+                        hours_to_transit = -hour_angle / 15
+                        if hours_to_transit < -12:
+                            hours_to_transit += 24
+                        if hours_to_transit > 12:
+                            hours_to_transit -= 24
+                        
+                        # Berechne die Transit-, Aufgangs- und Untergangszeiten
+                        transit_time = t.utc_datetime() + timedelta(hours=hours_to_transit)
+                        rise_time = transit_time - timedelta(hours=6)
+                        set_time = transit_time + timedelta(hours=6)
+                        
+                        # Berechne Altitude und Azimuth für den Beobachterstandort
+                        # Konvertiere RA/Dec zu Altitude/Azimuth
+                        
+                        # Konvertiere RA/Dec zu Stunden/Winkel
+                        ra_hours = ra_deg / 15.0
+                        dec_rad = dec_deg * math.pi / 180.0
+                        
+                        # Berechne den Stundenwinkel direkt ohne GMST
+                        # Vereinfachte Berechnung des Stundenwinkels
+                        current_time = t.utc_datetime()
+                        hours_since_midnight = current_time.hour + current_time.minute/60.0 + current_time.second/3600.0
+                        local_sidereal_time = (hours_since_midnight + lon/15.0) % 24
+                        ha_hours = (local_sidereal_time - ra_hours) % 24
+                        if ha_hours > 12:
+                            ha_hours -= 24
+                        ha_deg = ha_hours * 15.0
+                        ha_rad = ha_deg * math.pi / 180.0
+                        
+                        # Konvertiere Breite zu Radiant
+                        lat_rad = lat * math.pi / 180.0
+                        
+                        # Berechne Altitude
+                        sin_alt = math.sin(dec_rad) * math.sin(lat_rad) + math.cos(dec_rad) * math.cos(lat_rad) * math.cos(ha_rad)
+                        alt_rad = math.asin(sin_alt)
+                        alt_deg = alt_rad * 180.0 / math.pi
+                        
+                        # Berechne Azimuth
+                        cos_az = (math.sin(dec_rad) - math.sin(alt_rad) * math.sin(lat_rad)) / (math.cos(alt_rad) * math.cos(lat_rad))
+                        cos_az = max(-1.0, min(1.0, cos_az))  # Begrenze auf [-1, 1]
+                        az_rad = math.acos(cos_az)
+                        
+                        # Korrigiere den Quadranten für Azimuth
+                        if math.sin(ha_rad) >= 0:
+                            az_rad = 2 * math.pi - az_rad
+                        
+                        az_deg = az_rad * 180.0 / math.pi
+                        
+                        # Füge den Asteroiden zur Liste hinzu
+                        asteroid_data = {
+                            "name": name if name else f"Asteroid {number}",
+                            "number": number,
+                            "magnitude": apparent_magnitude,
+                            "ra": ra_deg,
+                            "dec": dec_deg,
+                            "altitude": alt_deg,  # Höhe über dem Horizont
+                            "azimuth": az_deg,    # Azimut (0=Nord, 90=Ost, 180=Süd, 270=West)
+                            "distance": distance_au,
+                            "rise_time": rise_time.isoformat(),
+                            "set_time": set_time.isoformat(),
+                            "transit_time": transit_time.isoformat(),
+                            "type": "asteroid"
+                        }
+                        
+                        asteroid_list.append(asteroid_data)
+                        count += 1
+                        
+                        if count % 10 == 0:
+                            print(f"Processed {count} asteroids...")
+                        
                     except Exception as e:
-                        # Zeiten sind optional; bei Fehlern weiterfahren
-                        pass
-
-                    name = str(row.get('designation', '')).strip() or str(row.get('name', '')).strip() or f"Asteroid_{idx}"
-                    asteroid_data = {
-                        "name": name,
-                        "symbol": "\u2022",
-                        "type": "asteroid",
-                        "magnitude": float(apparent_magnitude),
-                        "altitude": float(alt.degrees),
-                        "azimuth": float(az.degrees),
-                        "distance": float(delta_au),
-                        "rise_time": rise_time,
-                        "set_time": set_time,
-                        "transit_time": transit_time
-                    }
-                    asteroid_list.append(asteroid_data)
-                    count += 1
-
-                    if count % 10 == 0:
-                        print(f"Processed {count} asteroids...")
-                except Exception as e:
-                    print(f"Error processing asteroid row {idx}: {e}")
-                    continue
-
+                        print(f"Error parsing asteroid line: {e}")
+                        continue
+            
             print(f"Loaded {len(asteroid_list)} asteroids from MPCORB.DAT.gz")
-        
+            
         except Exception as e:
             print(f"Error loading asteroid data from MPCORB.DAT.gz: {e}")
             print("Failed to load asteroid data, returning empty list")
