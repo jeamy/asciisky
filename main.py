@@ -48,7 +48,6 @@ comet_data_cache = None
 comet_cache_timestamp = None
 
 # Cache-Dateien
-ASTEROID_CACHE_FILE = "cache/asteroid_cache.pkl"
 COMET_CACHE_FILE = "cache/comet_cache.pkl"
 
 # Stellen Sie sicher, dass das Cache-Verzeichnis existiert
@@ -457,137 +456,7 @@ async def get_celestial_object(body_id: str, lat: float = None, lon: float = Non
         print(f"Error in get_celestial_object: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def load_asteroid_data():
-    """Lade Asteroidendaten aus dem MPC."""
-    global asteroid_data_cache, asteroid_cache_timestamp
-    
-    try:
-        # Prüfe, ob ein Cache existiert und nicht zu alt ist
-        if os.path.exists(ASTEROID_CACHE_FILE):
-            try:
-                with open(ASTEROID_CACHE_FILE, 'rb') as f:
-                    cache_data = pickle.load(f)
-                    asteroid_cache_timestamp = cache_data.get('timestamp')
-                    cached_data = cache_data.get('data')
-                    
-                    # Wenn der Cache nicht zu alt ist (< 24 Stunden), verwende ihn
-                    if asteroid_cache_timestamp and (datetime.now() - asteroid_cache_timestamp).total_seconds() < 86400:
-                        print("Using cached asteroid data")
-                        asteroid_data_cache = cached_data
-                        return asteroid_data_cache
-            except Exception as cache_error:
-                print(f"Error loading asteroid cache: {str(cache_error)}")
-        
-        # Wenn kein gültiger Cache vorhanden ist, lade die MPCORB-Datei
-        mpcorb_file = "cache/MPCORB.DAT.gz"
-        if not os.path.exists(mpcorb_file):
-            print(f"MPCORB.DAT.gz file not found at {mpcorb_file}")
-            # Lade die Datei herunter
-            try:
-                print("Downloading MPCORB.DAT.gz...")
-                os.makedirs(os.path.dirname(mpcorb_file), exist_ok=True)
-                url = "https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz"
-                with urllib.request.urlopen(url) as response, open(mpcorb_file, 'wb') as out_file:
-                    data = response.read()
-                    out_file.write(data)
-                print("Download complete")
-            except Exception as download_error:
-                print(f"Error downloading MPCORB.DAT.gz: {str(download_error)}")
-                # Erstelle ein leeres DataFrame, wenn der Download fehlschlägt
-                asteroid_data = pd.DataFrame(columns=['designation', 'H'])
-                asteroid_cache_timestamp = datetime.now()
-                asteroid_data_cache = asteroid_data
-                return asteroid_data_cache
-        
-        # Parse die MPCORB-Datei
-        print("Parsing MPCORB.DAT.gz...")
-        asteroid_data = []
-        # Stelle sicher, dass pandas importiert ist
-        import pandas as pd
-        try:
-            with gzip.open(mpcorb_file, 'rt') as f:
-                # Überspringe den Header
-                for line in f:
-                    if line.startswith('00001'):
-                        break
-                
-                # Parse die Daten für die Asteroiden
-                max_asteroids = 1000  # Begrenze die Anzahl der zu ladenden Asteroiden
-                count = 0
-                
-                for line in f:
-                    if count >= max_asteroids:
-                        break
-                    
-                    try:
-                        # Parse die Zeile nach dem MPC-Format
-                        number = line[0:7].strip()  # Asteroid-Nummer
-                        name = line[166:194].strip()  # Name des Asteroiden
-                        
-                        # Wenn kein Name vorhanden ist, verwende die provisorische Bezeichnung
-                        designation = name if name else number
-                        
-                        # Absolute Magnitude (H) - Spalten 9-13 laut MPC-Format
-                        h_mag_str = line[8:13].strip()
-                        if h_mag_str:
-                            h_mag = float(h_mag_str)
-                        else:
-                            continue  # Überspringe Einträge ohne H-Magnitude
-                        
-                        # Erstelle ein Dictionary mit den benötigten Daten
-                        asteroid_dict = {
-                            'designation': designation,
-                            'H': h_mag,
-                            # Füge weitere Felder hinzu, die für mpc.mpcorb_orbit benötigt werden
-                            'epoch': line[20:25].strip(),
-                            'mean_anomaly': float(line[26:35].strip()),
-                            'argument_of_perihelion': float(line[37:46].strip()),
-                            'longitude_of_ascending_node': float(line[48:57].strip()),
-                            'inclination': float(line[59:68].strip()),
-                            'eccentricity': float(line[70:79].strip()),
-                            'semimajor_axis': float(line[92:103].strip()),
-                        }
-                        
-                        asteroid_data.append(asteroid_dict)
-                        count += 1
-                        
-                        if count % 100 == 0:
-                            print(f"Parsed {count} asteroids...")
-                    
-                    except Exception as parse_error:
-                        print(f"Error parsing asteroid line: {str(parse_error)}")
-                        continue
-            
-            # Konvertiere die Liste von Dictionaries in ein DataFrame
-            asteroid_data = pd.DataFrame(asteroid_data)
-            print(f"Parsed {len(asteroid_data)} asteroids from MPCORB.DAT.gz")
-            
-        except Exception as parse_error:
-            print(f"Error parsing MPCORB.DAT.gz: {str(parse_error)}")
-            # Erstelle ein leeres DataFrame, wenn das Parsen fehlschlägt
-            asteroid_data = pd.DataFrame(columns=['designation', 'H'])
-        
-        # Speichere den Zeitstempel und die Daten
-        asteroid_cache_timestamp = datetime.now()
-        asteroid_data_cache = asteroid_data
-        
-        # Speichere den Cache
-        try:
-            with open(ASTEROID_CACHE_FILE, 'wb') as f:
-                pickle.dump({
-                    'timestamp': asteroid_cache_timestamp,
-                    'data': asteroid_data_cache
-                }, f)
-            print(f"Saved {len(asteroid_data)} asteroids to disk cache")
-        except Exception as save_error:
-            print(f"Error saving asteroid cache: {str(save_error)}")
-        
-        return asteroid_data_cache
-    except Exception as e:
-        print(f"Error loading asteroid data: {str(e)}")
-        # Return an empty DataFrame instead of None to avoid errors
-        import pandas as pd
-        return pd.DataFrame(columns=['designation', 'H'])
+# Die load_asteroid_data Funktion wurde entfernt, da sie nicht mehr benötigt wird
 
 def load_comet_data():
     """Lade Kometendaten aus dem MPC."""
@@ -637,8 +506,7 @@ def load_comet_data():
 @app.on_event("startup")
 async def startup_event():
     """Load data on startup."""
-    # Lade Asteroiden- und Kometendaten
-    load_asteroid_data()
+    # Lade Kometendaten
     load_comet_data()
     
     # Lade Benutzereinstellungen

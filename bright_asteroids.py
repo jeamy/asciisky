@@ -257,7 +257,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                         dec_deg = dec_rad * 180.0 / np.pi
                         
                         # Berechne die Entfernung
-                        distance_au = np.sqrt(xeq**2 + yeq**2 + zeq**2)
+                        # Konvertiere in AU (Astronomische Einheiten) und runde auf 3 Dezimalstellen
+                        distance_au = round(np.sqrt(xeq**2 + yeq**2 + zeq**2), 3)
                         
                         # Berechne die scheinbare Magnitude
                         # Korrekte Formel: m = H + 5*log10(r*d) - 2.5*log10((1-G)*phi1 + G*phi2)
