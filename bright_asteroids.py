@@ -19,9 +19,10 @@ COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
+MAX_ASTEROIDS_MAGNITUDE = 8.0
 
 # Cache-Gültigkeitsdauer in Stunden
-CACHE_VALIDITY_HOURS = 24
+CACHE_VALIDITY_HOURS = 6
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
@@ -69,7 +70,7 @@ def download_mpcorb_file():
         return False
     return True
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0, use_cache=True):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_ASTEROIDS_MAGNITUDE, use_cache=True):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     
@@ -205,7 +206,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0,
                             continue
                         
                         # Nur Asteroiden mit einer Magnitude unter einem bestimmten Wert laden
-                        if h_mag > 10.0:  # Nur die hellsten Asteroiden laden
+                        if h_mag > MAX_ASTEROIDS_MAGNITUDE:  # Nur die hellsten Asteroiden laden
                             continue
                         
                         # Parse die Bahnelemente
@@ -278,8 +279,24 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0,
                         
                         # Berechne die Transit-, Aufgangs- und Untergangszeiten
                         transit_time = t.utc_datetime() + timedelta(hours=hours_to_transit)
-                        rise_time = transit_time - timedelta(hours=6)
-                        set_time = transit_time + timedelta(hours=6)
+                        
+                        # Berechne Aufgangs- und Untergangszeiten basierend auf der Deklination
+                        # Für Objekte nahe dem Äquator ist die Zeit vom Aufgang bis zum Transit etwa 6 Stunden
+                        # Für Objekte weiter nördlich oder südlich variiert diese Zeit
+                        
+                        # Berechne den Kosinus des Stundenwinkels beim Aufgang/Untergang
+                        lat_rad = lat * math.pi / 180.0
+                        cos_ha = -math.tan(lat_rad) * math.tan(dec_rad)
+                        
+                        # Begrenze den Wert auf [-1, 1] für den Fall, dass das Objekt zirkumpolar ist
+                        cos_ha = max(-1.0, min(1.0, cos_ha))
+                        
+                        # Berechne den Stundenwinkel in Stunden
+                        ha_hours_at_horizon = math.acos(cos_ha) * 12.0 / math.pi
+                        
+                        # Berechne Aufgangs- und Untergangszeiten
+                        rise_time = transit_time - timedelta(hours=ha_hours_at_horizon)
+                        set_time = transit_time + timedelta(hours=ha_hours_at_horizon)
                         
                         # Berechne Altitude und Azimuth für den Beobachterstandort
                         # Konvertiere RA/Dec zu Altitude/Azimuth
@@ -319,6 +336,13 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0,
                         az_deg = az_rad * 180.0 / math.pi
                         
                         # Füge den Asteroiden zur Liste hinzu
+                        # Formatiere die Zeiten für die Anzeige
+                        # Format: "HH:MM Uhr" für die lokale Zeit
+                        def format_time(dt):
+                            # Konvertiere zu lokalem Zeitformat ohne Zeitzone und ISO-Format
+                            local_time = dt.astimezone()
+                            return f"{local_time.hour:02d}:{local_time.minute:02d} Uhr"
+                        
                         asteroid_data = {
                             "name": name if name else f"Asteroid {number}",
                             "number": number,
@@ -328,9 +352,9 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=8.0,
                             "altitude": alt_deg,  # Höhe über dem Horizont
                             "azimuth": az_deg,    # Azimut (0=Nord, 90=Ost, 180=Süd, 270=West)
                             "distance": distance_au,
-                            "rise_time": rise_time.isoformat(),
-                            "set_time": set_time.isoformat(),
-                            "transit_time": transit_time.isoformat(),
+                            "rise_time": format_time(rise_time),
+                            "set_time": format_time(set_time),
+                            "transit_time": format_time(transit_time),
                             "type": "asteroid"
                         }
                         

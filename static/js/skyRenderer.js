@@ -444,6 +444,23 @@ export class SkyRenderer {
         });
     }
 
+    // Formatiert einen Zeitstring im ISO-Format in das Format HH:MM
+    formatTimeString(timeString) {
+        try {
+            // Wenn es ein ISO-Zeitstring ist
+            if (timeString && timeString.includes('T')) {
+                const date = new Date(timeString);
+                // Lokale Zeit im Format HH:MM
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            }
+            // Wenn es bereits ein formatierter String ist, gib ihn unverändert zurück
+            return timeString;
+        } catch (e) {
+            console.error('Error formatting time:', e);
+            return timeString; // Fallback zum ursprünglichen String
+        }
+    }
+
     showObjectDialog(obj) {
         console.log('Showing dialog for:', obj.name, obj);
         
@@ -465,15 +482,21 @@ export class SkyRenderer {
     
             // Zeige Auf- und Untergangszeiten an, wenn verfügbar
             if (obj.rise_time) {
-                info.push(`${t('rise_time')}: ${obj.rise_time} ${t('hour')}`);
+                // Formatiere die Zeit im Format HH:MM Uhr
+                const riseTime = this.formatTimeString(obj.rise_time);
+                info.push(`${t('rise_time')}: ${riseTime} ${t('hour')}`);
             }
             
             if (obj.set_time) {
-                info.push(`${t('set_time')}: ${obj.set_time} ${t('hour')}`);
+                // Formatiere die Zeit im Format HH:MM Uhr
+                const setTime = this.formatTimeString(obj.set_time);
+                info.push(`${t('set_time')}: ${setTime} ${t('hour')}`);
             }
             
             if (obj.transit_time) {
-                info.push(`${t('transit_time')}: ${obj.transit_time} ${t('hour')}`);
+                // Formatiere die Zeit im Format HH:MM Uhr
+                const transitTime = this.formatTimeString(obj.transit_time);
+                info.push(`${t('transit_time')}: ${transitTime} ${t('hour')}`);
             }
     
             if (obj.phase !== undefined) {

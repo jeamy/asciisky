@@ -43,10 +43,8 @@ API_ENDPOINT_BRIGHT_ASTEROIDS = "/api/bright_asteroids"
 ts = load.timescale()
 eph = load('de421.bsp')  # Ephemeris-Datei
 
-# Cache für Asteroiden- und Kometendaten
-asteroid_data_cache = None
+# Cache für Kometendaten
 comet_data_cache = None
-asteroid_cache_timestamp = None
 comet_cache_timestamp = None
 
 # Cache-Dateien
@@ -681,7 +679,7 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
             'elevation': elevation
         }
         bright_asteroid_list = bright_asteroids.load_bright_asteroids(
-            loader, ts, eph, location_dict, max_magnitude=8.0
+            loader, ts, eph, location_dict, max_magnitude=10.0
         )
         
         result = {
@@ -717,8 +715,8 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
 async def get_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible asteroids."""
     try:
-        # Verwende einen festen Wert für die maximale Magnitude
-        max_magnitude = 11.0  # Fester Wert für Asteroiden
+        # Verwende den Wert aus bright_asteroids.py
+        max_magnitude = bright_asteroids.MAX_ASTEROIDS_MAGNITUDE
         
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()
@@ -736,13 +734,16 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
         
         print(f"Getting asteroids with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}")
         t = ts.now()
-        # Benutze die Standortparameter
-        location = wgs84.latlon(lat, lon, elevation_m=elevation)
-        observer = eph['earth'] + location
         
-        global asteroid_data_cache
-        if asteroid_data_cache is None:
-            asteroid_data_cache = load_asteroid_data()
+        # Erstelle ein Dictionary mit den Standortdaten
+        location = {
+            "latitude": lat,
+            "longitude": lon,
+            "elevation": elevation
+        }
+        
+        # Rufe die Funktion aus bright_asteroids.py auf
+        asteroid_list = bright_asteroids.load_bright_asteroids(load, ts, eph, location, max_magnitude=max_magnitude)
         
         result = {
             "time": t.utc_datetime().isoformat(),
@@ -750,82 +751,26 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
             "bodies": {}
         }
         
-        # Verarbeite Asteroiden
-        count = 0
-        for _, asteroid in asteroid_data_cache.iterrows():
-            try:
-                # Hole die Bezeichnung und absolute Magnitude
-                designation = asteroid['designation']
-                
-                # Überprüfe, ob 'H' vorhanden ist und eine gültige Zahl ist
-                try:
-                    if 'H' not in asteroid or pd.isna(asteroid['H']):
-                        print(f"Skipping asteroid {designation}: Missing H magnitude")
-                        continue
-                    h_mag = float(asteroid['H'])
-                except (ValueError, TypeError):
-                    print(f"Skipping asteroid {designation}: Invalid H magnitude value '{asteroid['H']}'")  
-                    continue
-                
-                # Überspringe Asteroiden, die zu dunkel sind
-                if h_mag > max_magnitude:
-                    continue
-                
-                # Create skyfield object
-                try:
-                    # Erstelle ein SimpleNamespace-Objekt mit den benötigten Attributen für mpcorb_orbit
-                    # Die Attributnamen müssen den Erwartungen von Skyfield entsprechen
-                    orbit_obj = SimpleNamespace(
-                        designation=designation,
-                        # Epoch im gepackten Format (K2555 etc.)
-                        epoch_packed=str(asteroid['epoch']),
-                        mean_anomaly_degrees=float(asteroid['mean_anomaly']),
-                        argument_of_perihelion_degrees=float(asteroid['argument_of_perihelion']),
-                        longitude_of_ascending_node_degrees=float(asteroid['longitude_of_ascending_node']),
-                        inclination_degrees=float(asteroid['inclination']),
-                        eccentricity=float(asteroid['eccentricity']),
-                        semimajor_axis_au=float(asteroid['semimajor_axis'])
-                    )
-                    # Übergebe das Objekt an mpcorb_orbit mit dem korrekten GM-Parameter
-                    # GM der Sonne in km^3/s^2
-                    GM_SUN = 1.32712440018e11  # Standardwert für die Sonne
-                    asteroid_obj = mpc.mpcorb_orbit(orbit_obj, ts, GM_SUN)
-                except Exception as orbit_error:
-                    print(f"Error creating orbit for asteroid {designation}: {str(orbit_error)}")
-                    continue
-                
-                # Wir verwenden die Implementierung aus bright_asteroids.py
-                # Dort werden die Positionen bereits korrekt berechnet
-                # print(f"Skipping asteroid {designation} in main.py - using bright_asteroids.py implementation instead")
-                continue
-                
-                # Calculate apparent magnitude (approximate)
-                # This is a simplified calculation
-                mag = h_mag  # Use absolute magnitude as approximation
-                
-                # Create asteroid object
-                asteroid_data = {
-                    "name": designation,
+        # Formatiere die Daten für die API-Antwort
+        for i, asteroid in enumerate(asteroid_list):
+            if isinstance(asteroid, dict) and "name" in asteroid:
+                # Verwende einen eindeutigen Schlüssel für jeden Asteroiden
+                key = f"asteroid_{i}_{asteroid['name']}"
+                result["bodies"][key] = {
+                    "name": asteroid["name"],
                     "symbol": "•",  # Small dot for asteroids
                     "type": "asteroid",
                     "visible": True,  # Immer sichtbar, auch unter dem Horizont
-                    "altitude": float(alt.degrees),
-                    "azimuth": float(az.degrees),
-                    "distance": float(distance.km),
-                    "magnitude": float(mag)
+                    "altitude": float(asteroid["altitude"]),
+                    "azimuth": float(asteroid["azimuth"]),
+                    "distance": float(asteroid["distance"]) * 149597870.7,  # Umrechnung von AU in km
+                    "magnitude": float(asteroid["magnitude"]),
+                    "rise_time": asteroid["rise_time"],
+                    "set_time": asteroid["set_time"],
+                    "transit_time": asteroid["transit_time"]
                 }
-                
-                # Add to bodies dictionary with designation as key
-                result["bodies"][f"asteroid_{designation}"] = asteroid_data
-                count += 1
-                
-                # Limit to 50 asteroids for performance
-                if count >= 50:
-                    break
-                    
-            except Exception as e:
-                print(f"Error processing asteroid {asteroid['designation']}: {str(e)}")
-                continue
+            else:
+                print(f"Skipping invalid asteroid data at index {i}: {asteroid}")
         
         print(f"Returning {len(result['bodies'])} asteroids")
         return result
