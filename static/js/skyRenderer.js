@@ -98,21 +98,23 @@ export class SkyRenderer {
         const hidden = withEffective[0].dir;
         const visible = withEffective.filter(p => p.dir !== hidden);
         
-        // Zeichne nur die drei sichtbaren Richtungen und lasse sie mit horizontalShift mitlaufen
-        visible.forEach(pos => {
-            const effectiveAzimuth = pos.effectiveAzimuth;
-            const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
-            if (col >= 0 && col < width) {
-                if (pos.dir === 'N') {
-                    this.sky[horizonRow][col] = t('north');
-                } else if (pos.dir === 'S') {
-                    this.sky[horizonRow][col] = t('south');
-                } else if (pos.dir === 'O') {
-                    this.sky[horizonRow][col] = t('east');
-                } else if (pos.dir === 'W') {
-                    this.sky[horizonRow][col] = t('west');
-                }
-            }
+        // Platziere die drei sichtbaren Richtungen anhand ihres absoluten (verschobenen) Azimuts,
+        // damit sie sich bei Klick auf die Pfeile sichtbar bewegen
+        const inner = width - 2;
+        const vis = visible.map(p => ({ dir: p.dir, eff: p.effectiveAzimuth }));
+
+        const placeDir = (dir, col) => {
+            if (col < 0 || col >= width) return;
+            if (dir === 'N') this.sky[horizonRow][col] = t('north');
+            else if (dir === 'O') this.sky[horizonRow][col] = t('east');
+            else if (dir === 'S') this.sky[horizonRow][col] = t('south');
+            else if (dir === 'W') this.sky[horizonRow][col] = t('west');
+        };
+
+        // Absolute Abbildung auf Breite (0..360 -> 1..inner+1)
+        vis.forEach(v => {
+            const col = Math.round((v.eff / 360) * inner) + 1;
+            placeDir(v.dir, col);
         });
         
         // Füge Höhenmarkierungen hinzu (alle 30 Grad)
@@ -141,36 +143,36 @@ export class SkyRenderer {
 
     render() {
         // Don't call initSky() here to avoid recursion
-        
-        if (!this.celestialData) return;
-        
-        // Initialisiere den Himmel neu
+
+        // Initialisiere den Himmel neu (zeichnet den Horizont und die Himmelsrichtungen)
         this.initSky();
-        
-        // Draw each celestial object (unabhängig von body.visible)
-        Object.values(this.celestialData.bodies).forEach(body => {
-            this.drawCelestialObject(body);
-        });
-        
+
+        // Zeichne Himmelsobjekte nur, wenn Daten vorhanden sind
+        if (this.celestialData && this.celestialData.bodies) {
+            Object.values(this.celestialData.bodies).forEach(body => {
+                this.drawCelestialObject(body);
+            });
+        }
+
         // Convert 2D array to string and display
         const skyText = this.sky.map(row => row.join('')).join('\n');
-        
+
         // Erstelle ein temporäres div für den Himmelstext
         const skyTextDiv = document.createElement('div');
         skyTextDiv.className = 'sky-text';
         skyTextDiv.style.whiteSpace = 'pre';
         skyTextDiv.style.fontFamily = 'monospace';
         skyTextDiv.textContent = skyText;
-        
+
         // Speichere die vorhandenen Navigationspfeile
         const existingArrows = document.getElementById('navigation-arrows');
-        
+
         // Leere den Container
         this.container.innerHTML = '';
-        
+
         // Füge den Himmelstext hinzu
         this.container.appendChild(skyTextDiv);
-        
+
         // Füge immer neue Navigationspfeile hinzu
         this.addNavigationArrows();
 
