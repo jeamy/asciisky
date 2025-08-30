@@ -633,7 +633,7 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
                     "visible": True,  # Immer sichtbar, auch unter dem Horizont
                     "altitude": float(asteroid["altitude"]),
                     "azimuth": float(asteroid["azimuth"]),
-                    "distance": float(asteroid["distance"]) * 149597870.7,  # Umrechnung von AU in km
+                    "distance": float(asteroid["distance"]),  # Entfernung in AU (keine Umrechnung)
                     "magnitude": float(asteroid["magnitude"]),
                     "rise_time": asteroid["rise_time"],
                     "set_time": asteroid["set_time"],

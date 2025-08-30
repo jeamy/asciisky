@@ -850,6 +850,8 @@ export class SkyRenderer {
     // Lade Himmelsdaten und aktualisiere die Anzeige
     async updateSkyData() {
         try {
+            // Zeige allgemeinen Ladeindikator für den gesamten Update-Vorgang
+            this.showLoading('loading');
             // Hole die aktuellen Standortdaten
             const location = settingsManager.getLocation();
             
@@ -889,10 +891,13 @@ export class SkyRenderer {
                     this.skyData.bodies = { ...this.skyData.bodies, ...brightAsteroidData.bodies };
                 }
             } finally {
-                this.hideLoading();
+                // Nicht verstecken; der allgemeine Indikator wird am Ende verborgen
             }
         } catch (error) {
             console.error('Error updating sky data:', error);
+        } finally {
+            // Verstecke den Ladeindikator erst nach Abschluss aller Fetches
+            this.hideLoading();
         }
     }
 
@@ -900,6 +905,8 @@ export class SkyRenderer {
     async update() {
         try {
             console.log('Updating sky data...');
+            // Zeige allgemeinen Ladeindikator früh, um langsame Starts (z.B. MPCORB-Download) zu signalisieren
+            this.showLoading('loading');
             
             // Hole die aktuellen Standortdaten
             const location = settingsManager.getLocation();
@@ -928,7 +935,7 @@ export class SkyRenderer {
                     console.log('Bright asteroids loaded successfully:', Object.keys(brightAsteroidData.bodies).length);
                 }
             } finally {
-                this.hideLoading();
+                // Nicht verstecken; wir verbergen erst nach Abschluss aller Fetches
             }
             
             // Aktualisiere die Anzeige
@@ -938,6 +945,9 @@ export class SkyRenderer {
         } catch (error) {
             console.error('Error updating sky data:', error);
             this.container.textContent = t('error_loading');
+        } finally {
+            // Verstecke den Ladeindikator am Ende des gesamten Update-Zyklus
+            this.hideLoading();
         }
     }
 }
