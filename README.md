@@ -42,7 +42,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - If you change brightness thresholds in `bright_asteroids.py`:
   - `MAX_ABSOLUTE_MAGNITUDE = 12.0`
   - `MAX_APPARENT_MAGNITUDE = 10.0`
-  then you must delete the cache files under `cache/` so new results are computed with the updated thresholds.
+  then you must delete the cache files (*.pkl) under `cache/` so new results are computed with the updated thresholds.
 
 ### Without Docker
 
