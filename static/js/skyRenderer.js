@@ -234,10 +234,13 @@ export class SkyRenderer {
         return layer;
     }
 
-    // Rendert kleine Labels für helle Kleinplaneten (mag < Threshold)
+    // Rendert kleine Labels für helle Kleinplaneten und Kometen (mag < Threshold)
     renderLabels() {
         try {
-            if (!this.celestialData || !CONFIG.LABELS?.ENABLE_BRIGHT_MINOR_PLANET_LABELS) return;
+            if (!this.celestialData) return;
+            const enableAsteroidLabels = !!CONFIG.LABELS?.ENABLE_BRIGHT_MINOR_PLANET_LABELS;
+            const enableCometLabels = !!CONFIG.LABELS?.ENABLE_BRIGHT_COMET_LABELS;
+            if (!enableAsteroidLabels && !enableCometLabels) return;
             const layer = this.ensureLabelsLayer();
             // Layer leeren
             layer.innerHTML = '';
@@ -256,15 +259,22 @@ export class SkyRenderer {
             const colWidth = textRect.width / CONFIG.SKY_WIDTH;
             const rowHeight = textRect.height / CONFIG.SKY_HEIGHT;
 
-            const magThreshold = CONFIG.LABELS.BRIGHT_MINOR_PLANET_MAG_THRESHOLD;
+            const asteroidThreshold = (CONFIG.LABELS && CONFIG.LABELS.BRIGHT_MINOR_PLANET_MAG_THRESHOLD != null)
+                ? CONFIG.LABELS.BRIGHT_MINOR_PLANET_MAG_THRESHOLD : 9.0;
+            const cometThreshold = (CONFIG.LABELS && CONFIG.LABELS.BRIGHT_COMET_MAG_THRESHOLD != null)
+                ? CONFIG.LABELS.BRIGHT_COMET_MAG_THRESHOLD : 9.0;
 
             let renderedCount = 0;
             for (const obj of Object.values(this.celestialData.bodies)) {
-                // Nur Kleinplaneten/asteroids mit Magnitude prüfen
+                // Prüfe Objekt-Typ und Magnitude
                 const isAsteroid = (obj.type && obj.type === 'asteroid') || /asteroid/i.test(String(obj.name || ''));
-                if (!isAsteroid) continue;
+                const isComet = (obj.type && obj.type === 'comet');
                 if (typeof obj.magnitude !== 'number') continue;
-                if (obj.magnitude >= magThreshold) continue;
+
+                let eligible = false;
+                if (enableAsteroidLabels && isAsteroid && obj.magnitude < asteroidThreshold) eligible = true;
+                if (enableCometLabels && isComet && obj.magnitude < cometThreshold) eligible = true;
+                if (!eligible) continue;
 
                 // Position muss bereits berechnet sein
                 let row = (obj.displayRow !== undefined) ? obj.displayRow : null;
@@ -303,7 +313,7 @@ export class SkyRenderer {
                 renderedCount++;
             }
             if (renderedCount === 0) {
-                console.log('[labels] no labels rendered (threshold=', magThreshold, ')');
+                console.log('[labels] no labels rendered');
             } else {
                 console.log('[labels] rendered labels:', renderedCount);
             }

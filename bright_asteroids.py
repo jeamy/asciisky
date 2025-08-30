@@ -18,7 +18,6 @@ from types import SimpleNamespace
 # Konstanten für Cache-Dateien
 ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
 BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
-COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 20000

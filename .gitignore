@@ -59,7 +59,7 @@ logs/
 *.log
 
 hip_main.dat
-CometEls.txt
+#CometEls.txt
 MPCORB.DAT*
 hipparcos.dat
 cache/

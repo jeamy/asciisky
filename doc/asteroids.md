@@ -68,7 +68,7 @@ Two-stage filtering:
 1. H prefilter:
    - `MAX_ABSOLUTE_MAGNITUDE` (default 12.0) limits the dataset before heavy computations.
 2. Apparent V filter:
-   - After computing `apparent_magnitude`, keep rows with `V <= MAX_APPARENT_MAGNITUDE` (default 12.0).
+   - After computing `apparent_magnitude`, keep rows with `V <= MAX_APPARENT_MAGNITUDE` (default 10.0).
 
 Results are sorted by apparent magnitude and returned.
 

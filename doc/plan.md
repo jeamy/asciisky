@@ -42,6 +42,20 @@
   - Transit selection: choose the upper transit (highest altitude) on the current local day
   - Time formatting: backend returns plain local "HH:MM" strings (no localized suffix)
 
+ - ✅ Implemented comets pipeline with real MPC data and M1/k1 photometric model
+   - Load MPC elements, build orbits with `mpc.comet_orbit()`; compute topocentric alt/az
+   - Apparent magnitude: `V = M1 + 5 log10(Δ) + k1 log10(r)`
+   - Filtering: prefilter `M1 ≤ 14.0`; final filter `V ≤ 10.0`; optional `max_comets` parameter
+   - Event times: risings/settings + transit over 48h; select highest-altitude transit; local "HH:MM"
+   - Caching: DataFrame (~6h TTL) and bright comet list (~6h TTL) under `cache/`
+   - API: `GET /api/comets` (centralized in `static/js/constants.js`)
+
+ - ✅ Completed planet, Sun, Moon magnitude models and endpoints
+   - Sun fixed −26.74; Moon phase-based heuristic
+   - Mercury–Saturn via `planetary_magnitude` (fallbacks); Uranus/Neptune fixed
+   - Endpoints: `GET /api/celestial` and `GET /api/celestial/{body}`
+   - See `doc/planets.md`
+
 ### Frontend (JavaScript)
 - ✅ Centralized constants in constants.js
 - ✅ Fixed recursion bug in skyRenderer.js
@@ -65,13 +79,16 @@
 ## Ongoing Tasks
 
 ### Backend
-- [ ] Implement comet pipeline with Skyfield (`mpc.load_comets_dataframe()`, `mpc.comet_orbit()`) with magnitude filtering and rise/set/transit events
 - [ ] Implement time-based simulation controls
+- [ ] Optional: Standardize logging across backend modules and set default level to INFO
 
 ### Frontend
 - [ ] Add responsive design for different screen sizes
 - [ ] Implement animation for object movement
 - [ ] Add search functionality for celestial objects
+- [ ] Gate console logging behind a debug flag in `skyRenderer.js`/`settings.js`
+- [ ] Persist last-selected object and restore on load
+- [ ] Test comet labels and tune label thresholds if needed (labels only)
 
 ### UI/UX
 - [ ] Improve ASCII art for different objects
@@ -84,34 +101,45 @@
 - Centralized constants for better maintainability
 - Optimized rendering to prevent recursion issues
 - H–G magnitude implementation and asteroid selection documented in `doc/asteroids.md`
+ - Comet brightness uses M1/k1 model with thresholds `M1 ≤ 14.0` and `V ≤ 10.0`
+ - Caching under `cache/`: comet DataFrame (~24h TTL), bright comet list (~6h TTL)
+ - API endpoints are centralized in `static/js/constants.js`
 
-## Comets Calculation Plan (Skyfield)
+## Comets Pipeline (Implemented)
 
 1. Data source and caching
    - Load MPC comet orbital elements via `skyfield.data.mpc.load_comets_dataframe()`
-   - Cache parsed DataFrame and computed results (pickled under `cache/` with validity window)
-2. Geometry and target setup
-   - Build comet orbit with `mpc.comet_orbit(row, ts, GM_SUN)`
-   - Observe `sun + comet_orbit` from topocentric observer (`eph['earth'] + Topos`)
-   - Compute heliocentric distance r (AU), observer distance Δ (AU), phase angle α
-3. Apparent magnitude model and filtering
-   - Use a comet brightness model: `V = H + 5 log10(Δ) + k log10(r)` with configurable `k` (default 10)
-   - Two-stage filtering similar to asteroids: prefilter by `H` (absolute), then keep `V <= MAX_APPARENT_MAGNITUDE`
-   - Configuration: `MAX_COMET_ABSOLUTE_MAGNITUDE`, `MAX_COMET_APPARENT_MAGNITUDE`, `COMET_K_SLOPE`
-4. Rise/Set/Transit events
-   - Use `almanac.risings_and_settings(eph, sun + orbit, topos)` and `almanac.meridian_transits(...)`
-   - Search over a two-day window; select events for the current local day
-   - Transit selection: choose the upper transit (highest altitude)
-   - Format times in backend as local "HH:MM" (no suffix); frontend applies localized label
-5. API and output shape
-   - Endpoint: `GET /api/comets?lat=&lon=&elevation=&location_name=&save_location=`
-   - Return `time` (UTC ISO), `location`, and `bodies` mapping
-   - Each comet: `name`, `magnitude` (V), `altitude`, `azimuth`, `distance` (AU), `rise_time`, `set_time`, `transit_time`, `symbol` (☄️), `type` ("comet")
+   - Cache raw MPC file and standardized DataFrame under `cache/` (DataFrame TTL ~6h)
+   - Cache the final bright comet list separately (TTL ~6h) for fast responses
+
+2. Orbit and geometry
+   - Build comet orbits with `mpc.comet_orbit(row, ts, GM_SUN)`
+   - Compute topocentric alt/az from the observer `eph['earth'] + wgs84.latlon(...)`
+   - Distances: observer distance Δ (AU) and heliocentric distance r (AU)
+
+3. Photometric model and filtering
+   - Use the M1/k1 model: `V = M1 + 5 log10(Δ) + k1 log10(r)`
+   - Prefilter by absolute magnitude `M1 ≤ 14.0`
+   - Final filter by apparent magnitude `V ≤ 10.0`
+   - Optional: limit payload with `max_comets` query parameter
+
+4. Event times
+   - Compute rise, set, and transit over a 48-hour window using Skyfield almanac
+   - Select events for the current local day and choose the highest-altitude transit
+   - Format times as local "HH:MM"; frontend applies localized labels
+
+5. API
+   - Endpoint: `GET /api/comets?max_comets=<N>`
+   - Returns a list with: `name`, `symbol` (☄️), `type` ("comet"), `ra`, `dec`, `altitude`, `azimuth`, `distance`, `magnitude`, `rise_time`, `set_time`, `transit_time`
+
 6. Frontend integration
-   - Reuse existing rendering; symbol `☄️`
-   - Deduplicate by normalized name key
-   - Time labels via `buildTimeLabel()`
-7. Testing
-   - Unit-test magnitude function with synthetic r, Δ
-   - Validate event selection and time formatting across TZ boundaries (TZ=Europe/Berlin)
-   - Compare a sample comet (e.g., 12P Pons-Brooks) against external ephemerides for sanity
+   - Endpoints centralized in `static/js/constants.js`
+   - Label control via `CONFIG.LABELS.ENABLE_BRIGHT_COMET_LABELS` and `BRIGHT_COMET_MAG_THRESHOLD`
+   - Magnitude filtering is backend-internal; UI labels are controlled separately
+
+7. Documentation
+   - See `doc/comets.md` for details; `README.md` updated with caching and endpoint notes
+
+8. Testing
+   - Sanity-check a sample comet against external ephemerides
+   - UI test/tune label thresholds; verify timing across timezones

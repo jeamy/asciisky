@@ -47,7 +47,9 @@ export const CONFIG = {
     ALTITUDE_PRECISION: 1,         // Genauigkeit der Höhenanzeige in Grad
     LABELS: {
         ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
-        BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0
+        BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
+        ENABLE_BRIGHT_COMET_LABELS: true,
+        BRIGHT_COMET_MAG_THRESHOLD: 9.0
     }
 };
 

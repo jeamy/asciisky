@@ -11,6 +11,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Interactive object selection with detailed information dialog
 - Distance and magnitude information for all objects
 - Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
+- Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
 - Minimalist UI design with optimized space usage
@@ -33,13 +34,18 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 ### First Run and Caching
 
-- The first startup can take significantly longer because the app downloads MPC orbital data (MPCORB.DAT) and builds caches for asteroids:
+- The first startup can take longer because the app downloads and parses MPC orbital data and creates caches.
+
+- Asteroids
   - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
-  - `cache/bright_asteroid_cache.pkl` (filtered and computed results)
-- If you change brightness thresholds in `bright_asteroids.py`:
-  - `MAX_ABSOLUTE_MAGNITUDE = 12.0`
-  - `MAX_APPARENT_MAGNITUDE = 10.0`
-  then you must delete the cache files (*.pkl) under `cache/` so new results are computed with the updated thresholds.
+  - `cache/bright_asteroid_cache.pkl` (final filtered results; ~6h TTL)
+  - If you change thresholds in `bright_asteroids.py` (`MAX_ABSOLUTE_MAGNITUDE`, `MAX_APPARENT_MAGNITUDE`), delete asteroid cache files under `cache/`.
+
+- Comets
+  - `cache/CometEls.txt` (download-once copy of MPC comet elements)
+  - `cache/comets_dataframe.pkl` (standardized DataFrame; ~6h TTL)
+  - `cache/bright_comet_cache.pkl` (final comet list; ~6h TTL; not keyed by location)
+  - Thresholds are defined in `comets.py` (`MAX_ABSOLUTE_MAGNITUDE = 14.0`, `MAX_APPARENT_MAGNITUDE = 10.0`). Delete the comet cache files under `cache/` to force recompute with new thresholds.
 
 ### Without Docker
 
@@ -77,6 +83,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - `doc/` - Documentation files
   - `plan.md` - Development plan and feature tracking
   - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
+  - `comets.md` - Comet position and magnitude pipeline (M1/k1 model)
+  - `planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
@@ -89,7 +97,7 @@ All endpoints are referenced in the frontend via `static/js/constants.js`.
 - `GET /api/celestial/{body}` — position for a single body
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
 - `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
-- `GET /api/comets` — comet endpoint (to be completed with full pipeline)
+- `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
 
 Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
 
