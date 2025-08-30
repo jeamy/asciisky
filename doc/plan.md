@@ -33,6 +33,12 @@
 - ✅ Improved error handling for missing celestial bodies
 - ✅ Added calculation of rise, set, and transit times for all celestial objects
 - ✅ Modified visibility logic to always show objects below the horizon
+- ✅ Implemented bright asteroids pipeline with IAU H–G magnitude model
+  - Use `mpc.mpcorb_orbit()` and observe `sun + orbit` from an Earth `Topos`
+  - Compute heliocentric distance r, observer distance Δ, phase angle α
+  - Apply H–G magnitude: `V = H + 5 log10(rΔ) − 2.5 log10((1−G)Φ1 + GΦ2)`
+  - Two-stage filtering: `MAX_ABSOLUTE_MAGNITUDE (H)` and `MAX_APPARENT_MAGNITUDE (V)`
+  - Rise/Set/Transit via `almanac` with `sun + orbit` and `Topos`
 
 ### Frontend (JavaScript)
 - ✅ Centralized constants in constants.js
@@ -44,6 +50,8 @@
 - ✅ Implemented internationalization (i18n) with German as default language
 - ✅ Improved multi-object dialog with minimalist design and better spacing
 - ✅ Moved dialog CSS to external file for better maintainability
+- ✅ Added loading indicator while fetching bright asteroids
+- ✅ Simplified asteroid display names (strip numeric designations like "(4) Vesta")
 
 ### Code Organization
 - ✅ Moved all constants to constants.js
@@ -71,3 +79,4 @@
 - Docker for consistent deployment environment
 - Centralized constants for better maintainability
 - Optimized rendering to prevent recursion issues
+- H–G magnitude implementation and asteroid selection documented in `doc/asteroids.md`

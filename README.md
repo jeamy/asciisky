@@ -10,6 +10,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Rise, set, and transit times for all celestial objects
 - Interactive object selection with detailed information dialog
 - Distance and magnitude information for all objects
+- Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
 - Auto-updates every 60 seconds
 - Responsive design
 - Internationalization (i18n) with German as default language
@@ -56,6 +57,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - `dialogStyles.css` - CSS styles for object dialogs
 - `doc/` - Documentation files
   - `plan.md` - Development plan and feature tracking
+  - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
