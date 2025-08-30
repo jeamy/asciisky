@@ -102,7 +102,7 @@
 - Optimized rendering to prevent recursion issues
 - H–G magnitude implementation and asteroid selection documented in `doc/asteroids.md`
  - Comet brightness uses M1/k1 model with thresholds `M1 ≤ 14.0` and `V ≤ 10.0`
- - Caching under `cache/`: comet DataFrame (~24h TTL), bright comet list (~6h TTL)
+ - Caching under `cache/`: comet DataFrame (~6h TTL), bright comet list (~6h TTL)
  - API endpoints are centralized in `static/js/constants.js`
 
 ## Comets Pipeline (Implemented)
