@@ -330,11 +330,36 @@ export class SkyRenderer {
     getLocalizedDisplayName(name) {
         try {
             if (!name) return '';
-            const m = name.match(/^\((\d+)\)\s*(.+)$/);
-            const base = m ? m[2] : name;
-            return t(base) || base;
+            let s = String(name).trim();
+
+            // 1) Entferne doppelte Namenssegmente, die mit einem Bullet getrennt sind, z.B. "(4) Vesta • (4) Vesta"
+            if (s.includes('•')) {
+                const parts = s.split('•')
+                    .map(p => p.trim())
+                    .filter(Boolean);
+                // Wähle den längsten Teil (meist ohne führende/abschließende Artefakte)
+                if (parts.length > 0) {
+                    parts.sort((a, b) => b.length - a.length);
+                    s = parts[0];
+                }
+            }
+
+            // 2) Entferne führende nummerische Bezeichnungen
+            //    a) "(4) Vesta" -> "Vesta"
+            s = s.replace(/^\(\s*\d+\s*\)\s*/, '');
+            //    b) "4 Vesta" oder "0004 Vesta" -> "Vesta"
+            s = s.replace(/^\d+\s+/, '');
+
+            // 3) Falls der Name exakt doppelt vorkommt (mit Leerzeichen), reduziere auf einmal
+            //    Beispiel: "Vesta Vesta" -> "Vesta"
+            s = s.replace(/^(.+?)\s+\1$/, '$1');
+
+            // 4) Mehrfache Whitespaces bereinigen
+            s = s.replace(/\s+/g, ' ').trim();
+
+            return t(s) || s;
         } catch (_) {
-            return name;
+            return String(name);
         }
     }
 
@@ -455,17 +480,28 @@ export class SkyRenderer {
                 
                 // Sortiere nach Distanz
                 nearbyObjects.sort((a, b) => a.distance - b.distance);
+
+                // Entferne Duplikate (gleicher Objektname), behalte den nächsten Eintrag
+                const seenNames = new Set();
+                const uniqueNearby = [];
+                for (const item of nearbyObjects) {
+                    const key = item.obj && item.obj.name ? item.obj.name : item.name;
+                    if (!seenNames.has(key)) {
+                        seenNames.add(key);
+                        uniqueNearby.push(item);
+                    }
+                }
                 
-                if (nearbyObjects.length > 0) {
-                    console.log(`Found ${nearbyObjects.length} nearby objects:`, 
-                        nearbyObjects.map(item => item.name).join(', '));
+                if (uniqueNearby.length > 0) {
+                    console.log(`Found ${uniqueNearby.length} nearby objects:`, 
+                        uniqueNearby.map(item => item.name).join(', '));
                     
-                    if (nearbyObjects.length === 1) {
+                    if (uniqueNearby.length === 1) {
                         // Nur ein Objekt gefunden
-                        this.selectObject(nearbyObjects[0].name, true);
+                        this.selectObject(uniqueNearby[0].name, true);
                     } else {
                         // Mehrere Objekte gefunden - zeige Dialog mit allen Objekten
-                        this.showMultiObjectDialog(nearbyObjects.map(item => item.obj));
+                        this.showMultiObjectDialog(uniqueNearby.map(item => item.obj));
                     }
                     return;
                 }
@@ -515,21 +551,21 @@ export class SkyRenderer {
     
             // Zeige Auf- und Untergangszeiten an, wenn verfügbar
             if (obj.rise_time) {
-                // Formatiere die Zeit im Format HH:MM Uhr
                 const riseTime = this.formatTimeString(obj.rise_time);
-                info.push(`${t('rise_time')}: ${riseTime} ${t('hour')}`);
+                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(riseTime) ? riseTime : `${riseTime} ${t('hour')}`;
+                info.push(`${t('rise_time')}: ${label}`);
             }
             
             if (obj.set_time) {
-                // Formatiere die Zeit im Format HH:MM Uhr
                 const setTime = this.formatTimeString(obj.set_time);
-                info.push(`${t('set_time')}: ${setTime} ${t('hour')}`);
+                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(setTime) ? setTime : `${setTime} ${t('hour')}`;
+                info.push(`${t('set_time')}: ${label}`);
             }
             
             if (obj.transit_time) {
-                // Formatiere die Zeit im Format HH:MM Uhr
                 const transitTime = this.formatTimeString(obj.transit_time);
-                info.push(`${t('transit_time')}: ${transitTime} ${t('hour')}`);
+                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(transitTime) ? transitTime : `${transitTime} ${t('hour')}`;
+                info.push(`${t('transit_time')}: ${label}`);
             }
     
             if (obj.phase !== undefined) {
@@ -574,6 +610,17 @@ export class SkyRenderer {
             // Entferne vorherige Dialoge
             this.removeDialog();
             
+            // Entferne doppelte Einträge nach Name
+            const seen = new Set();
+            const uniqueObjects = [];
+            for (const o of objects) {
+                const key = o && o.name ? o.name : '';
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    uniqueObjects.push(o);
+                }
+            }
+
             // Erstelle einen neuen Dialog
             const dialog = document.createElement('div');
             dialog.className = 'object-dialog multi-object-dialog';
@@ -584,7 +631,7 @@ export class SkyRenderer {
             
             // Füge Liste der Objekte hinzu
             dialogContent += '<div class="object-list">';
-            objects.forEach((obj, index) => {
+            uniqueObjects.forEach((obj, index) => {
                 const displayName = this.getLocalizedDisplayName(obj.name);
                 dialogContent += `<div class="object-list-item" data-object-name="${obj.name}">${obj.symbol || ''} ${displayName}</div>`;
             });
@@ -625,7 +672,7 @@ export class SkyRenderer {
             // Funktion zum Anzeigen der Objektdaten
             const showObjectData = (objectName) => {
                 // Finde das ausgewählte Objekt
-                const selectedObject = objects.find(obj => obj.name === objectName);
+                const selectedObject = uniqueObjects.find(obj => obj.name === objectName);
                 if (!selectedObject) return;
                 
                 // Erstelle Informationstext
@@ -639,15 +686,21 @@ export class SkyRenderer {
                 
                 // Zeige Auf- und Untergangszeiten an, wenn verfügbar
                 if (selectedObject.rise_time) {
-                    info.push(`${t('rise_time')}: ${selectedObject.rise_time} ${t('hour')}`);
+                    const riseTime = this.formatTimeString(selectedObject.rise_time);
+                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(riseTime) ? riseTime : `${riseTime} ${t('hour')}`;
+                    info.push(`${t('rise_time')}: ${label}`);
                 }
                 
                 if (selectedObject.set_time) {
-                    info.push(`${t('set_time')}: ${selectedObject.set_time} ${t('hour')}`);
+                    const setTime = this.formatTimeString(selectedObject.set_time);
+                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(setTime) ? setTime : `${setTime} ${t('hour')}`;
+                    info.push(`${t('set_time')}: ${label}`);
                 }
                 
                 if (selectedObject.transit_time) {
-                    info.push(`${t('transit_time')}: ${selectedObject.transit_time} ${t('hour')}`);
+                    const transitTime = this.formatTimeString(selectedObject.transit_time);
+                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(transitTime) ? transitTime : `${transitTime} ${t('hour')}`;
+                    info.push(`${t('transit_time')}: ${label}`);
                 }
         
                 if (selectedObject.phase !== undefined) {
@@ -684,8 +737,8 @@ export class SkyRenderer {
             });
             
             // Zeige das erste Objekt standardmäßig an
-            if (objects.length > 0) {
-                showObjectData(objects[0].name);
+            if (uniqueObjects.length > 0) {
+                showObjectData(uniqueObjects[0].name);
             }
         } catch (error) {
             console.error('Error showing multi-object dialog:', error);
