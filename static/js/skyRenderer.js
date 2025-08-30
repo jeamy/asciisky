@@ -74,35 +74,34 @@ export class SkyRenderer {
         
         // Keine Beschriftung für den Horizont
         
-        // Add cardinal directions along the horizon
-        const directions = CONFIG.CARDINAL_DIRECTIONS;
-        
-        // Positionen für die vier Hauptrichtungen entlang des Horizonts
+        // Add cardinal directions along the horizon (dehnen: nur 3 gleichzeitig anzeigen)
         // Azimut-Mapping: 0°=Nord, 90°=Ost, 180°=Süd, 270°=West
-        // Spalten entsprechend dem Azimut-Mapping mit horizontaler Verschiebung
         const positions = [
-            { dir: 'N', azimuth: 0 },     // 0° Azimut
-            { dir: 'O', azimuth: 90 },    // 90° Azimut  
-            { dir: 'S', azimuth: 180 },   // 180° Azimut
-            { dir: 'W', azimuth: 270 }    // 270° Azimut
+            { dir: 'N', azimuth: 0 },
+            { dir: 'O', azimuth: 90 },
+            { dir: 'S', azimuth: 180 },
+            { dir: 'W', azimuth: 270 }
         ];
         
-        // Alle Himmelsrichtungen anzeigen, unabhängig von der Verschiebung
-        const visibleDirections = positions;
+        // Bestimme die Richtung, die aktuell "aus dem Blick" liegt: die mit effektivem Azimut am nächsten zu 0°
+        // Standard (horizontalShift=0): N ist am nächsten zu 0° => O,S,W bleiben sichtbar
+        const withEffective = positions.map(p => {
+            let eff = p.azimuth - this.horizontalShift;
+            while (eff < 0) eff += 360;
+            while (eff >= 360) eff -= 360;
+            const distToZero = Math.min(eff, 360 - eff); // Abstand zu 0° entlang des Kreises
+            return { ...p, effectiveAzimuth: eff, distToZero };
+        });
         
-        // Zeichne die sichtbaren Himmelsrichtungen
-        visibleDirections.forEach(pos => {
-            // Berechne den effektiven Azimut mit Verschiebung
-            let effectiveAzimuth = pos.azimuth - this.horizontalShift;
-            
-            // Normalisiere den Azimut auf den Bereich 0-360
-            while (effectiveAzimuth < 0) effectiveAzimuth += 360;
-            while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
-            
-            // Berechne die Spalte basierend auf dem normalisierten Azimut
+        // Verstecke genau eine Richtung: die mit minimalem Abstand zu 0°
+        withEffective.sort((a, b) => a.distToZero - b.distToZero);
+        const hidden = withEffective[0].dir;
+        const visible = withEffective.filter(p => p.dir !== hidden);
+        
+        // Zeichne nur die drei sichtbaren Richtungen und lasse sie mit horizontalShift mitlaufen
+        visible.forEach(pos => {
+            const effectiveAzimuth = pos.effectiveAzimuth;
             const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
-            
-            // Nur zeichnen, wenn die Spalte im sichtbaren Bereich liegt
             if (col >= 0 && col < width) {
                 if (pos.dir === 'N') {
                     this.sky[horizonRow][col] = t('north');
