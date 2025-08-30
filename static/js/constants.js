@@ -44,7 +44,11 @@ export const CONFIG = {
     BELOW_HORIZON_SYMBOL: '★',      // Symbol für Objekte unter dem Horizont
     MAX_ALTITUDE: 90,              // Maximale Höhe in Grad (Zenit)
     MIN_ALTITUDE: -90,             // Minimale Höhe in Grad (Nadir)
-    ALTITUDE_PRECISION: 1          // Genauigkeit der Höhenanzeige in Grad
+    ALTITUDE_PRECISION: 1,         // Genauigkeit der Höhenanzeige in Grad
+    LABELS: {
+        ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
+        BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0
+    }
 };
 
 // ASCII Art

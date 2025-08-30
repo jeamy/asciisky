@@ -174,6 +174,10 @@ export class SkyRenderer {
         
         // Füge immer neue Navigationspfeile hinzu
         this.addNavigationArrows();
+
+        // Aktualisiere Label-Overlay für helle Kleinplaneten nach dem Layout-Pass
+        // requestAnimationFrame stellt sicher, dass getBoundingClientRect() valide Größen liefert
+        requestAnimationFrame(() => this.renderLabels());
     }
 
     addNavigationArrows() {
@@ -215,6 +219,96 @@ export class SkyRenderer {
         arrowsDiv.appendChild(leftArrow);
         arrowsDiv.appendChild(rightArrow);
         this.container.appendChild(arrowsDiv);
+    }
+
+    // Stellt sicher, dass eine Ebene für Labels existiert und gibt sie zurück
+    ensureLabelsLayer() {
+        let layer = this.container.querySelector('#labels-layer');
+        if (!layer) {
+            layer = document.createElement('div');
+            layer.id = 'labels-layer';
+            layer.className = 'labels-layer';
+            this.container.appendChild(layer);
+        }
+        return layer;
+    }
+
+    // Rendert kleine Labels für helle Kleinplaneten (mag < Threshold)
+    renderLabels() {
+        try {
+            if (!this.celestialData || !CONFIG.LABELS?.ENABLE_BRIGHT_MINOR_PLANET_LABELS) return;
+            const layer = this.ensureLabelsLayer();
+            // Layer leeren
+            layer.innerHTML = '';
+
+            // Verwende die tatsächliche Größe und Position des Sky-Textes, nicht des Containers
+            const containerRect = this.container.getBoundingClientRect();
+            const textEl = this.container.querySelector('.sky-text');
+            if (!textEl) {
+                console.warn('[labels] sky-text element not found; skip labels');
+                return;
+            }
+            const textRect = textEl.getBoundingClientRect();
+            // Berücksichtige Scroll-Offsets des Containers, da overflow:auto aktiv ist
+            const offsetX = (textRect.left - containerRect.left) + this.container.scrollLeft;
+            const offsetY = (textRect.top  - containerRect.top)  + this.container.scrollTop;
+            const colWidth = textRect.width / CONFIG.SKY_WIDTH;
+            const rowHeight = textRect.height / CONFIG.SKY_HEIGHT;
+
+            const magThreshold = CONFIG.LABELS.BRIGHT_MINOR_PLANET_MAG_THRESHOLD;
+
+            let renderedCount = 0;
+            for (const obj of Object.values(this.celestialData.bodies)) {
+                // Nur Kleinplaneten/asteroids mit Magnitude prüfen
+                const isAsteroid = (obj.type && obj.type === 'asteroid') || /asteroid/i.test(String(obj.name || ''));
+                if (!isAsteroid) continue;
+                if (typeof obj.magnitude !== 'number') continue;
+                if (obj.magnitude >= magThreshold) continue;
+
+                // Position muss bereits berechnet sein
+                let row = (obj.displayRow !== undefined) ? obj.displayRow : null;
+                let col = (obj.displayCol !== undefined) ? obj.displayCol : null;
+                // Fallback falls Position nicht gesetzt wurde
+                if (row === null || col === null) {
+                    const horizonRow = CONFIG.HORIZON_ROW;
+                    const height = CONFIG.SKY_HEIGHT;
+                    const width = CONFIG.SKY_WIDTH;
+                    if (obj.altitude >= 0) {
+                        row = Math.round(horizonRow - (obj.altitude / 90 * horizonRow));
+                    } else {
+                        row = Math.round(horizonRow + (Math.abs(obj.altitude) / 90 * (height - horizonRow - 1)));
+                    }
+                    let effectiveAzimuth = obj.azimuth - this.horizontalShift;
+                    while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+                    while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
+                    col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
+                }
+                if (row === null || col === null) continue;
+
+                // Pixelposition relativ zum Container, ausgerichtet auf die Textfläche
+                const xRaw = offsetX + (col + 0.5) * colWidth;
+                const yRaw = offsetY + (row - 0.6) * rowHeight; // leicht oberhalb des Symbols
+                const x = Math.max(offsetX, Math.min(offsetX + textRect.width, xRaw));
+                const y = Math.max(offsetY, Math.min(offsetY + textRect.height, yRaw));
+
+                // Label erzeugen
+                const label = document.createElement('div');
+                label.className = 'object-label';
+                const displayName = this.getLocalizedDisplayName(obj.name);
+                label.textContent = `${displayName} ${obj.magnitude.toFixed(1)} m`;
+                label.style.left = `${x}px`;
+                label.style.top = `${y}px`;
+                layer.appendChild(label);
+                renderedCount++;
+            }
+            if (renderedCount === 0) {
+                console.log('[labels] no labels rendered (threshold=', magThreshold, ')');
+            } else {
+                console.log('[labels] rendered labels:', renderedCount);
+            }
+        } catch (e) {
+            console.error('Error rendering labels:', e);
+        }
     }
 
     // Zeige/Verberge einen lokalisierten Ladeindikator außerhalb des Sky-Containers
