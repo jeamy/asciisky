@@ -39,6 +39,8 @@
   - Apply H–G magnitude: `V = H + 5 log10(rΔ) − 2.5 log10((1−G)Φ1 + GΦ2)`
   - Two-stage filtering: `MAX_ABSOLUTE_MAGNITUDE (H)` and `MAX_APPARENT_MAGNITUDE (V)`
   - Rise/Set/Transit via `almanac` with `sun + orbit` and `Topos`
+  - Transit selection: choose the upper transit (highest altitude) on the current local day
+  - Time formatting: backend returns plain local "HH:MM" strings (no localized suffix)
 
 ### Frontend (JavaScript)
 - ✅ Centralized constants in constants.js
@@ -52,6 +54,8 @@
 - ✅ Moved dialog CSS to external file for better maintainability
 - ✅ Added loading indicator while fetching bright asteroids
 - ✅ Simplified asteroid display names (strip numeric designations like "(4) Vesta")
+- ✅ Deduplicate objects by normalized name key to avoid duplicates in dialogs
+- ✅ Centralized time labeling with `buildTimeLabel()` to avoid duplicated "Uhr"
 
 ### Code Organization
 - ✅ Moved all constants to constants.js
@@ -61,7 +65,7 @@
 ## Ongoing Tasks
 
 ### Backend
-- [ ] Add more celestial bodies (asteroids, comets)
+- [ ] Implement comet pipeline with Skyfield (`mpc.load_comets_dataframe()`, `mpc.comet_orbit()`) with magnitude filtering and rise/set/transit events
 - [ ] Implement time-based simulation controls
 
 ### Frontend
@@ -80,3 +84,34 @@
 - Centralized constants for better maintainability
 - Optimized rendering to prevent recursion issues
 - H–G magnitude implementation and asteroid selection documented in `doc/asteroids.md`
+
+## Comets Calculation Plan (Skyfield)
+
+1. Data source and caching
+   - Load MPC comet orbital elements via `skyfield.data.mpc.load_comets_dataframe()`
+   - Cache parsed DataFrame and computed results (pickled under `cache/` with validity window)
+2. Geometry and target setup
+   - Build comet orbit with `mpc.comet_orbit(row, ts, GM_SUN)`
+   - Observe `sun + comet_orbit` from topocentric observer (`eph['earth'] + Topos`)
+   - Compute heliocentric distance r (AU), observer distance Δ (AU), phase angle α
+3. Apparent magnitude model and filtering
+   - Use a comet brightness model: `V = H + 5 log10(Δ) + k log10(r)` with configurable `k` (default 10)
+   - Two-stage filtering similar to asteroids: prefilter by `H` (absolute), then keep `V <= MAX_APPARENT_MAGNITUDE`
+   - Configuration: `MAX_COMET_ABSOLUTE_MAGNITUDE`, `MAX_COMET_APPARENT_MAGNITUDE`, `COMET_K_SLOPE`
+4. Rise/Set/Transit events
+   - Use `almanac.risings_and_settings(eph, sun + orbit, topos)` and `almanac.meridian_transits(...)`
+   - Search over a two-day window; select events for the current local day
+   - Transit selection: choose the upper transit (highest altitude)
+   - Format times in backend as local "HH:MM" (no suffix); frontend applies localized label
+5. API and output shape
+   - Endpoint: `GET /api/comets?lat=&lon=&elevation=&location_name=&save_location=`
+   - Return `time` (UTC ISO), `location`, and `bodies` mapping
+   - Each comet: `name`, `magnitude` (V), `altitude`, `azimuth`, `distance` (AU), `rise_time`, `set_time`, `transit_time`, `symbol` (☄️), `type` ("comet")
+6. Frontend integration
+   - Reuse existing rendering; symbol `☄️`
+   - Deduplicate by normalized name key
+   - Time labels via `buildTimeLabel()`
+7. Testing
+   - Unit-test magnitude function with synthetic r, Δ
+   - Validate event selection and time formatting across TZ boundaries (TZ=Europe/Berlin)
+   - Compare a sample comet (e.g., 12P Pons-Brooks) against external ephemerides for sanity

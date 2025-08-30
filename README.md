@@ -11,6 +11,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Interactive object selection with detailed information dialog
 - Distance and magnitude information for all objects
 - Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
+- Clean local time formatting: backend returns plain HH:MM; frontend adds localized hour label once (e.g., "Uhr" in German)
+- Normalized asteroid names and deduplication in dialogs to avoid duplicated entries
 - Auto-updates every 60 seconds
 - Responsive design
 - Internationalization (i18n) with German as default language
@@ -32,6 +34,16 @@ A web application that displays the current positions of celestial bodies (Sun, 
    ```
 4. Open your browser and navigate to `http://localhost:8000`
 
+### First Run and Caching
+
+- The first startup can take significantly longer because the app downloads MPC orbital data (MPCORB.DAT) and builds caches for asteroids:
+  - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
+  - `cache/bright_asteroid_cache.pkl` (filtered and computed results)
+- If you change brightness thresholds in `bright_asteroids.py`:
+  - `MAX_ABSOLUTE_MAGNITUDE = 12.0`
+  - `MAX_APPARENT_MAGNITUDE = 10.0`
+  then you must delete the cache files under `cache/` so new results are computed with the updated thresholds.
+
 ### Without Docker
 
 1. Ensure you have Python 3.9+ installed
@@ -48,19 +60,41 @@ A web application that displays the current positions of celestial bodies (Sun, 
 ## Project Structure
 
 - `main.py` - FastAPI application with celestial object calculation logic
+- `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
+- `settings.py` - User/location settings; persists to `user_settings.json`
+- `de421.bsp` - JPL ephemeris used by Skyfield
 - `templates/` - HTML templates
 - `static/js/` - JavaScript modules
-  - `constants.js` - Configuration parameters and constants
-  - `skyRenderer.js` - ASCII sky rendering and interaction logic
+  - `constants.js` - Configuration parameters and centralized API endpoints
+  - `skyRenderer.js` - ASCII sky rendering, dialogs, name normalization and time label handling
   - `skyManager.js` - Sky rendering initialization and update management
   - `i18n.js` - Internationalization module with translations
-  - `dialogStyles.css` - CSS styles for object dialogs
+  - `locationDialog.js` - User location dialog logic
+  - `settings.js` - Frontend settings utilities
+  - `zodiacRenderer.js` - Zodiac rendering utilities
+- `static/css/` - CSS styles
+  - `dialogStyles.css` - Object dialog styles
+  - `loadingIndicator.css` - Loading indicator styles
+  - `locationDialogStyles.css` - Location dialog styles
+  - `navigationArrows.css` - Navigation arrows styles
 - `doc/` - Documentation files
   - `plan.md` - Development plan and feature tracking
   - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
+
+## API Endpoints
+
+All endpoints are referenced in the frontend via `static/js/constants.js`.
+
+- `GET /api/celestial` — positions for Sun, Moon, and planets
+- `GET /api/celestial/{body}` — position for a single body
+- `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
+- `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
+- `GET /api/comets` — comet endpoint (to be completed with full pipeline)
+
+Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
 
 ## Technologies Used
 

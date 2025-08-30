@@ -76,10 +76,11 @@ Results are sorted by apparent magnitude and returned.
 
 For the asteroids that pass filtering:
 
-- Time window: start at local day 00:00 UTC for two days.
+- Time window: compute events over a two-day window, selecting events for the current local day.
 - Rise/Set: `almanac.risings_and_settings(eph, sun + orbit, topos)` then `almanac.find_discrete(...)`.
 - Transit: `almanac.meridian_transits(eph, sun + orbit, topos)` then `almanac.find_discrete(...)`.
-- Times are formatted into local HH:MM in the frontend; backend stores strings like `"12:34 Uhr"` or ISO when appropriate.
+- Transit selection: choose the upper transit (highest altitude) that occurs on the current local day to avoid ~12h offsets.
+- Time formatting: backend returns plain local "HH:MM" strings (no localized suffix). The frontend appends the localized hour label via `buildTimeLabel()` (German: "Uhr", English: empty), ensuring it is added at most once.
 
 ## Output Shape
 
@@ -95,7 +96,7 @@ Each asteroid entry returned by `load_bright_asteroids()` includes:
 - `type`: "asteroid".
 - `symbol`: "•".
 
-Frontend display: the UI simplifies display names by stripping numeric designations (e.g., "(4) Vesta" → "Vesta").
+Frontend display: the UI simplifies display names by stripping numeric designations (e.g., "(4) Vesta" → "Vesta"). Names are deduplicated using a normalized key to prevent duplicates in multi-object dialogs and click selection. Time labels are built with `buildTimeLabel()` to avoid duplicate suffixes.
 
 ## Caching
 
