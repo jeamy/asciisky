@@ -11,10 +11,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Interactive object selection with detailed information dialog
 - Distance and magnitude information for all objects
 - Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
-- Clean local time formatting: backend returns plain HH:MM; frontend adds localized hour label once (e.g., "Uhr" in German)
-- Normalized asteroid names and deduplication in dialogs to avoid duplicated entries
 - Auto-updates every 60 seconds
-- Responsive design
 - Internationalization (i18n) with German as default language
 - Minimalist UI design with optimized space usage
 
