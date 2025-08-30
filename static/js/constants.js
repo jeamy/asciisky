@@ -70,3 +70,37 @@ export const ASCII_ART = {
     DIALOG_VERTICAL: '║',
     DIALOG_HORIZONTAL: '═'
 };
+
+// Debug configuration
+export const DEBUG = (() => {
+    try {
+        // URL param wins: ?debug=1|true|yes|on or 0|false|no|off
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('debug')) {
+            const v = String(params.get('debug')).toLowerCase();
+            return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+        }
+        // Local override via localStorage
+        const ls = localStorage.getItem('asciisky_debug');
+        if (ls != null) {
+            const v = String(ls).toLowerCase();
+            return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+        }
+    } catch (_) { /* noop */ }
+    // Default: enabled (developer-friendly). Pass ?debug=0 to mute.
+    return true;
+})();
+
+// Globally mute console (except errors) when not debugging
+(() => {
+    try {
+        if (!DEBUG && typeof console !== 'undefined') {
+            const noop = () => {};
+            console.log = noop;
+            console.debug = noop;
+            console.info = noop;
+            console.warn = noop;
+            console.trace = noop;
+        }
+    } catch (_) { /* noop */ }
+})();

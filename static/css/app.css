@@ -1,0 +1,225 @@
+:root {
+    --primary-color: #00ff00;
+    --background-color: #0a0a0a;
+    --panel-bg: #111;
+    --border-color: #333;
+    --text-dim: #666;
+}
+
+.sky-text {
+    white-space: pre;
+    font-family: monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.filter-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-top: 15px;
+    align-items: center;
+}
+
+.magnitude-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.magnitude-filter input {
+    width: 60px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    padding: 5px;
+    border-radius: 3px;
+    font-family: inherit;
+}
+
+body {
+    font-family: 'Courier New', monospace;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px;
+    background-color: var(--background-color);
+    color: var(--primary-color);
+    line-height: 1.4;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+h1 {
+    color: var(--primary-color);
+    margin: 0 0 10px 0;
+}
+
+.sky-container {
+    background-color: #000;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    margin-bottom: 20px;
+    font-family: monospace;
+    white-space: pre;
+    line-height: 1;
+    letter-spacing: 2px;
+    min-height: calc(100vh - 200px);
+    height: calc(100vh - 200px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    cursor: crosshair;
+    position: relative; /* Für die relative Positionierung des Dialogs */
+}
+
+#object-dialog {
+    position: absolute;
+    background: var(--panel-bg);
+    border: 1px solid var(--primary-color);
+    padding: 15px 20px;
+    color: var(--primary-color);
+    font-family: monospace;
+    white-space: pre;
+    z-index: 1000;
+    min-width: 200px;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    max-width: 300px;
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.object-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.object-btn {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.object-btn:hover {
+    background: #222;
+}
+
+.object-btn.active {
+    background: #004400;
+    border-color: var(--primary-color);
+}
+
+.header-controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.language-selector {
+    display: flex;
+    gap: 5px;
+}
+
+.control-btn {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.control-btn:hover {
+    background: #222;
+}
+
+.lang-btn {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+}
+
+.lang-btn:hover {
+    background: #222;
+}
+
+.lang-btn.active {
+    background: #004400;
+    border-color: var(--primary-color);
+}
+
+.status-bar {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-dim);
+    font-size: 0.9em;
+    margin-top: 10px;
+}
+
+#object-dialog {
+    position: absolute;
+    background: var(--panel-bg);
+    border: 1px solid var(--primary-color);
+    padding: 15px 20px;
+    color: var(--primary-color);
+    font-family: monospace;
+    white-space: pre;
+    z-index: 1000;
+    min-width: 200px;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+}
+
+#object-dialog button {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: transparent;
+    border: none;
+    color: var(--primary-color);
+    cursor: pointer;
+    font-weight: bold;
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+
+    .controls {
+        flex-direction: column;
+    }
+
+    .sky-container {
+        font-size: 0.7rem;
+        padding: 10px;
+    }
+}

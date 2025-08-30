@@ -160,8 +160,6 @@ export class SkyRenderer {
         // Erstelle ein temporäres div für den Himmelstext
         const skyTextDiv = document.createElement('div');
         skyTextDiv.className = 'sky-text';
-        skyTextDiv.style.whiteSpace = 'pre';
-        skyTextDiv.style.fontFamily = 'monospace';
         skyTextDiv.textContent = skyText;
 
         // Speichere die vorhandenen Navigationspfeile
