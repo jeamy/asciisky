@@ -1,6 +1,6 @@
 # ASCII Sky - Celestial Tracker
 
-A web application that displays the current positions of celestial bodies (Sun, Moon, planets) in ASCII art, specifically for Vienna, Austria.
+A web application that displays the current positions of celestial bodies (Sun, Moon, planets) in ASCII art.
 
 ## Features
 
