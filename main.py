@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,6 +22,8 @@ from skyfield.api import load, wgs84, Star, Topos, Loader
 from skyfield.data import hipparcos, mpc
 from skyfield.magnitudelib import planetary_magnitude
 from starlette.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
+from pydantic import BaseModel
 
 import settings
 import bright_asteroids
@@ -29,6 +31,8 @@ import comets
 
 # Initialisiere FastAPI
 app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung des Sternenhimmels")
+SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET", "dev-secret-please-change")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
 # Statische Dateien und Templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -77,18 +81,43 @@ async def read_root():
     """Render the main page."""
     return FileResponse("templates/index.html")
 
+# Session models and endpoints
+class LocationPayload(BaseModel):
+    latitude: float
+    longitude: float
+    elevation: float
+    name: Optional[str] = None
+
+@app.get("/api/session/location")
+async def get_session_location(request: Request):
+    loc = request.session.get("location")
+    return {"location": loc}
+
+@app.post("/api/session/location")
+async def set_session_location(payload: LocationPayload, request: Request):
+    loc = {
+        "latitude": float(payload.latitude),
+        "longitude": float(payload.longitude),
+        "elevation": float(payload.elevation),
+    }
+    if payload.name:
+        loc["name"] = payload.name
+    request.session["location"] = loc
+    return {"ok": True, "location": loc}
+
 @app.get(API_ENDPOINT_CELESTIAL)
-async def get_celestial_objects(lat: float = None, lon: float = None, elevation: float = None):
+async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None):
     """Get positions of celestial objects."""
     try:
-        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        # Hole Standortdaten: query params -> session -> settings
         location_settings = settings.get_location()
+        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
         if lat is None:
-            lat = location_settings["latitude"]
+            lat = session_loc.get("latitude", location_settings["latitude"])
         if lon is None:
-            lon = location_settings["longitude"]
+            lon = session_loc.get("longitude", location_settings["longitude"])
         if elevation is None:
-            elevation = location_settings["elevation"]
+            elevation = session_loc.get("elevation", location_settings["elevation"])
         
         t = ts.now()
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
@@ -249,21 +278,22 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(f"{API_ENDPOINT_CELESTIAL}/{{body_id}}")
-async def get_celestial_object(body_id: str, lat: float = None, lon: float = None, elevation: float = None):
+async def get_celestial_object(body_id: str, request: Request, lat: float = None, lon: float = None, elevation: float = None):
     """Get position of a specific celestial object."""
     try:
         # Überprüfe, ob der angeforderte Körper existiert
         if body_id not in CELESTIAL_BODIES:
             raise HTTPException(status_code=404, detail=f"Celestial body '{body_id}' not found")
         
-        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        # Hole Standortdaten: query params -> session -> settings
         location_settings = settings.get_location()
+        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
         if lat is None:
-            lat = location_settings["latitude"]
+            lat = session_loc.get("latitude", location_settings["latitude"])
         if lon is None:
-            lon = location_settings["longitude"]
+            lon = session_loc.get("longitude", location_settings["longitude"])
         if elevation is None:
-            elevation = location_settings["elevation"]
+            elevation = session_loc.get("elevation", location_settings["elevation"])
         
         t = ts.now()
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
@@ -463,17 +493,18 @@ async def startup_event():
     os.makedirs("cache", exist_ok=True)
 
 @app.get(API_ENDPOINT_BRIGHT_ASTEROIDS)
-async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
+async def get_bright_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
-        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        # Hole Standortdaten: query params -> session -> settings
         location_settings = settings.get_location()
+        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
         if lat is None:
-            lat = location_settings["latitude"]
+            lat = session_loc.get("latitude", location_settings["latitude"])
         if lon is None:
-            lon = location_settings["longitude"]
+            lon = session_loc.get("longitude", location_settings["longitude"])
         if elevation is None:
-            elevation = location_settings["elevation"]
+            elevation = session_loc.get("elevation", location_settings["elevation"]) 
         
         # Speichere die Standortdaten, wenn gewünscht
         if save_location and lat is not None and lon is not None and elevation is not None:
@@ -528,20 +559,21 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(API_ENDPOINT_ASTEROIDS)
-async def get_asteroids(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
+async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
     """Get visible asteroids."""
     try:
         # Verwende den Wert aus bright_asteroids.py
         max_magnitude = bright_asteroids.MAX_APPARENT_MAGNITUDE
         
-        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        # Hole Standortdaten: query params -> session -> settings
         location_settings = settings.get_location()
+        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
         if lat is None:
-            lat = location_settings["latitude"]
+            lat = session_loc.get("latitude", location_settings["latitude"])
         if lon is None:
-            lon = location_settings["longitude"]
+            lon = session_loc.get("longitude", location_settings["longitude"])
         if elevation is None:
-            elevation = location_settings["elevation"]
+            elevation = session_loc.get("elevation", location_settings["elevation"]) 
         
         # Speichere die Standortdaten, wenn gewünscht
         if save_location and lat is not None and lon is not None and elevation is not None:
@@ -598,19 +630,20 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(API_ENDPOINT_COMETS)
-async def get_comets(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000):
+async def get_comets(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000):
     """Get comets with real MPC data and rise/set/transit times.
     Supports optional 'max_comets' query parameter to limit processing for performance (default: 1000).
     """
     try:
-        # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
+        # Hole Standortdaten: query params -> session -> settings
         location_settings = settings.get_location()
+        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
         if lat is None:
-            lat = location_settings["latitude"]
+            lat = session_loc.get("latitude", location_settings["latitude"])
         if lon is None:
-            lon = location_settings["longitude"]
+            lon = session_loc.get("longitude", location_settings["longitude"])
         if elevation is None:
-            elevation = location_settings["elevation"]
+            elevation = session_loc.get("elevation", location_settings["elevation"]) 
 
         # Speichere die Standortdaten, wenn gewünscht
         if save_location and lat is not None and lon is not None and elevation is not None:

@@ -70,6 +70,62 @@ export class SettingsManager {
         return this.settings.display?.horizontalShift || 0;
     }
     
+    // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
+    async fetchSessionLocation() {
+        try {
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, {
+                credentials: 'same-origin'
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const loc = data && data.location ? data.location : null;
+            if (loc && typeof loc.latitude === 'number' && typeof loc.longitude === 'number') {
+                // Übernehme Session-Standort als bevorzugte Quelle
+                this.settings.location = {
+                    latitude: parseFloat(loc.latitude),
+                    longitude: parseFloat(loc.longitude),
+                    elevation: typeof loc.elevation === 'number' ? parseFloat(loc.elevation) : (this.settings.location?.elevation ?? ASTRO_CONSTANTS.VIENNA_ELEVATION),
+                    name: loc.name || this.settings.location?.name || 'Unbekannt'
+                };
+                this.saveSettings();
+                return this.settings.location;
+            }
+            return null;
+        } catch (err) {
+            console.error('Error fetching session location:', err);
+            return null;
+        }
+    }
+
+    // Speichert den Standort direkt in der Session (Backend-Session via Cookie)
+    async saveSessionLocation(location) {
+        try {
+            if (!location) return false;
+            const payload = {
+                latitude: location.latitude,
+                longitude: location.longitude,
+                elevation: location.elevation,
+                name: location.name || 'Unbekannt'
+            };
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
+            });
+            if (resp.ok) {
+                this.serverSynced = true;
+                return true;
+            } else {
+                console.error('Error saving session location: HTTP', resp.status);
+                return false;
+            }
+        } catch (err) {
+            console.error('Error saving session location:', err);
+            return false;
+        }
+    }
+
     // Standortdaten setzen und mit Server synchronisieren
     async setLocation(latitude, longitude, elevation, locationName) {
         this.settings.location = {
@@ -82,6 +138,10 @@ export class SettingsManager {
         
         // Sofort mit dem Server synchronisieren
         try {
+            // 1) Session sofort aktualisieren (Cookie-basierte Session)
+            await this.saveSessionLocation(this.settings.location);
+
+            // 2) Persistente Nutzereinstellungen auf dem Server aktualisieren
             // Standortdaten explizit zum Server senden mit save_location=true
             const asteroidResponse = await fetch(`${API_ENDPOINTS.ASTEROIDS}?lat=${latitude}&lon=${longitude}&elevation=${elevation}&location_name=${encodeURIComponent(this.settings.location.name)}&save_location=true`);
             
@@ -125,10 +185,13 @@ export class SettingsManager {
         // Lokale Einstellungen laden
         this.settings = this.loadSettings();
         
-        // Entferne Magnitude-Werte aus den Einstellungen
+        // Entferne veraltete Werte aus den Einstellungen
         this.cleanupSettings();
         
-        // Mit dem Server synchronisieren
+        // Session-Standort bevorzugen (falls vorhanden)
+        await this.fetchSessionLocation();
+        
+        // Persistente Nutzereinstellungen mit aktuellem (ggf. Session-)Standort abgleichen
         await this.syncSettingsToServer();
         
         return this.settings;

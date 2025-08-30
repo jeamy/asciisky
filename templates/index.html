@@ -272,14 +272,17 @@
         let locationDialog;
         
         // Initialize the sky tracker when the DOM is fully loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            // Initialisiere den Renderer und speichere die Referenz
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 1) Einstellungen initialisieren und Session-Standort bevorzugen
+            await settingsManager.initialize();
+
+            // 2) Renderer initialisieren (nutzt jetzt den Session-Standort)
             renderer = initializeSkyTracker();
             
-            // Initialisiere den Standort-Dialog
+            // 3) Standort-Dialog initialisieren
             locationDialog = new LocationDialog(handleLocationChange);
             
-            // Warte einen kurzen Moment, um sicherzustellen, dass der Renderer initialisiert ist
+            // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
             setTimeout(() => {
                 setupObjectList();
                 setupLanguageButtons();
@@ -288,35 +291,48 @@
                 setupNavigationArrows();
                 updateUITexts();
                 
-                // Lade gespeicherte Standortdaten, falls vorhanden
+                // Übernehme aktuellen (Session-)Standort in UI und SkyManager
                 loadSavedLocation();
             }, 500);
         });
         
-        // Funktion zum Laden gespeicherter Standortdaten
+        // Funktion zum Anwenden des aktuellen (Session-präferierten) Standorts
         function loadSavedLocation() {
             try {
-                const savedLocationJson = localStorage.getItem('asciisky_location');
-                if (savedLocationJson) {
-                    const savedLocation = JSON.parse(savedLocationJson);
-                    console.log('Loaded saved location:', savedLocation);
-                    
-                    // Aktualisiere den Titel mit dem gespeicherten Standort
-                    updateAppTitle(savedLocation.name);
-                    
-                    // Aktualisiere den Standort im SkyManager
-                    if (renderer && renderer.skyManager) {
-                        renderer.skyManager.setLocation(savedLocation.lat, savedLocation.lon);
-                        updateSky();
-                    }
-                    
-                    // Aktualisiere auch den LocationDialog
-                    if (locationDialog) {
-                        locationDialog.currentLocation = savedLocation;
-                    }
+                const loc = settingsManager.getLocation();
+                if (!loc) return;
+
+                // App-Titel aktualisieren
+                updateAppTitle(loc.name);
+
+                // Standort im SkyManager setzen und sofort updaten
+                if (renderer && renderer.skyManager) {
+                    renderer.skyManager.setLocation(loc.latitude, loc.longitude, loc.elevation);
+                    updateSky();
                 }
+
+                // Dialog-Defaults aktualisieren
+                if (locationDialog) {
+                    locationDialog.currentLocation = {
+                        lat: loc.latitude,
+                        lon: loc.longitude,
+                        elevation: loc.elevation,
+                        name: loc.name || 'Unbekannt'
+                    };
+                }
+
+                // LocalStorage aus Kompatibilitätsgründen synchron halten
+                try {
+                    const legacy = {
+                        lat: loc.latitude,
+                        lon: loc.longitude,
+                        elevation: loc.elevation,
+                        name: loc.name || 'Unbekannt'
+                    };
+                    localStorage.setItem('asciisky_location', JSON.stringify(legacy));
+                } catch (_) { /* noop */ }
             } catch (error) {
-                console.error('Error loading saved location:', error);
+                console.error('Error applying location after init:', error);
             }
         }
         
@@ -329,14 +345,14 @@
                 setLanguage('de');
                 updateLanguageButtons();
                 updateUITexts();
-                if (renderer) renderer.updateSky();
+                if (renderer) updateSky();
             });
             
             btnEN.addEventListener('click', () => {
                 setLanguage('en');
                 updateLanguageButtons();
                 updateUITexts();
-                if (renderer) renderer.updateSky();
+                if (renderer) updateSky();
             });
             
             // Initialen Zustand setzen

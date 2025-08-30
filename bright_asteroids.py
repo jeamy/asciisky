@@ -14,6 +14,7 @@ import urllib.request
 from skyfield.data import mpc
 import math
 from types import SimpleNamespace
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
 
 # Konstanten für Cache-Dateien
 ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
@@ -129,15 +130,19 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
 
     print(f"Getting asteroids with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}.")
 
-    # Check for final cached asteroid list
-    if use_cache and os.path.exists(BRIGHT_ASTEROID_CACHE_FILE):
-        cache_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(BRIGHT_ASTEROID_CACHE_FILE))
-        if cache_age.total_seconds() < CACHE_VALIDITY_HOURS * 3600:
-            print(f"Loading {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
-            with open(BRIGHT_ASTEROID_CACHE_FILE, 'rb') as f:
-                return pickle.load(f)
-        else:
-            print("Bright asteroid cache is too old.")
+    # Per-location/time-bucket cache file path
+    cache_file = build_cache_path('asteroids', lat, lon, elevation)
+    # Check for final cached asteroid list (per-location/time-bucket)
+    if use_cache:
+        cached = read_pickle_if_fresh(cache_file, DEFAULT_TTL_SECONDS)
+        if isinstance(cached, list):
+            print(f"Loading {cache_file} (valid per-location/time cache)")
+            return cached
+        # Fallback: legacy global cache for migration
+        legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, DEFAULT_TTL_SECONDS)
+        if isinstance(legacy, list):
+            print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
+            return legacy
 
     # --- DataFrame Loading --- 
     df = None
@@ -273,9 +278,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 print(f"Error in final processing for {row['designation']}: {e}")
                 continue
 
-        with open(BRIGHT_ASTEROID_CACHE_FILE, 'wb') as f:
-            pickle.dump(asteroid_list, f)
-        print(f"Saved {len(asteroid_list)} bright asteroids to cache.")
+        atomic_write_pickle(cache_file, asteroid_list)
+        print(f"Saved {len(asteroid_list)} bright asteroids to cache ({cache_file}).")
         
         return asteroid_list
 

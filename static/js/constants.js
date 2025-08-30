@@ -5,7 +5,8 @@ export const API_ENDPOINTS = {
     SKY: '/api/celestial',
     ASTEROIDS: '/api/asteroids',
     COMETS: '/api/comets',
-    BRIGHT_ASTEROIDS: '/api/bright_asteroids'
+    BRIGHT_ASTEROIDS: '/api/bright_asteroids',
+    SESSION_LOCATION: '/api/session/location'
     // ZODIAC endpoint removed as it's not implemented in the backend
 };
 

@@ -21,6 +21,7 @@ import numpy as np
 import math
 
 from bright_asteroids import format_time
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
 
 # Cache files
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
@@ -347,20 +348,21 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             logger.warning("Could not extract location data from observer_location")
             lat, lon, elevation = 0.0, 0.0, 0.0
 
-    # Optional: load final list from cache (coarse TTL, not keyed by location; mirrors asteroid behavior)
-    try:
-        if use_cache and os.path.exists(BRIGHT_COMET_CACHE_FILE):
-            cache_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(BRIGHT_COMET_CACHE_FILE))
-            if cache_age.total_seconds() < COMET_LIST_CACHE_VALIDITY_HOURS * 3600:
-                logger.debug(f"Loading {BRIGHT_COMET_CACHE_FILE} (valid cache)")
-                with open(BRIGHT_COMET_CACHE_FILE, 'rb') as f:
-                    cached_list = pickle.load(f)
-                if isinstance(cached_list, list):
-                    return cached_list[:max_comets]
-            else:
-                logger.debug("Bright comet cache is too old.")
-    except Exception as e:
-        logger.debug(f"Error reading bright comet cache: {e}")
+    # Per-location/time-bucket cache for final comet list
+    cache_file = build_cache_path('comets', lat, lon, elevation)
+    if use_cache:
+        try:
+            cached_list = read_pickle_if_fresh(cache_file, DEFAULT_TTL_SECONDS)
+            if isinstance(cached_list, list):
+                logger.debug(f"Loading {cache_file} (valid per-location/time cache)")
+                return cached_list[:max_comets]
+            # Fallback to legacy global cache for migration
+            legacy = read_pickle_if_fresh(BRIGHT_COMET_CACHE_FILE, DEFAULT_TTL_SECONDS)
+            if isinstance(legacy, list):
+                logger.debug(f"Loading legacy comet cache {BRIGHT_COMET_CACHE_FILE}")
+                return legacy[:max_comets]
+        except Exception as e:
+            logger.debug(f"Error reading comet caches: {e}")
 
     df = load_comet_dataframe()
     if df is None or df.empty:
@@ -565,12 +567,11 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             })
             count += 1
 
-    # Save final list to cache for faster subsequent loads
+    # Save final list to per-location/time cache for faster subsequent loads
     try:
-        with open(BRIGHT_COMET_CACHE_FILE, 'wb') as f:
-            pickle.dump(comet_list, f)
-        logger.debug(f"Saved {len(comet_list)} bright comets to cache.")
+        atomic_write_pickle(cache_file, comet_list)
+        logger.debug(f"Saved {len(comet_list)} bright comets to cache ({cache_file}).")
     except Exception as e:
-        logger.debug(f"Failed to write bright comet cache: {e}")
+        logger.debug(f"Failed to write comet cache {cache_file}: {e}")
 
     return comet_list
