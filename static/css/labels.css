@@ -1,0 +1,29 @@
+/* Labels overlay for bright minor planets */
+.labels-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none; /* allow clicks to pass through */
+  z-index: 5000; /* above sky text but below nav arrows (9999) */
+}
+
+.object-label {
+  position: absolute;
+  transform: translate(-50%, -100%); /* center horizontally, above point */
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #88ff88; /* dim green */
+  background: rgba(0, 0, 0, 0.4);
+  padding: 1px 3px;
+  /*border-radius: 2px;
+  border: 1px solid rgba(0, 255, 0, 0.2);*/
+  white-space: nowrap;
+  text-shadow: 0 0 2px rgba(0, 255, 0, 0.3);
+}
+
+@media (max-width: 768px) {
+  .object-label { font-size: 0.7rem; }
+}
