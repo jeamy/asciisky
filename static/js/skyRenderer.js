@@ -820,16 +820,16 @@ export class SkyRenderer {
                     info.push(`${t('rise_time')}: ${label}`);
                 }
                 
-                if (selectedObject.set_time) {
-                    const label = this.buildTimeLabel(selectedObject.set_time);
-                    info.push(`${t('set_time')}: ${label}`);
-                }
-                
                 if (selectedObject.transit_time) {
                     const label = this.buildTimeLabel(selectedObject.transit_time);
                     info.push(`${t('transit_time')}: ${label}`);
                 }
         
+                if (selectedObject.set_time) {
+                    const label = this.buildTimeLabel(selectedObject.set_time);
+                    info.push(`${t('set_time')}: ${label}`);
+                }
+                
                 if (selectedObject.phase !== undefined) {
                     const phaseName = selectedObject.phase_name ? t(selectedObject.phase_name) : '';
                     info.push(`${t('phase')}: ${(selectedObject.phase * 100).toFixed(1)}% ${phaseName}`);
