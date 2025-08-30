@@ -28,6 +28,7 @@ from pydantic import BaseModel
 import settings
 import bright_asteroids
 import comets
+from timezone_utils import get_tzinfo
 
 # Initialisiere FastAPI
 app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung des Sternenhimmels")
@@ -119,6 +120,9 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
         if elevation is None:
             elevation = session_loc.get("elevation", location_settings["elevation"])
         
+        # Determine observer timezone from coordinates
+        tz = get_tzinfo(lat, lon)
+        
         t = ts.now()
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
         observer = eph['earth'] + location
@@ -208,7 +212,7 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                     for time, event in zip(times, events):
                         # Konvertiere UTC zu lokaler Zeit mit expliziter Zeitzone
                         utc_time = time.utc_datetime().replace(tzinfo=timezone.utc)
-                        local_time = utc_time.astimezone()
+                        local_time = utc_time.astimezone(tz)
                         # Formatiere die Zeit als HH:MM
                         formatted_time = local_time.strftime('%H:%M')
                         # print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
@@ -224,8 +228,8 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                         # Wenn Auf- und Untergangszeit bekannt sind, suche im Zeitraum dazwischen
                         if rise_time and set_time:
                             # Hole die aktuelle Zeit mit Zeitzone
-                            now = datetime.now().astimezone()
-                            local_tz = now.tzinfo
+                            now = datetime.now(timezone.utc).astimezone(tz)
+                            local_tz = tz
                             today = now.date()
                             
                             # Konvertiere Zeiten zu Datetime-Objekten mit lokaler Zeitzone
@@ -236,15 +240,15 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                             
                             # Wenn der Untergang vor dem Aufgang liegt, ist er am nächsten Tag
                             if set_dt < rise_dt:
-                                set_dt = set_dt.replace(day=today.day + 1)
+                                set_dt += timedelta(days=1)
                             
                             # Berechne die Mitte zwischen Auf- und Untergang als Näherung für die Transitzeit
                             transit_dt = rise_dt + (set_dt - rise_dt) / 2
                             transit_time = transit_dt.strftime('%H:%M')
                             # print(f"Transit time for {name}: {transit_time} local ({local_tz})")
                         else:
-                            # Grobe Schätzung: Transitzeit in 12 Stunden
-                            transit_dt = datetime.now() + timedelta(hours=12)
+                            # Grobe Schätzung: Transitzeit in 12 Stunden (timezone-aware)
+                            transit_dt = datetime.now(timezone.utc).astimezone(tz) + timedelta(hours=12)
                             transit_time = transit_dt.strftime('%H:%M')
                     except Exception as e:
                         print(f"Fehler bei der Berechnung der Transitzeit für {name}: {str(e)}")
@@ -295,6 +299,9 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
         if elevation is None:
             elevation = session_loc.get("elevation", location_settings["elevation"])
         
+        # Determine observer timezone from coordinates
+        tz = get_tzinfo(lat, lon)
+
         t = ts.now()
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
         observer = eph['earth'] + location
@@ -370,7 +377,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
         
         for time, event in zip(times, events):
             # Konvertiere UTC zu lokaler Zeit
-            local_time = time.utc_datetime().replace(tzinfo=timezone.utc).astimezone()
+            local_time = time.utc_datetime().replace(tzinfo=timezone.utc).astimezone(tz)
             # Formatiere die Zeit als HH:MM
             formatted_time = local_time.strftime('%H:%M')
             
@@ -396,9 +403,9 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
             # Wenn Auf- und Untergangszeit bekannt sind, suche im Zeitraum dazwischen
             if rise_time and set_time:
                 # Konvertiere Zeiten zu Datetime-Objekten
-                now = datetime.now()
-                rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
-                set_dt = datetime.strptime(set_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day)
+                now = datetime.now(timezone.utc).astimezone(tz)
+                rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day, tzinfo=tz)
+                set_dt = datetime.strptime(set_time, '%H:%M').replace(year=now.year, month=now.month, day=now.day, tzinfo=tz)
                 
                 # Wenn der Untergang vor dem Aufgang liegt, ist er am nächsten Tag
                 if set_dt < rise_dt:
@@ -419,10 +426,10 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
                 # Wenn der Körper aufsteigt, liegt die Transitzeit in der Zukunft
                 if alt_later > alt_now:
                     # Grobe Schätzung: Transitzeit in 6 Stunden
-                    transit_dt = datetime.now() + timedelta(hours=6)
+                    transit_dt = datetime.now(timezone.utc).astimezone(tz) + timedelta(hours=6)
                 else:
                     # Grobe Schätzung: Transitzeit in 18 Stunden
-                    transit_dt = datetime.now() + timedelta(hours=18)
+                    transit_dt = datetime.now(timezone.utc).astimezone(tz) + timedelta(hours=18)
                 
                 transit_time = transit_dt.strftime('%H:%M')
         except Exception as e:

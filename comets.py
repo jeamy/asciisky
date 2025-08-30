@@ -22,6 +22,7 @@ import math
 
 from bright_asteroids import format_time
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
+from timezone_utils import get_tzinfo
 
 # Cache files
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
@@ -383,6 +384,8 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
     observer = eph['earth'] + topos
     sun = eph['sun']
+    # Determine observer timezone for formatting and local-day selection
+    tz = get_tzinfo(lat, lon)
 
     comet_list: List[dict] = []
     count = 0
@@ -519,12 +522,12 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 t_times, t_events = almanac.find_discrete(start_time, end_time, f)
                 chosen_local_dt = None
                 if len(t_times):
-                    now_local = datetime.now().astimezone()
+                    now_local = datetime.now(timezone.utc).astimezone(tz)
                     today_local = now_local.date()
                     candidates = []
                     for ti, ev in zip(t_times, t_events):
                         utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        local_dt = utc_dt.astimezone()
+                        local_dt = utc_dt.astimezone(tz)
                         try:
                             alt_deg = observer.at(ti).observe(sun + orbit).apparent().altaz()[0].degrees
                         except Exception:
@@ -561,9 +564,9 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 'azimuth': az.degrees,
                 'distance': round(distance.au, 3),
                 'magnitude': round(float(apparent_magnitude), 1) if isinstance(apparent_magnitude, (int, float)) else None,
-                'rise_time': format_time(rise_time),
-                'set_time': format_time(set_time),
-                'transit_time': format_time(transit_time)
+                'rise_time': format_time(rise_time, tz),
+                'set_time': format_time(set_time, tz),
+                'transit_time': format_time(transit_time, tz)
             })
             count += 1
 

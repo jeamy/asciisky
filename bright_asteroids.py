@@ -15,6 +15,7 @@ from skyfield.data import mpc
 import math
 from types import SimpleNamespace
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
+from timezone_utils import get_tzinfo
 
 # Konstanten für Cache-Dateien
 ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
@@ -38,17 +39,22 @@ CACHE_VALIDITY_HOURS = 6
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
 
-def format_time(dt):
+def format_time(dt, tz=None):
     """
     Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM'.
     Gibt None zurück, wenn dt None ist.
-    Hinweis: Die UI hängt die lokalisierte Stundenbezeichnung an (z.B. 'Uhr').
+    Wenn tz übergeben wird, wird in diese Zeitzone konvertiert. Naive dt
+    wird als UTC interpretiert.
     """
     if dt is None:
         return None
-    
-    # Konvertiere zu lokaler Zeit und gebe nur HH:MM zurück (ohne 'Uhr')
-    local_time = dt.astimezone()
+    # Stelle sicher, dass dt tz-aware ist (interpretiere naive als UTC)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if tz is None:
+        local_time = dt.astimezone()
+    else:
+        local_time = dt.astimezone(tz)
     return f"{local_time.hour:02d}:{local_time.minute:02d}"
 
 # IAU H-G asteroid magnitude system
@@ -129,6 +135,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             lat, lon, elevation = 0.0, 0.0, 0.0
 
     print(f"Getting asteroids with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}.")
+    # Determine observer timezone from coordinates
+    tz = get_tzinfo(lat, lon)
 
     # Per-location/time-bucket cache file path
     cache_file = build_cache_path('asteroids', lat, lon, elevation)
@@ -243,13 +251,13 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 # Wähle die obere Kulmination (höchste Altitude) für den lokalen Tag
                 chosen_local_dt = None
                 if len(t_times):
-                    now_local = datetime.now().astimezone()
+                    now_local = datetime.now(timezone.utc).astimezone(tz)
                     today_local = now_local.date()
                     candidates = []
                     for ti, ev in zip(t_times, t_events):
-                        # UTC -> lokal
+                        # UTC -> lokal in Beobachter-Zeitzone
                         utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        local_dt = utc_dt.astimezone()
+                        local_dt = utc_dt.astimezone(tz)
                         # Altitude am Transit-Zeitpunkt bestimmen
                         try:
                             alt_deg = observer.at(ti).observe(sun + orbit).apparent().altaz()[0].degrees
@@ -270,8 +278,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     "magnitude": round(float(row['apparent_magnitude']), 1),
                     "ra": ra.hours * 15.0, "dec": dec.degrees,
                     "altitude": alt.degrees, "azimuth": az.degrees,
-                    "distance": round(distance.au, 3), "rise_time": format_time(rise_time),
-                    "set_time": format_time(set_time), "transit_time": format_time(transit_time),
+                    "distance": round(distance.au, 3), "rise_time": format_time(rise_time, tz),
+                    "set_time": format_time(set_time, tz), "transit_time": format_time(transit_time, tz),
                     "type": "asteroid", "symbol": "•"
                 })
             except Exception as e:
