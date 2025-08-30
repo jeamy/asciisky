@@ -460,49 +460,64 @@ async def get_celestial_object(body_id: str, lat: float = None, lon: float = Non
 # Die load_asteroid_data Funktion wurde entfernt, da sie nicht mehr benötigt wird
 
 def load_comet_data():
-    """Lade Kometendaten aus dem MPC."""
+    """Lade echte Kometendaten vom MPC und cachen sie für 24h.
+
+    Verwendet Skyfields mpc.COMET_URL und mpc.load_comets_dataframe(),
+    behält pro Bezeichnung nur das jüngste Orbit-Set, indexiert nach 'designation'.
+    """
     global comet_data_cache, comet_cache_timestamp
-    
-    # Prüfe, ob wir einen gültigen Cache haben
+
+    # In-Memory Cache prüfen (24h gültig)
     if comet_data_cache is not None and comet_cache_timestamp is not None:
-        # Wenn der Cache weniger als 24 Stunden alt ist, verwende ihn
         if (datetime.now() - comet_cache_timestamp).total_seconds() < 86400:
-            print("Using cached comet data")
+            print("Using cached comet dataframe (memory)")
             return comet_data_cache
-    
+
     try:
-        # Versuche, die Daten aus dem Cache zu laden
-        cache_file = "cache/comet_cache.pkl"
-        if os.path.exists(cache_file):
-            with open(cache_file, "rb") as f:
+        # Pickle-Cache prüfen (24h gültig)
+        if os.path.exists(COMET_CACHE_FILE):
+            with open(COMET_CACHE_FILE, "rb") as f:
                 cache = pickle.load(f)
-                if "timestamp" in cache and "data" in cache:
-                    # Wenn der Cache weniger als 24 Stunden alt ist, verwende ihn
-                    if (datetime.now() - cache["timestamp"]).total_seconds() < 86400:
-                        print("Using pickled comet data")
-                        comet_cache_timestamp = cache["timestamp"]
-                        comet_data_cache = cache["data"]
-                        return comet_data_cache
-        
-        print("Erstelle leeres Kometen-DataFrame für Testzwecke...")
-        # Erstelle ein leeres DataFrame anstatt die Daten herunterzuladen
-        import pandas as pd
-        comet_data = pd.DataFrame(columns=['designation', 'magnitude_H'])
-        
-        # Speichere den Zeitstempel und die Daten
+            if isinstance(cache, dict) and "timestamp" in cache and "data" in cache:
+                if (datetime.now() - cache["timestamp"]).total_seconds() < 86400:
+                    print("Using cached comet dataframe (pickle)")
+                    comet_cache_timestamp = cache["timestamp"]
+                    comet_data_cache = cache["data"]
+                    return comet_data_cache
+
+        # Echte Daten laden
+        with load.open(mpc.COMET_URL) as f:
+            comets = mpc.load_comets_dataframe(f)
+
+        # Nur aktuellste Orbits pro Bezeichnung behalten und Index setzen
+        comets = (
+            comets.sort_values('reference')
+                   .groupby('designation', as_index=False)
+                   .last()
+                   .set_index('designation', drop=False)
+        )
+
+        # Numerische Spalten robust konvertieren (falls als String geliefert)
+        numeric_cols = [
+            'e', 'q', 'i', 'incl', 'om', 'node', 'w', 'peri', 'epoch_tt', 'Tp',
+            'M1', 'k1', 'M2', 'k2'
+        ]
+        for col in numeric_cols:
+            if col in comets.columns:
+                comets[col] = pd.to_numeric(comets[col], errors='coerce')
+
         comet_cache_timestamp = datetime.now()
-        comet_data_cache = comet_data
-        
-        # Speichere den Cache
-        with open(cache_file, "wb") as f:
+        comet_data_cache = comets
+
+        with open(COMET_CACHE_FILE, "wb") as f:
             pickle.dump({"timestamp": comet_cache_timestamp, "data": comet_data_cache}, f)
-        
+
+        print(f"Loaded {len(comets)} comets from MPC and cached.")
         return comet_data_cache
     except Exception as e:
         print(f"Error loading comet data: {str(e)}")
-        # Fallback: Leeres DataFrame zurückgeben
-        import pandas as pd
-        return pd.DataFrame(columns=['designation', 'magnitude_H'])
+        # Kein Fallback auf Demo-Daten – leeres DataFrame zurückgeben (Policy: keine Fallback-Daten)
+        return pd.DataFrame(columns=['designation'])
 
 @app.on_event("startup")
 async def startup_event():
@@ -653,11 +668,8 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
 
 @app.get(API_ENDPOINT_COMETS)
 async def get_comets(lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False):
-    """Get visible comets."""
+    """Get comets with real MPC data, no magnitude filtering, and rise/set/transit times."""
     try:
-        # Verwende einen festen Wert für die maximale Magnitude
-        max_magnitude = 12.0  # Fester Wert für Kometen
-        
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()
         if lat is None:
@@ -666,129 +678,154 @@ async def get_comets(lat: float = None, lon: float = None, elevation: float = No
             lon = location_settings["longitude"]
         if elevation is None:
             elevation = location_settings["elevation"]
-        
+
         # Speichere die Standortdaten, wenn gewünscht
         if save_location and lat is not None and lon is not None and elevation is not None:
             settings.set_location(lat, lon, elevation, location_name)
             print(f"Saved location settings: lat={lat}, lon={lon}, elevation={elevation}, name={location_name}")
-        
-        print(f"Getting comets with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}")
+
         t = ts.now()
         # Benutze die Standortparameter
         location = wgs84.latlon(lat, lon, elevation_m=elevation)
         observer = eph['earth'] + location
-        
+
         global comet_data_cache
         if comet_data_cache is None:
             comet_data_cache = load_comet_data()
-        
-        # Even if the data is empty, we'll return an empty result rather than an error
-        
+
         result = {
             "time": t.utc_datetime().isoformat(),
-            "max_magnitude": max_magnitude,
             "bodies": {}
         }
-        
+
         # Import constants for comet orbit calculation
         from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2 as GM_SUN
-        
-        # Get the sun object for comet position calculation
+
         sun = eph['sun']
-        
-        # Process comets - we'll limit to a reasonable number to avoid performance issues
+
+        # Process comets - limit for performance
         comet_count = 0
-        max_comets = 100  # Limit to prevent performance issues
-        
+        max_comets = 100
+
         # Process each comet in the dataframe
         for designation, comet_row in comet_data_cache.iterrows():
             try:
-                # Skip if we've reached our limit
                 if comet_count >= max_comets:
                     print(f"Reached maximum comet count ({max_comets}), stopping processing")
                     break
-                    
-                # Get the magnitude if available
-                try:
-                    if 'magnitude_H' in comet_row and pd.notna(comet_row['magnitude_H']):
-                        mag = float(comet_row['magnitude_H'])
+
+                # Approximate apparent magnitude if possible using MPC M1/k1 formula: m = M1 + 5 log10(Δ) + k1 log10(r)
+                # Fallback to None if insufficient data
+                apparent_magnitude = None
+
+                # Prepare numeric fields for orbit creation
+                numeric_fields = ['e', 'q', 'i', 'om', 'w', 'epoch_tt', 'Tp', 'peri', 'node', 'incl', 'M1', 'k1']
+                comet_data = {}
+                for field, value in comet_row.items():
+                    if pd.notna(value) and field in numeric_fields:
+                        try:
+                            comet_data[field] = float(value)
+                        except (ValueError, TypeError):
+                            comet_data[field] = value
                     else:
-                        mag = 15.0  # Default magnitude
-                except (ValueError, TypeError):
-                    mag = 15.0  # Default if conversion fails
-                
-                # Skip if magnitude is greater than max_magnitude
-                if mag > max_magnitude:
-                    continue
-                
-                # Create the comet orbit object directly from the row
-                # This follows the Skyfield documentation approach
-                try:
-                    # Konvertiere alle erforderlichen Felder explizit zu float
-                    # Dies behebt den Typfehler bei der Addition in Skyfield
-                    # Erweitere die Liste der zu konvertierenden Felder
-                    numeric_fields = ['e', 'q', 'i', 'om', 'w', 'epoch_tt', 'Tp', 'peri', 'node', 'incl']
-                    
-                    # Erstelle eine Kopie der Daten, um die Originaldaten nicht zu verändern
-                    comet_data = {}
-                    
-                    # Konvertiere alle Felder in der Zeile zu den richtigen Typen
-                    for field, value in comet_row.items():
-                        if pd.notna(value):
-                            if field in numeric_fields or isinstance(value, (str, np.str_)) and value.replace('.', '', 1).isdigit():
-                                try:
-                                    comet_data[field] = float(value)
-                                except (ValueError, TypeError):
-                                    comet_data[field] = value
-                            else:
-                                comet_data[field] = value
-                        else:
-                            comet_data[field] = None
-                    
-                    # Create the comet orbit object mit den konvertierten Daten
-                    comet_obj = sun + mpc.comet_orbit(comet_data, ts, GM_SUN)
-                except Exception as e:
-                    print(f"Error processing comet {designation}: {str(e)}")
-                    continue
-                
+                        comet_data[field] = value
+
+                # Create the comet orbit object
+                comet_obj = sun + mpc.comet_orbit(comet_data, ts, GM_SUN)
+
                 # Calculate position
                 astrometric = observer.at(t).observe(comet_obj)
                 apparent = astrometric.apparent()
                 alt, az, distance = apparent.altaz()
-                
-                # We already have the magnitude from earlier
-                apparent_magnitude = mag
-                
-                # Get RA/Dec
                 ra, dec, _ = apparent.radec()
-                
+
+                # If M1/k1 available, estimate magnitude
+                try:
+                    r = (sun.at(t).observe(comet_obj).distance().au)
+                    delta = distance.au
+                    if pd.notna(comet_row.get('M1')) and pd.notna(comet_row.get('k1')):
+                        M1 = float(comet_row.get('M1'))
+                        k1 = float(comet_row.get('k1'))
+                        import math
+                        apparent_magnitude = float(M1) + 5.0 * math.log10(max(delta, 1e-12)) + float(k1) * math.log10(max(r, 1e-12))
+                except Exception:
+                    apparent_magnitude = apparent_magnitude if apparent_magnitude is not None else None
+
                 # Get name or designation
                 if 'name' in comet_row and comet_row['name'] and pd.notna(comet_row['name']):
                     name = str(comet_row['name'])
                 else:
                     name = designation
-                
-                # Add to result
+
+                # Rise/Set over next 48h starting at local midnight
+                try:
+                    now_local = datetime.now().astimezone()
+                    local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+                    start_dt_utc = local_midnight.astimezone(timezone.utc)
+                    end_dt_utc = (local_midnight + timedelta(days=2)).astimezone(timezone.utc)
+                    start_time = ts.from_datetime(start_dt_utc)
+                    end_time = ts.from_datetime(end_dt_utc)
+                    rise_set_func = almanac.risings_and_settings(eph, comet_obj, location)
+                    times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+                    rise_time, set_time = None, None
+                    for ti, event in zip(times, events):
+                        if event == 1 and rise_time is None:
+                            rise_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        elif event == 0 and set_time is None:
+                            set_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
+
+                    # Transit time (choose highest altitude for local day)
+                    f = almanac.meridian_transits(eph, comet_obj, location)
+                    t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                    chosen_local_dt = None
+                    if len(t_times):
+                        now_local = datetime.now().astimezone()
+                        today_local = now_local.date()
+                        candidates = []
+                        for ti, ev in zip(t_times, t_events):
+                            utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                            local_dt = utc_dt.astimezone()
+                            try:
+                                alt_deg = observer.at(ti).observe(comet_obj).apparent().altaz()[0].degrees
+                            except Exception:
+                                alt_deg = float('-inf')
+                            candidates.append((local_dt, alt_deg, int(ev)))
+                        today_candidates = [c for c in candidates if c[0].date() == today_local]
+                        pool = today_candidates if today_candidates else candidates
+                        if pool:
+                            pool.sort(key=lambda x: (-x[1], x[0]))
+                            chosen_local_dt = pool[0][0]
+                    transit_time = chosen_local_dt
+                except Exception as e:
+                    print(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                    rise_time = None
+                    set_time = None
+                    transit_time = None
+
+                # Add to result with frontend-compatible fields
                 result["bodies"][designation] = {
                     "name": name,
-                    "ra": ra._degrees,
+                    "symbol": BODY_SYMBOLS.get('comet', '☄️'),
+                    "type": "comet",
+                    "ra": ra.hours * 15.0,
                     "dec": dec.degrees,
-                    "alt": alt.degrees,
-                    "az": az.degrees,
-                    "distance": distance.au,
-                    "magnitude": apparent_magnitude,
-                    "type": "comet"
+                    "altitude": alt.degrees,
+                    "azimuth": az.degrees,
+                    "distance": round(distance.au, 3),
+                    "magnitude": round(float(apparent_magnitude), 1) if isinstance(apparent_magnitude, (int, float)) else None,
+                    "rise_time": bright_asteroids.format_time(rise_time),
+                    "set_time": bright_asteroids.format_time(set_time),
+                    "transit_time": bright_asteroids.format_time(transit_time)
                 }
-                
-                # Increment our counter
+
                 comet_count += 1
             except Exception as e:
                 print(f"Error processing comet {designation}: {str(e)}")
                 continue
-        
+
         print(f"Returning {len(result['bodies'])} comets")
         return result
-        
+
     except Exception as e:
         print(f"Error in get_comets: {str(e)}")
         import traceback
