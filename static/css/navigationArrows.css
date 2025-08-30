@@ -11,7 +11,7 @@
 }
 
 .nav-arrow {
-    font-size: 16px;
+    font-size: 1rem;
     background-color: transparent; /* nur Pfeile, keine Box */
     border: none; /* kein Border */
     color: rgba(0, 255, 0, 0.85);
@@ -44,7 +44,7 @@
 
 @media (max-width: 768px) {
     .nav-arrow {
-        font-size: 14px;
+        font-size: 1rem;
         padding: 3px;
     }
 }
