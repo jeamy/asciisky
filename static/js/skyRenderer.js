@@ -363,6 +363,31 @@ export class SkyRenderer {
         }
     }
 
+    // Normalisiert Roh-Namen zu einem stabilen Dedup-Key (ohne Lokalisierung)
+    normalizeNameKey(name) {
+        try {
+            if (!name) return '';
+            let s = String(name).trim();
+
+            if (s.includes('•')) {
+                const parts = s.split('•').map(p => p.trim()).filter(Boolean);
+                if (parts.length > 0) {
+                    parts.sort((a, b) => b.length - a.length);
+                    s = parts[0];
+                }
+            }
+
+            s = s.replace(/^\(\s*\d+\s*\)\s*/, '');
+            s = s.replace(/^\d+\s+/, '');
+            s = s.replace(/^(.+?)\s+\1$/, '$1');
+            s = s.replace(/\s+/g, ' ').trim();
+
+            return s.toLowerCase();
+        } catch (_) {
+            return String(name).toLowerCase();
+        }
+    }
+
     selectObject(objectName, showDialog = false) {
         console.log(`Selecting object: ${objectName}`);
         if (this.celestialData?.bodies[objectName]) {
@@ -481,11 +506,12 @@ export class SkyRenderer {
                 // Sortiere nach Distanz
                 nearbyObjects.sort((a, b) => a.distance - b.distance);
 
-                // Entferne Duplikate (gleicher Objektname), behalte den nächsten Eintrag
+                // Entferne Duplikate (gleicher Objektname, nach Normalisierung), behalte den nächsten Eintrag
                 const seenNames = new Set();
                 const uniqueNearby = [];
                 for (const item of nearbyObjects) {
-                    const key = item.obj && item.obj.name ? item.obj.name : item.name;
+                    const rawName = item.obj && item.obj.name ? item.obj.name : item.name;
+                    const key = this.normalizeNameKey(rawName);
                     if (!seenNames.has(key)) {
                         seenNames.add(key);
                         uniqueNearby.push(item);
@@ -530,6 +556,19 @@ export class SkyRenderer {
         }
     }
 
+    // Baut ein sauber lokalisiertes Zeitlabel (fügt 'Uhr' nur einmal hinzu und trimmt Leerzeichen)
+    buildTimeLabel(timeValue) {
+        try {
+            if (!timeValue) return '';
+            const s = this.formatTimeString(timeValue);
+            if (!s) return '';
+            const needsSuffix = !/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(s);
+            return (needsSuffix ? `${s} ${t('hour')}` : s).trim();
+        } catch (_) {
+            return String(timeValue);
+        }
+    }
+
     showObjectDialog(obj) {
         console.log('Showing dialog for:', obj.name, obj);
         
@@ -551,20 +590,17 @@ export class SkyRenderer {
     
             // Zeige Auf- und Untergangszeiten an, wenn verfügbar
             if (obj.rise_time) {
-                const riseTime = this.formatTimeString(obj.rise_time);
-                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(riseTime) ? riseTime : `${riseTime} ${t('hour')}`;
+                const label = this.buildTimeLabel(obj.rise_time);
                 info.push(`${t('rise_time')}: ${label}`);
             }
             
             if (obj.set_time) {
-                const setTime = this.formatTimeString(obj.set_time);
-                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(setTime) ? setTime : `${setTime} ${t('hour')}`;
+                const label = this.buildTimeLabel(obj.set_time);
                 info.push(`${t('set_time')}: ${label}`);
             }
             
             if (obj.transit_time) {
-                const transitTime = this.formatTimeString(obj.transit_time);
-                const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(transitTime) ? transitTime : `${transitTime} ${t('hour')}`;
+                const label = this.buildTimeLabel(obj.transit_time);
                 info.push(`${t('transit_time')}: ${label}`);
             }
     
@@ -610,11 +646,11 @@ export class SkyRenderer {
             // Entferne vorherige Dialoge
             this.removeDialog();
             
-            // Entferne doppelte Einträge nach Name
+            // Entferne doppelte Einträge nach normalisiertem Namen
             const seen = new Set();
             const uniqueObjects = [];
             for (const o of objects) {
-                const key = o && o.name ? o.name : '';
+                const key = this.normalizeNameKey(o && o.name ? o.name : '');
                 if (key && !seen.has(key)) {
                     seen.add(key);
                     uniqueObjects.push(o);
@@ -686,20 +722,17 @@ export class SkyRenderer {
                 
                 // Zeige Auf- und Untergangszeiten an, wenn verfügbar
                 if (selectedObject.rise_time) {
-                    const riseTime = this.formatTimeString(selectedObject.rise_time);
-                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(riseTime) ? riseTime : `${riseTime} ${t('hour')}`;
+                    const label = this.buildTimeLabel(selectedObject.rise_time);
                     info.push(`${t('rise_time')}: ${label}`);
                 }
                 
                 if (selectedObject.set_time) {
-                    const setTime = this.formatTimeString(selectedObject.set_time);
-                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(setTime) ? setTime : `${setTime} ${t('hour')}`;
+                    const label = this.buildTimeLabel(selectedObject.set_time);
                     info.push(`${t('set_time')}: ${label}`);
                 }
                 
                 if (selectedObject.transit_time) {
-                    const transitTime = this.formatTimeString(selectedObject.transit_time);
-                    const label = /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(transitTime) ? transitTime : `${transitTime} ${t('hour')}`;
+                    const label = this.buildTimeLabel(selectedObject.transit_time);
                     info.push(`${t('transit_time')}: ${label}`);
                 }
         

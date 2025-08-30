@@ -8,7 +8,7 @@ from skyfield import almanac
 import numpy as np
 import os
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import gzip
 import urllib.request
 from skyfield.data import mpc
@@ -26,7 +26,7 @@ MAX_ASTEROIDS = 20000
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
 MAX_ABSOLUTE_MAGNITUDE = 12.0
 # V-limit for final apparent magnitude filtering
-MAX_APPARENT_MAGNITUDE = 10.0
+MAX_APPARENT_MAGNITUDE = 12.0
 # Backward-compatibility alias (legacy name used earlier in this module)
 MAX_ASTEROIDS_MAGNITUDE = MAX_ABSOLUTE_MAGNITUDE
 # Gravitationskonstante der Sonne für Skyfield
@@ -40,15 +40,16 @@ os.makedirs("cache", exist_ok=True)
 
 def format_time(dt):
     """
-    Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM Uhr'
-    Gibt None zurück, wenn dt None ist
+    Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM'.
+    Gibt None zurück, wenn dt None ist.
+    Hinweis: Die UI hängt die lokalisierte Stundenbezeichnung an (z.B. 'Uhr').
     """
     if dt is None:
         return None
     
-    # Konvertiere zu lokalem Zeitformat
+    # Konvertiere zu lokaler Zeit und gebe nur HH:MM zurück (ohne 'Uhr')
     local_time = dt.astimezone()
-    return f"{local_time.hour:02d}:{local_time.minute:02d} Uhr"
+    return f"{local_time.hour:02d}:{local_time.minute:02d}"
 
 # IAU H-G asteroid magnitude system
 def asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
@@ -234,8 +235,31 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     elif event == 0 and set_time is None: set_time = ti.utc_datetime()
                 
                 f = almanac.meridian_transits(eph, sun + orbit, topos)
-                transit_times, _ = almanac.find_discrete(start_time, end_time, f)
-                transit_time = transit_times[0].utc_datetime() if transit_times else None
+                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                # Wähle die obere Kulmination (höchste Altitude) für den lokalen Tag
+                chosen_local_dt = None
+                if len(t_times):
+                    now_local = datetime.now().astimezone()
+                    today_local = now_local.date()
+                    candidates = []
+                    for ti, ev in zip(t_times, t_events):
+                        # UTC -> lokal
+                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        local_dt = utc_dt.astimezone()
+                        # Altitude am Transit-Zeitpunkt bestimmen
+                        try:
+                            alt_deg = observer.at(ti).observe(sun + orbit).apparent().altaz()[0].degrees
+                        except Exception:
+                            alt_deg = float('-inf')
+                        candidates.append((local_dt, alt_deg, int(ev)))
+                    # Kandidaten auf heutigen lokalen Tag beschränken
+                    today_candidates = [c for c in candidates if c[0].date() == today_local]
+                    pool = today_candidates if today_candidates else candidates
+                    if pool:
+                        # Höchste Altitude zuerst, bei Gleichstand früheste Zeit
+                        pool.sort(key=lambda x: (-x[1], x[0]))
+                        chosen_local_dt = pool[0][0]
+                transit_time = chosen_local_dt
 
                 asteroid_list.append({
                     "name": row['designation'], "number": str(row.name),
