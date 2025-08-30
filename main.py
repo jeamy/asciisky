@@ -110,7 +110,8 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                 "longitude": lon,
                 "elevation": elevation
             },
-            "bodies": {}
+            "bodies": {},
+            "loading": False
         }
         
         # Berechne Position und Helligkeit für jeden Himmelskörper
@@ -190,7 +191,7 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                         local_time = utc_time.astimezone()
                         # Formatiere die Zeit als HH:MM
                         formatted_time = local_time.strftime('%H:%M')
-                        print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
+                        # print(f"Converted time for {name}: {utc_time.strftime('%H:%M')} UTC -> {formatted_time} local ({local_time.tzinfo})")
                         
                         if event == 1:  # Aufgang
                             rise_time = formatted_time
@@ -220,7 +221,7 @@ async def get_celestial_objects(lat: float = None, lon: float = None, elevation:
                             # Berechne die Mitte zwischen Auf- und Untergang als Näherung für die Transitzeit
                             transit_dt = rise_dt + (set_dt - rise_dt) / 2
                             transit_time = transit_dt.strftime('%H:%M')
-                            print(f"Transit time for {name}: {transit_time} local ({local_tz})")
+                            # print(f"Transit time for {name}: {transit_time} local ({local_tz})")
                         else:
                             # Grobe Schätzung: Transitzeit in 12 Stunden
                             transit_dt = datetime.now() + timedelta(hours=12)
@@ -547,7 +548,7 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
             'elevation': elevation
         }
         bright_asteroid_list = bright_asteroids.load_bright_asteroids(
-            loader, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_ASTEROIDS_MAGNITUDE
+            loader, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE
         )
         
         result = {
@@ -557,7 +558,8 @@ async def get_bright_asteroids(lat: float = None, lon: float = None, elevation: 
                 "longitude": lon,
                 "elevation": elevation
             },
-            "bodies": {}
+            "bodies": {},
+            "loading": False
         }
         
         # Füge die Asteroiden zum Ergebnis hinzu
@@ -584,7 +586,7 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
     """Get visible asteroids."""
     try:
         # Verwende den Wert aus bright_asteroids.py
-        max_magnitude = bright_asteroids.MAX_ASTEROIDS_MAGNITUDE
+        max_magnitude = bright_asteroids.MAX_APPARENT_MAGNITUDE
         
         # Hole Standortdaten aus den Einstellungen, wenn nicht übergeben
         location_settings = settings.get_location()
@@ -600,7 +602,7 @@ async def get_asteroids(lat: float = None, lon: float = None, elevation: float =
             settings.set_location(lat, lon, elevation, location_name)
             print(f"Saved location settings: lat={lat}, lon={lon}, elevation={elevation}, name={location_name}")
         
-        print(f"Getting asteroids with magnitude <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}")
+        # print(f"Getting asteroids with magnitude 1 <= {max_magnitude} at lat={lat}, lon={lon}, elevation={elevation}")
         t = ts.now()
         
         # Erstelle ein Dictionary mit den Standortdaten

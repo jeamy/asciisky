@@ -3,6 +3,7 @@
 <head>
     <title>ASCII Sky - Celestial Tracker</title>
     <link rel="stylesheet" href="./static/css/navigationArrows.css">
+    <link rel="stylesheet" href="./static/css/loadingIndicator.css">
     <style>
         :root {
             --primary-color: #00ff00;
@@ -247,6 +248,11 @@
             <!-- Will be populated by JavaScript -->
         </div>
         <!-- Magnitude-Filter wurden entfernt -->
+    </div>
+    
+    <div id="loading-indicator" class="loading-indicator" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="text">Loading...</span>
     </div>
     
     <div id="sky-container" class="sky-container">

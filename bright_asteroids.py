@@ -22,8 +22,13 @@ COMET_CACHE_FILE = 'cache/comet_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 20000
-# Maximale absolute Magnitude für Asteroiden (kleinere Werte = hellere Objekte)
-MAX_ASTEROIDS_MAGNITUDE = 10.0
+# Magnitude thresholds (restored defaults)
+# H-limit for prefiltering by absolute magnitude (smaller = brighter)
+MAX_ABSOLUTE_MAGNITUDE = 12.0
+# V-limit for final apparent magnitude filtering
+MAX_APPARENT_MAGNITUDE = 12.0
+# Backward-compatibility alias (legacy name used earlier in this module)
+MAX_ASTEROIDS_MAGNITUDE = MAX_ABSOLUTE_MAGNITUDE
 # Gravitationskonstante der Sonne für Skyfield
 GM_SUN = 1.32712440041e20
 
@@ -44,6 +49,27 @@ def format_time(dt):
     # Konvertiere zu lokalem Zeitformat
     local_time = dt.astimezone()
     return f"{local_time.hour:02d}:{local_time.minute:02d} Uhr"
+
+# IAU H-G asteroid magnitude system
+def asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
+    """
+    Compute apparent V magnitude using the IAU H-G phase function.
+    V = H + 5 log10(r * delta) - 2.5 log10((1 - G) * Phi1 + G * Phi2)
+    with Phi1 = exp(-3.33 * tan(alpha/2)^0.63) and Phi2 = exp(-1.87 * tan(alpha/2)^1.22)
+    """
+    try:
+        alpha = math.radians(phase_angle_deg)
+        tan_half = math.tan(alpha / 2.0)
+        # Phase functions
+        phi1 = math.exp(-3.33 * (tan_half ** 0.63))
+        phi2 = math.exp(-1.87 * (tan_half ** 1.22))
+        # Avoid log of zero
+        flux_term = max((1.0 - float(G)) * phi1 + float(G) * phi2, 1e-12)
+        value = float(H) + 5.0 * math.log10(max(r * delta, 1e-12)) - 2.5 * math.log10(flux_term)
+        return value
+    except Exception:
+        # Conservative fallback if anything goes wrong
+        return float(H) + 5.0 * math.log10(max(r * delta, 1e-12))
 
 def download_mpcorb_file():
     """
@@ -88,7 +114,7 @@ def download_mpcorb_file():
         return False
     return True
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_ASTEROIDS_MAGNITUDE, use_cache=True):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     """
@@ -155,22 +181,28 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
 
     # --- Calculations ---
     t = ts.now()
-    observer = eph['earth'] + Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
+    topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
+    observer = eph['earth'] + topos
     sun = eph['sun']
     
     try:
         df.dropna(subset=['magnitude_H'], inplace=True)
-        candidates_df = df[df['magnitude_H'] < MAX_ASTEROIDS_MAGNITUDE].copy()
-        print(f"Found {len(candidates_df)} candidates with H < {MAX_ASTEROIDS_MAGNITUDE}")
+        candidates_df = df[df['magnitude_H'] < MAX_ABSOLUTE_MAGNITUDE].copy()
+        print(f"Found {len(candidates_df)} candidates with H < {MAX_ABSOLUTE_MAGNITUDE}")
 
         apparent_magnitudes = []
         for index, row in candidates_df.iterrows():
             try:
                 orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
                 astrometric = observer.at(t).observe(sun + orbit)
-                apparent_mag = mpc.apparent_magnitude(
-                    H=row['magnitude_H'], G=row['magnitude_G'], delta=astrometric.distance().au,
-                    r=orbit.heliocentric_distance().au, phase_angle=astrometric.phase_angle(sun).degrees
+                # Distances
+                delta = astrometric.distance().au
+                sun_vec = sun.at(t).observe(sun + orbit)
+                r = sun_vec.distance().au
+                phase_angle = astrometric.phase_angle(sun).degrees
+                # Compute apparent magnitude using IAU H-G model
+                apparent_mag = asteroid_apparent_magnitude(
+                    H=row['magnitude_H'], G=row['magnitude_G'], r=r, delta=delta, phase_angle_deg=phase_angle
                 )
                 apparent_magnitudes.append(apparent_mag)
             except Exception as e:
@@ -193,14 +225,15 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
 
                 start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
                 end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                times, events = almanac.find_discrete(start_time, end_time, almanac.risings_and_settings(eph, orbit, observer.topos))
+                rise_set_func = almanac.risings_and_settings(eph, sun + orbit, topos)
+                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
                 
                 rise_time, set_time = None, None
                 for ti, event in zip(times, events):
                     if event == 1 and rise_time is None: rise_time = ti.utc_datetime()
                     elif event == 0 and set_time is None: set_time = ti.utc_datetime()
                 
-                f = almanac.meridian_transits(eph, orbit, observer.topos)
+                f = almanac.meridian_transits(eph, sun + orbit, topos)
                 transit_times, _ = almanac.find_discrete(start_time, end_time, f)
                 transit_time = transit_times[0].utc_datetime() if transit_times else None
 
@@ -211,7 +244,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     "altitude": alt.degrees, "azimuth": az.degrees,
                     "distance": round(distance.au, 3), "rise_time": format_time(rise_time),
                     "set_time": format_time(set_time), "transit_time": format_time(transit_time),
-                    "type": "asteroid"
+                    "type": "asteroid", "symbol": "•"
                 })
             except Exception as e:
                 print(f"Error in final processing for {row['designation']}: {e}")

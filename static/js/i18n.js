@@ -4,6 +4,7 @@ export const i18n = {
     'de': {
         // Allgemeine Texte
         'loading': 'Lade Himmelsdaten...',
+        'loading_asteroids': 'Lade Kleinplaneten-Daten...',
         'error_loading': 'Fehler beim Laden der Himmelsdaten. Bitte Seite neu laden.',
         'click_info': 'Klicke auf ein Objekt für Details',
         'app_title': 'ASCII Sky Tracker',
@@ -97,6 +98,7 @@ export const i18n = {
     'en': {
         // General texts
         'loading': 'Loading celestial data...',
+        'loading_asteroids': 'Loading minor planet data...',
         'error_loading': 'Error loading sky data. Please refresh the page.',
         'click_info': 'Click on any object for details',
         'app_title': 'ASCII Sky Tracker',
