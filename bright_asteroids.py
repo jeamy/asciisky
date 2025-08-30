@@ -26,7 +26,7 @@ MAX_ASTEROIDS = 20000
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
 MAX_ABSOLUTE_MAGNITUDE = 12.0
 # V-limit for final apparent magnitude filtering
-MAX_APPARENT_MAGNITUDE = 12.0
+MAX_APPARENT_MAGNITUDE = 10.0
 # Backward-compatibility alias (legacy name used earlier in this module)
 MAX_ASTEROIDS_MAGNITUDE = MAX_ABSOLUTE_MAGNITUDE
 # Gravitationskonstante der Sonne für Skyfield

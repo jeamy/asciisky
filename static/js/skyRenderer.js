@@ -326,6 +326,18 @@ export class SkyRenderer {
         }
     }
 
+    // Hilfsfunktion: Entfernt numerische Bezeichnungen wie "(4) Vesta" -> "Vesta" und lokalisiert
+    getLocalizedDisplayName(name) {
+        try {
+            if (!name) return '';
+            const m = name.match(/^\((\d+)\)\s*(.+)$/);
+            const base = m ? m[2] : name;
+            return t(base) || base;
+        } catch (_) {
+            return name;
+        }
+    }
+
     selectObject(objectName, showDialog = false) {
         console.log(`Selecting object: ${objectName}`);
         if (this.celestialData?.bodies[objectName]) {
@@ -493,7 +505,7 @@ export class SkyRenderer {
             }
             
             // Dialog-Inhalt erstellen
-            const displayName = t(obj.name) || obj.name;
+            const displayName = this.getLocalizedDisplayName(obj.name);
             const info = [
                 `${obj.symbol || ''} ${displayName}`,
                 `${t('altitude')}: ${obj.altitude.toFixed(1)}°`,
@@ -573,7 +585,7 @@ export class SkyRenderer {
             // Füge Liste der Objekte hinzu
             dialogContent += '<div class="object-list">';
             objects.forEach((obj, index) => {
-                const displayName = t(obj.name) || obj.name;
+                const displayName = this.getLocalizedDisplayName(obj.name);
                 dialogContent += `<div class="object-list-item" data-object-name="${obj.name}">${obj.symbol || ''} ${displayName}</div>`;
             });
             dialogContent += '</div>';
@@ -617,7 +629,7 @@ export class SkyRenderer {
                 if (!selectedObject) return;
                 
                 // Erstelle Informationstext
-                const displayName = t(selectedObject.name) || selectedObject.name;
+                const displayName = this.getLocalizedDisplayName(selectedObject.name);
                 const info = [
                     `${selectedObject.symbol || ''} ${displayName}`,
                     `${t('altitude')}: ${selectedObject.altitude.toFixed(1)}°`,
