@@ -22,8 +22,7 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Download ephemeris data
-RUN python -c "from skyfield.api import load; load('de421.bsp')"
+# Do not download ephemeris data at build time. The app uses a local Loader('.') and a bundled de421.bsp.
 
 # Expose the port the app runs on
 EXPOSE 8000

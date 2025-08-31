@@ -89,7 +89,7 @@ def download_mpcorb_file():
         
         # Datei herunterladen mit Fortschrittsanzeige
         print("Starting download...")
-        with urllib.request.urlopen(MPCORB_URL) as response, open(MPCORB_FILE, 'wb') as out_file:
+        with urllib.request.urlopen(MPCORB_URL, timeout=300) as response, open(MPCORB_FILE, 'wb') as out_file:
             file_size = int(response.info().get('Content-Length', 0))
             print(f"File size: {file_size / (1024*1024):.1f} MB")
             

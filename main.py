@@ -7,6 +7,7 @@ import pickle
 import time
 import gzip
 import urllib.request
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from types import SimpleNamespace
@@ -45,9 +46,10 @@ API_ENDPOINT_ASTEROIDS = "/api/asteroids"
 API_ENDPOINT_COMETS = "/api/comets"
 API_ENDPOINT_BRIGHT_ASTEROIDS = "/api/bright_asteroids"
 
-# Lade Skyfield-Daten
-ts = load.timescale()
-eph = load('de421.bsp')  # Ephemeris-Datei
+# Lade Skyfield-Daten (use local Loader to avoid network download)
+LOADER = Loader('.')
+ts = LOADER.timescale()
+eph = LOADER('de421.bsp')  # Ephemeris-Datei
 
 # Planeten und andere Himmelskörper
 CELESTIAL_BODIES = {
@@ -489,10 +491,15 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Load data on startup."""
-    # Lade Kometendaten
-    comets.load_comet_dataframe()
-    
+    """Load data on startup (non-blocking comet preload)."""
+    # Optional: preload comets in the background if enabled
+    try:
+        preload = os.environ.get("ASCII_SKY_PRELOAD_COMETS", "").lower() in ("1", "true", "yes", "on")
+        if preload:
+            asyncio.create_task(asyncio.to_thread(comets.load_comet_dataframe))
+    except Exception as e:
+        print(f"Failed to schedule comet preload: {e}")
+
     # Lade Benutzereinstellungen
     settings.load_settings()
     

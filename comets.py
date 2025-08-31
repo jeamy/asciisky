@@ -13,6 +13,7 @@ from skyfield import almanac
 import os
 import pickle
 import logging
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -285,19 +286,31 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                     comets = mpc.load_comets_dataframe(f)
             else:
                 logger.debug("Downloading MPC comet elements from network and caching to cache/CometEls.txt")
-                # Download once and store a copy
-                with load.open(mpc.COMET_URL) as rf:
-                    content = rf.read()
-                os.makedirs('cache', exist_ok=True)
+                # Download once with timeout and store a copy
                 try:
-                    with open(local_mpc_file, 'wb') as wf:
-                        wf.write(content)
-                except Exception as we:
-                    logger.warning(f"Failed to write {local_mpc_file}: {we}")
-                # Parse from the saved file (ensures consistent behavior)
-                with open(local_mpc_file, 'rb') as f:
-                    comets = mpc.load_comets_dataframe(f)
+                    with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
+                        content = rf.read()
+                except Exception as ne:
+                    logger.error(f"Error downloading MPC comet elements: {ne}")
+                    content = None
+                if content:
+                    os.makedirs('cache', exist_ok=True)
+                    try:
+                        with open(local_mpc_file, 'wb') as wf:
+                            wf.write(content)
+                    except Exception as we:
+                        logger.warning(f"Failed to write {local_mpc_file}: {we}")
+                    # Parse from the saved file (ensures consistent behavior)
+                    try:
+                        with open(local_mpc_file, 'rb') as f:
+                            comets = mpc.load_comets_dataframe(f)
+                    except Exception as pe:
+                        logger.error(f"Failed to parse MPC comet elements: {pe}")
+                        comets = pd.DataFrame(columns=['designation'])
 
+        # Ensure non-None DF before standardization
+        if comets is None:
+            comets = pd.DataFrame(columns=['designation'])
         # Standardize DataFrame (types, aliases, filtering)
         comets = _standardize_comet_df(comets)
 
