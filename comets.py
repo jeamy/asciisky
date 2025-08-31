@@ -36,7 +36,7 @@ MAX_COMETS_DEFAULT = 200
 # Pre-filter by comet absolute magnitude parameter (M1); smaller = brighter
 MAX_ABSOLUTE_MAGNITUDE = 14.0
 # Final filter by estimated apparent magnitude at current time/location
-MAX_APPARENT_MAGNITUDE = 11
+MAX_APPARENT_MAGNITUDE = 10
 
 # Ensure cache directory exists
 os.makedirs('cache', exist_ok=True)
@@ -369,11 +369,12 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
     # Prefilter by photometric parameters to reduce heavy computations
     try:
-        df_pref = df[df['M1'].notna() & df['k1'].notna() & (df['M1'] <= MAX_ABSOLUTE_MAGNITUDE)].copy()
+        # Do not require k1; use default n=4.0 later if missing (align with example in c.py)
+        df_pref = df[df['M1'].notna() & (df['M1'] <= MAX_ABSOLUTE_MAGNITUDE)].copy()
         # Process intrinsically brighter comets first
         if 'M1' in df_pref.columns:
             df_pref = df_pref.sort_values('M1')
-        logger.debug(f"Prefiltered comets by M1<= {MAX_ABSOLUTE_MAGNITUDE} & k1: {len(df_pref)} candidates from {len(df)}")
+        logger.debug(f"Prefiltered comets by M1<= {MAX_ABSOLUTE_MAGNITUDE}: {len(df_pref)} candidates from {len(df)}")
     except Exception as e:
         logger.warning(f"Comet prefilter failed, processing all: {e}")
         df_pref = df
@@ -479,15 +480,23 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             # Build comet orbit from pandas row (not dict)
             orbit = mpc.comet_orbit(row2, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
 
+            # Ensure barycentric target like in c.py: if orbit is Sun-centered, shift to SSB by adding Sun
+            try:
+                center_code = int(getattr(orbit, 'center', 10))
+            except Exception:
+                center_code = 10
+            target = (sun + orbit) if center_code != 0 else orbit
+
             # Compute geometry and estimate magnitude BEFORE heavy rise/set/transit
-            astrometric = observer.at(t).observe(sun + orbit)
+            astrometric = observer.at(t).observe(target)
             apparent_magnitude = None
             try:
-                r = sun.at(t).observe(sun + orbit).distance().au
+                r = sun.at(t).observe(target).distance().au
                 delta = astrometric.distance().au
-                if pd.notna(row2.get('M1')) and pd.notna(row2.get('k1')):
+                if pd.notna(row2.get('M1')):
                     M1 = float(row2.get('M1'))
-                    n = float(row2.get('k1'))  # interpret k1 as exponent n
+                    n_raw = row2.get('k1')
+                    n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
                     apparent_magnitude = (
                         float(M1)
                         + 5.0 * math.log10(max(delta, 1e-12))
@@ -509,7 +518,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             try:
                 start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
                 end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                rise_set_func = almanac.risings_and_settings(eph, sun + orbit, topos)
+                rise_set_func = almanac.risings_and_settings(eph, target, topos)
                 times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
                 rise_time, set_time = None, None
@@ -520,7 +529,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                         set_time = ti.utc_datetime()
 
                 # Transit time (choose highest altitude for local day)
-                f = almanac.meridian_transits(eph, sun + orbit, topos)
+                f = almanac.meridian_transits(eph, target, topos)
                 t_times, t_events = almanac.find_discrete(start_time, end_time, f)
                 chosen_local_dt = None
                 if len(t_times):
@@ -531,7 +540,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                         utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
                         local_dt = utc_dt.astimezone(tz)
                         try:
-                            alt_deg = observer.at(ti).observe(sun + orbit).apparent().altaz()[0].degrees
+                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
                         except Exception:
                             alt_deg = float('-inf')
                         candidates.append((local_dt, alt_deg, int(ev)))

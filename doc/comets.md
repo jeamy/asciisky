@@ -7,12 +7,17 @@ This document explains how ASCII Sky computes positions and brightness for comet
 - Source data: MPC comet orbital elements (downloaded once and cached locally).
 - Orbits: Constructed per row with Skyfield `mpc.comet_orbit()`.
 - Geometry: Positions are computed topocentrically from an Earth observer with the composite target `sun + orbit`.
+  - Center handling: we build `orbit = mpc.comet_orbit(row, ts, ...)` and then:
+    - If `orbit.center != 0` (i.e., Sun-centered), we set `target = sun + orbit` to shift to the Solar System Barycenter.
+    - Else (`center == 0`), we use `target = orbit` (already baryzentrisch).
+    - All observations and almanac calls use `target`.
 - Apparent magnitude: Estimated using the M1/k1 photometric model:
   - V = M1 + 5 log10(Δ) + 2.5·k1·log10(r) (with k1 interpreted as exponent n)
 - Filtering: Two-stage filtering for performance and relevance.
-  - Prefilter by absolute parameters: require M1 and k1, and M1 ≤ 14.0
+  - Prefilter by absolute parameters: require M1 and M1 ≤ 14.0 (k1 optional; defaults to n=4.0 if missing)
   - Final filter by estimated apparent magnitude: V ≤ 10.0
 - Rise/Set/Transit: Computed with Skyfield almanac over a two-day window, selecting the best local-day transit.
+  - Functions `risings_and_settings(eph, target, topos)` and `meridian_transits(eph, target, topos)` are used with the `target` defined above.
 - Caching: DataFrame and final bright list are cached to speed up subsequent calls.
 - API: `GET /api/comets` with optional `max_comets` parameter.
 

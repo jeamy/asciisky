@@ -207,11 +207,14 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         for index, row in candidates_df.iterrows():
             try:
                 orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+                # Build barycentric target (explicit center check)
+                center_code = int(getattr(orbit, 'center', 10))
+                target = (sun + orbit) if center_code != 0 else orbit
 
-                astrometric = observer.at(t).observe(sun + orbit)
+                astrometric = observer.at(t).observe(target)
                 # Distances
                 delta = astrometric.distance().au
-                sun_vec = sun.at(t).observe(sun + orbit)
+                sun_vec = sun.at(t).observe(target)
                 r = sun_vec.distance().au
                 phase_angle = astrometric.phase_angle(sun).degrees
                 # Compute apparent magnitude using IAU H-G model
@@ -232,14 +235,17 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         for index, row in top_df.iterrows():
             try:
                 orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
-                astrometric = observer.at(t).observe(sun + orbit)
+                # Build barycentric target (explicit center check)
+                center_code = int(getattr(orbit, 'center', 10))
+                target = (sun + orbit) if center_code != 0 else orbit
+                astrometric = observer.at(t).observe(target)
                 apparent = astrometric.apparent()
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
 
                 start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
                 end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                rise_set_func = almanac.risings_and_settings(eph, sun + orbit, topos)
+                rise_set_func = almanac.risings_and_settings(eph, target, topos)
                 times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
                 
                 rise_time, set_time = None, None
@@ -247,7 +253,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     if event == 1 and rise_time is None: rise_time = ti.utc_datetime()
                     elif event == 0 and set_time is None: set_time = ti.utc_datetime()
                 
-                f = almanac.meridian_transits(eph, sun + orbit, topos)
+                f = almanac.meridian_transits(eph, target, topos)
                 t_times, t_events = almanac.find_discrete(start_time, end_time, f)
                 # Wähle die obere Kulmination (höchste Altitude) für den lokalen Tag
                 chosen_local_dt = None
@@ -261,7 +267,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                         local_dt = utc_dt.astimezone(tz)
                         # Altitude am Transit-Zeitpunkt bestimmen
                         try:
-                            alt_deg = observer.at(ti).observe(sun + orbit).apparent().altaz()[0].degrees
+                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
                         except Exception:
                             alt_deg = float('-inf')
                         candidates.append((local_dt, alt_deg, int(ev)))
