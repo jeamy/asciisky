@@ -22,7 +22,7 @@ ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
 BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
-MAX_ASTEROIDS = 20000
+MAX_ASTEROIDS = 1000
 # Magnitude thresholds (restored defaults)
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
 MAX_ABSOLUTE_MAGNITUDE = 12.0
@@ -34,7 +34,7 @@ MAX_ASTEROIDS_MAGNITUDE = MAX_ABSOLUTE_MAGNITUDE
 GM_SUN = 1.32712440041e20
 
 # Cache-Gültigkeitsdauer in Stunden
-CACHE_VALIDITY_HOURS = 6
+CACHE_VALIDITY_HOURS = 12
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
@@ -207,6 +207,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         for index, row in candidates_df.iterrows():
             try:
                 orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+
                 astrometric = observer.at(t).observe(sun + orbit)
                 # Distances
                 delta = astrometric.distance().au

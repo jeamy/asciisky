@@ -8,7 +8,7 @@ This document explains how ASCII Sky computes positions and brightness for comet
 - Orbits: Constructed per row with Skyfield `mpc.comet_orbit()`.
 - Geometry: Positions are computed topocentrically from an Earth observer with the composite target `sun + orbit`.
 - Apparent magnitude: Estimated using the M1/k1 photometric model:
-  - V = M1 + 5 log10(Δ) + k1 log10(r)
+  - V = M1 + 5 log10(Δ) + 2.5·k1·log10(r) (with k1 interpreted as exponent n)
 - Filtering: Two-stage filtering for performance and relevance.
   - Prefilter by absolute parameters: require M1 and k1, and M1 ≤ 14.0
   - Final filter by estimated apparent magnitude: V ≤ 10.0
@@ -51,13 +51,17 @@ For each candidate comet row:
 
 ## Apparent Magnitude (M1/k1)
 
-We estimate the total apparent magnitude V using the commonly used comet model:
+We estimate the total apparent magnitude V using the model:
 
-- V = M1 + 5 log10(Δ) + k1 log10(r)
+- V = M1 + 5 log10(Δ) + 2.5·k1·log10(r)
+
+Interpretation:
+
+- We treat `k1` as the brightness exponent `n` and multiply by 2.5 in magnitude space.
 
 Where:
 
-- M1, k1: comet photometric parameters from MPC (or their mapped columns)
+- M1, k1: comet photometric parameters from MPC (k1 interpreted as exponent n)
 - r: heliocentric distance in AU
 - Δ: observer (topocentric) distance in AU
 

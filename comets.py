@@ -26,19 +26,17 @@ from timezone_utils import get_tzinfo
 
 # Cache files
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
-CACHE_VALIDITY_SECONDS = 6 * 3600  # 6h
+CACHE_VALIDITY_SECONDS = 12 * 3600  # 12h
 COMETS_FILE = 'cache/CometEls.txt'
 # Final comet list cache (mirror bright_asteroids behavior)
 BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'
-# Validity for final list cache
-COMET_LIST_CACHE_VALIDITY_HOURS = 6
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
-MAX_COMETS_DEFAULT = 5000
+MAX_COMETS_DEFAULT = 200
 # Pre-filter by comet absolute magnitude parameter (M1); smaller = brighter
 MAX_ABSOLUTE_MAGNITUDE = 14.0
 # Final filter by estimated apparent magnitude at current time/location
-MAX_APPARENT_MAGNITUDE = 10.0
+MAX_APPARENT_MAGNITUDE = 11
 
 # Ensure cache directory exists
 os.makedirs('cache', exist_ok=True)
@@ -489,8 +487,12 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 delta = astrometric.distance().au
                 if pd.notna(row2.get('M1')) and pd.notna(row2.get('k1')):
                     M1 = float(row2.get('M1'))
-                    k1 = float(row2.get('k1'))
-                    apparent_magnitude = float(M1) + 5.0 * math.log10(max(delta, 1e-12)) + float(k1) * math.log10(max(r, 1e-12))
+                    n = float(row2.get('k1'))  # interpret k1 as exponent n
+                    apparent_magnitude = (
+                        float(M1)
+                        + 5.0 * math.log10(max(delta, 1e-12))
+                        + 2.5 * float(n) * math.log10(max(r, 1e-12))
+                    )
             except Exception:
                 pass
 
