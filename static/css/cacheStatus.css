@@ -19,11 +19,13 @@
   flex-direction: column;
   max-height: calc(100vh - 200px);
   overflow: auto;
+  font-size: 0.8rem;
 }
 
 .cache-status-panel .cs-header {
   font-weight: 700;
   margin-bottom: 8px;
+  font-size: 0.9rem;
 }
 
 .cache-status-panel .cs-subtle {
