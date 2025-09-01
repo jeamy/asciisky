@@ -759,7 +759,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get(API_ENDPOINT_CACHE_STATUS)
-async def get_cache_status(time: Optional[str] = None):
+async def get_cache_status(time: Optional[str] = None, lat: Optional[float] = None, lon: Optional[float] = None, elevation: Optional[float] = None, loc_key: Optional[str] = None):
     """Report status of the precomputed cache system.
     Returns targeted locations, configured kinds, horizon, current window, and counts of
     cached files per kind and location within the current rolling window.
@@ -779,48 +779,94 @@ async def get_cache_status(time: Optional[str] = None):
         window_start = _hour_floor(dt_utc)
         window_end = window_start + timedelta(hours=horizon_hours)
 
-        # Get target locations (lazy import to avoid circular import)
-        targets = []
-        try:
+        # Determine if a specific location was requested via query params
+        requested = None  # dict with keys: latitude, longitude, elevation, name, loc_key
+        if loc_key:
             try:
-                from precompute_worker import get_target_locations as _get_targets  # type: ignore
+                parts = loc_key.split("_")
+                if len(parts) == 3 and parts[0].startswith("lat") and parts[1].startswith("lon") and parts[2].startswith("el"):
+                    lat_s = parts[0][3:]
+                    lon_s = parts[1][3:]
+                    el_s = parts[2][2:]
+                    lat_v = float(lat_s)
+                    lon_v = float(lon_s)
+                    elev_v = float(int(el_s))  # stored as signed integer with leading zeros
+                    lat_n, lon_n, elev_n = normalize_location(lat_v, lon_v, elev_v)
+                    requested = {
+                        "latitude": float(lat_n),
+                        "longitude": float(lon_n),
+                        "elevation": float(elev_n),
+                        "name": "",
+                        "loc_key": loc_key,
+                    }
             except Exception:
-                _get_targets = None
-            if _get_targets is not None:
-                try:
-                    targets = _get_targets() or []
-                except Exception:
-                    targets = []
-        except Exception:
-            targets = []
-        # Fallback: include persisted user location if targets empty
-        if not targets:
-            try:
-                base = settings.get_location()
-                if isinstance(base, dict) and "latitude" in base and "longitude" in base:
-                    targets = [{
-                        "latitude": float(base.get("latitude", 0.0)),
-                        "longitude": float(base.get("longitude", 0.0)),
-                        "elevation": float(base.get("elevation", 0.0)),
-                        "name": base.get("name", "") or ""
-                    }]
-            except Exception:
-                targets = []
+                requested = None
 
-        # De-duplicate by normalized cache location key
-        dedup = {}
-        for loc in targets:
+        if requested is None and (lat is not None and lon is not None):
             try:
-                lat_n, lon_n, elev_n = normalize_location(loc.get("latitude", 0.0), loc.get("longitude", 0.0), loc.get("elevation", 0.0))
+                elev_in = float(elevation) if elevation is not None else 0.0
+                lat_n, lon_n, elev_n = normalize_location(float(lat), float(lon), elev_in)
                 key = location_key(lat_n, lon_n, elev_n)
-                dedup[key] = {
+                requested = {
                     "latitude": float(lat_n),
                     "longitude": float(lon_n),
                     "elevation": float(elev_n),
-                    "name": loc.get("name", "") or "",
+                    "name": "",
+                    "loc_key": key,
                 }
             except Exception:
-                continue
+                requested = None
+
+        dedup = {}
+        if requested is not None:
+            dedup[requested["loc_key"]] = {
+                "latitude": requested["latitude"],
+                "longitude": requested["longitude"],
+                "elevation": requested["elevation"],
+                "name": requested.get("name", ""),
+            }
+        else:
+            # Get target locations (lazy import to avoid circular import)
+            targets = []
+            try:
+                try:
+                    from precompute_worker import get_target_locations as _get_targets  # type: ignore
+                except Exception:
+                    _get_targets = None
+                if _get_targets is not None:
+                    try:
+                        targets = _get_targets() or []
+                    except Exception:
+                        targets = []
+            except Exception:
+                targets = []
+            # Fallback: include persisted user location if targets empty
+            if not targets:
+                try:
+                    base = settings.get_location()
+                    if isinstance(base, dict) and "latitude" in base and "longitude" in base:
+                        targets = [{
+                            "latitude": float(base.get("latitude", 0.0)),
+                            "longitude": float(base.get("longitude", 0.0)),
+                            "elevation": float(base.get("elevation", 0.0)),
+                            "name": base.get("name", "") or ""
+                        }]
+                except Exception:
+                    targets = []
+
+            # De-duplicate by normalized cache location key
+            for loc in targets:
+                try:
+                    lat_n, lon_n, elev_n = normalize_location(loc.get("latitude", 0.0), loc.get("longitude", 0.0), loc.get("elevation", 0.0))
+                    key = location_key(lat_n, lon_n, elev_n)
+                    dedup[key] = {
+                        "latitude": float(lat_n),
+                        "longitude": float(lon_n),
+                        "elevation": float(elev_n),
+                        "name": loc.get("name", "") or "",
+                    }
+                except Exception:
+                    continue
 
         # Helper to parse bucket label 'YYYYMMDDTHH' to UTC-aware datetime
         def _parse_bucket(label: str) -> Optional[datetime]:

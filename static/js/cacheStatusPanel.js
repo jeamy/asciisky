@@ -3,6 +3,7 @@ import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
 
 let panelEl = null;
+let __debounceTimer = null;
 
 function setPanel(el) {
   panelEl = el;
@@ -174,7 +175,13 @@ export function initCacheStatusPanel(elementId = 'cache-status-panel') {
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName = '') {
   try {
     renderLoading(locationName);
-    const url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
+    let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
+    // Restrict backend scan to just this location via loc_key
+    try {
+      const key = buildLocKey(lat, lon, elevation);
+      const sep = url.includes('?') ? '&' : '?';
+      url = `${url}${sep}loc_key=${encodeURIComponent(key)}`;
+    } catch (_) { /* noop */ }
     const resp = await fetch(url, { credentials: 'same-origin' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -183,4 +190,12 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
   } catch (err) {
     renderError(err, locationName);
   }
+}
+
+// Debounced variant to avoid spamming the API during rapid simulated time changes
+export function updateCacheStatusForLocationDebounced(lat, lon, elevation, locationName = '') {
+  try { if (__debounceTimer) clearTimeout(__debounceTimer); } catch (_) { /* noop */ }
+  __debounceTimer = setTimeout(() => {
+    updateCacheStatusForLocation(lat, lon, elevation, locationName);
+  }, 300);
 }

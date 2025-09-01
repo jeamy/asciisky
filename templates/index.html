@@ -61,16 +61,18 @@
     import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
     import { LocationDialog } from './static/js/locationDialog.js';
     import { settingsManager } from './static/js/settings.js';
-    import { initCacheStatusPanel, updateCacheStatusForLocation } from './static/js/cacheStatusPanel.js';
+    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     
     let renderer;
     let locationDialog;
+    let __csSecondPassTimer = null;
     
     function refreshCacheStatus() {
         try {
             const loc = settingsManager.getLocation();
             if (loc) {
-                updateCacheStatusForLocation(loc.latitude, loc.longitude, loc.elevation, loc.name);
+                // debounced to avoid spamming during rapid simulated time changes
+                updateCacheStatusForLocationDebounced(loc.latitude, loc.longitude, loc.elevation, loc.name);
             }
         } catch (_) { /* noop */ }
     }
@@ -244,8 +246,9 @@
                     if (renderer) updateSky();
                     // Refresh cache status to reflect (potential) background precompute triggered by simulated time
                     try { refreshCacheStatus(); } catch (_) { /* noop */ }
-                    // Do a second pass shortly after to pick up async updates
-                    setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
+                    // Debounced second pass 3s later, avoid stacking multiple timers
+                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
+                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 };
 
                 btnHourMinus.addEventListener('click', () => applyDelta(-60));
@@ -256,7 +259,8 @@
                     if (renderer) updateSky();
                     // Refresh cache status for returning to real-time
                     try { refreshCacheStatus(); } catch (_) { /* noop */ }
-                    setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
+                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
+                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
                 btnMinutePlus.addEventListener('click', () => applyDelta(1));
                 btnHourPlus.addEventListener('click', () => applyDelta(60));

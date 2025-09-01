@@ -1,6 +1,6 @@
 """
-AsciiSky 48h Precompute Worker
-- Maintains per-hour cached snapshots for the next N hours (default 48)
+AsciiSky Precompute Worker
+- Maintains per-hour cached snapshots for the next N hours (default 48 or env override)
 - Kinds: celestial, asteroids, comets
 - Sources locations from:
   * settings.get_location() (persisted user location)
@@ -8,7 +8,8 @@ AsciiSky 48h Precompute Worker
   * optional precompute_locations.json file at project root (JSON array)
   * existing cached locations under cache/<kind>/* (directory names 'lat±DD.DDDD_lon±DD.DDDD_el±DDDDD')
 - Runs every hour (at top of hour) to keep a rolling window fresh by creating any
-  missing per-hour cache files. It never deletes old files.
+  missing per-hour cache files.
+- Optional retention pruning deletes snapshots older than a configured number of days.
 
 Environment variables:
 - ASCII_SKY_PRECOMPUTE_HOURS: horizon in hours (default 48)
@@ -16,6 +17,7 @@ Environment variables:
   (default: "celestial,asteroids,comets")
 - ASCII_SKY_PRECOMPUTE_LOCATIONS: JSON array of objects with latitude/longitude/elevation
   or CSV string "lat,lon,elev;lat,lon,elev"
+- ASCII_SKY_RETENTION_DAYS: if set to a positive integer N, prune cache files older than N days
 - ASCII_SKY_WORKER_RUN_ONCE: if set to "1", run a single sweep and exit
 - TZ should be set in Docker to ensure local logging timestamps
 """
@@ -26,7 +28,7 @@ import json
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # Local imports
 import settings
@@ -311,7 +313,68 @@ def precompute_sweep(kinds: List[str], horizon_hours: int) -> Tuple[int, int]:
     return created, checked
 
 
-def seconds_until_next_hour(now: datetime | None = None) -> int:
+def _parse_bucket_label(label: str) -> Optional[datetime]:
+    """Parse 'YYYYMMDDTHH' into UTC-aware datetime or None."""
+    try:
+        dt = datetime.strptime(label, "%Y%m%dT%H")
+        return dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
+    """Delete cache files older than retention_days.
+    Returns (deleted_files, scanned_files).
+    """
+    if retention_days is None or retention_days <= 0:
+        return (0, 0)
+    now = _now_utc()
+    cutoff = now - timedelta(days=int(retention_days))
+    deleted = 0
+    scanned = 0
+    try:
+        for kind in ("celestial", "asteroids", "comets"):
+            base_dir = os.path.join(CACHE_ROOT, kind)
+            if not os.path.isdir(base_dir):
+                continue
+            for loc_entry in os.listdir(base_dir):
+                loc_dir = os.path.join(base_dir, loc_entry)
+                if not os.path.isdir(loc_dir):
+                    continue
+                for fn in os.listdir(loc_dir):
+                    if not fn.endswith(".pkl"):
+                        continue
+                    scanned += 1
+                    label = fn[:-4]
+                    dt = _parse_bucket_label(label)
+                    if dt is None:
+                        continue
+                    if dt < cutoff:
+                        fpath = os.path.join(loc_dir, fn)
+                        try:
+                            os.remove(fpath)
+                            deleted += 1
+                        except Exception:
+                            traceback.print_exc()
+                # Remove empty location directories
+                try:
+                    if not os.listdir(loc_dir):
+                        os.rmdir(loc_dir)
+                except Exception:
+                    pass
+            # Remove empty kind directory
+            try:
+                if not os.listdir(base_dir):
+                    os.rmdir(base_dir)
+            except Exception:
+                pass
+    except Exception:
+        traceback.print_exc()
+    print(f"Retention prune: days={retention_days}, deleted={deleted}, scanned={scanned}")
+    return deleted, scanned
+
+
+def seconds_until_next_hour(now: Optional[datetime] = None) -> int:
     if now is None:
         now = _now_utc()
     next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
@@ -327,16 +390,33 @@ def main() -> None:
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "144"))
     except Exception:
         horizon_hours = 144
+    # Optional retention
+    try:
+        retention_days_env = os.environ.get("ASCII_SKY_RETENTION_DAYS", "").strip()
+        retention_days = int(retention_days_env) if retention_days_env else 0
+    except Exception:
+        retention_days = 0
 
     run_once = os.environ.get("ASCII_SKY_WORKER_RUN_ONCE", "").strip() == "1"
 
     print("AsciiSky precompute worker starting...")
     print(f"  kinds={kinds}")
     print(f"  horizon_hours={horizon_hours}")
+    if retention_days and retention_days > 0:
+        print(f"  retention_days={retention_days}")
+    else:
+        print("  retention_days=disabled")
 
     # Initial sweep immediately
     try:
         precompute_sweep(kinds, horizon_hours)
+    except Exception:
+        traceback.print_exc()
+
+    # Initial prune
+    try:
+        if retention_days and retention_days > 0:
+            prune_old_snapshots(retention_days)
     except Exception:
         traceback.print_exc()
 
@@ -351,6 +431,8 @@ def main() -> None:
             print(f"Sleeping {sleep_s}s until next hour...")
             time.sleep(sleep_s)
             precompute_sweep(kinds, horizon_hours)
+            if retention_days and retention_days > 0:
+                prune_old_snapshots(retention_days)
         except KeyboardInterrupt:
             print("Worker interrupted; exiting.")
             break
