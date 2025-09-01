@@ -72,6 +72,39 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
     """
     df = comets.copy()
 
+    # Ensure 'designation' is a plain column (not also an index level) to avoid
+    # pandas ambiguity errors like: "'designation' is both an index level and a column label".
+    try:
+        idx_names = list(df.index.names) if getattr(df.index, 'names', None) is not None else []
+        if 'designation' in idx_names:
+            # Move index level(s) to columns; if a 'designation' column already exists, we'll deduplicate below.
+            df = df.reset_index()
+    except Exception:
+        # Be permissive; proceed even if index inspection/reset fails.
+        pass
+
+    # If multiple 'designation' columns exist (e.g., from reset_index when one already existed),
+    # keep the first occurrence and drop the rest deterministically.
+    try:
+        if isinstance(df.columns, pd.Index):
+            desig_count = sum(1 for c in df.columns if c == 'designation')
+            if desig_count > 1:
+                kept = False
+                cols = []
+                for c in df.columns:
+                    if c == 'designation':
+                        if not kept:
+                            kept = True
+                            cols.append(c)
+                        else:
+                            # skip duplicate occurrences
+                            continue
+                    else:
+                        cols.append(c)
+                df = df.loc[:, cols]
+    except Exception:
+        pass
+
     # Defer selection of latest per designation until after numeric coercion
     # (so we can choose the latest row that still has valid e and q)
 
