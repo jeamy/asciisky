@@ -17,6 +17,8 @@ Environment variables:
   (default: "celestial,asteroids,comets")
 - ASCII_SKY_PRECOMPUTE_LOCATIONS: JSON array of objects with latitude/longitude/elevation
   or CSV string "lat,lon,elev;lat,lon,elev"
+- ASCII_SKY_PRECOMPUTE_WORKERS: number of parallel workers for location processing (default 3)
+- ASCII_SKY_ADAPTIVE_WORKERS: if set to "1", enable adaptive worker scaling based on system load
 - ASCII_SKY_RETENTION_DAYS: if set to a positive integer N, prune cache files older than N days
 - ASCII_SKY_WORKER_RUN_ONCE: if set to "1", run a single sweep and exit
 - TZ should be set in Docker to ensure local logging timestamps
@@ -27,8 +29,10 @@ import os
 import json
 import time
 import traceback
+import psutil
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Local imports
 import settings
@@ -216,6 +220,44 @@ def iter_hours(start_utc: datetime, horizon_hours: int) -> List[datetime]:
     return [base + timedelta(hours=i) for i in range(horizon_hours)]
 
 
+def iter_hours_prioritized(start_utc: datetime, horizon_hours: int) -> Tuple[List[datetime], List[datetime]]:
+    """Split hours into high priority (current + next 6h) and low priority (rest).
+    Returns (high_priority_hours, low_priority_hours).
+    """
+    base = hour_floor(start_utc)
+    all_hours = [base + timedelta(hours=i) for i in range(horizon_hours)]
+    
+    # High priority: current hour + next 6 hours (7 total)
+    high_priority = all_hours[:7] if len(all_hours) >= 7 else all_hours
+    low_priority = all_hours[7:] if len(all_hours) > 7 else []
+    
+    return high_priority, low_priority
+
+
+def get_adaptive_worker_count(base_workers: int) -> int:
+    """Calculate adaptive worker count based on system load.
+    Returns worker count between 1 and base_workers*2.
+    """
+    try:
+        # Get CPU usage (average over 1 second)
+        cpu_percent = psutil.cpu_percent(interval=1.0)
+        # Get memory usage
+        memory = psutil.virtual_memory()
+        memory_percent = memory.percent
+        
+        # Reduce workers if system is under high load
+        if cpu_percent > 80 or memory_percent > 85:
+            return max(1, base_workers // 2)
+        elif cpu_percent > 60 or memory_percent > 70:
+            return base_workers
+        else:
+            # System has capacity, can use more workers
+            return min(base_workers * 2, 8)
+    except Exception:
+        # Fallback to base workers if psutil fails
+        return base_workers
+
+
 def ensure_celestial(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure a celestial snapshot exists for this hour. Returns True if created."""
     path = build_cache_path("celestial", lat, lon, elevation, dt=dt_utc, bucket_hours=1)
@@ -269,8 +311,65 @@ def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) ->
         return False
 
 
-def precompute_sweep(kinds: List[str], horizon_hours: int) -> Tuple[int, int]:
-    """Run one sweep over all locations and hours.
+def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: List[str], batch_size: int = 6) -> Tuple[int, int]:
+    """Process all hours and kinds for a single location with batch optimization.
+    Returns (created_count, checked_count) for this location.
+    """
+    lat = float(loc["latitude"])
+    lon = float(loc["longitude"])
+    elevation = float(loc.get("elevation", 0.0))
+    label = loc.get("name") or f"{lat:.4f},{lon:.4f},{elevation:.0f}m"
+    
+    created = 0
+    checked = 0
+    
+    # Group hours into batches for more efficient processing
+    hour_batches = [hours[i:i + batch_size] for i in range(0, len(hours), batch_size)]
+    
+    for batch_idx, hour_batch in enumerate(hour_batches):
+        for kind in kinds:
+            # Check which hours in this batch need processing
+            hours_to_process = []
+            for dt in hour_batch:
+                if kind == "celestial":
+                    path = build_cache_path("celestial", lat, lon, elevation, dt=dt, bucket_hours=1)
+                elif kind == "asteroids":
+                    path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                elif kind == "comets":
+                    path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                else:
+                    continue
+                    
+                checked += 1
+                if not os.path.exists(path):
+                    hours_to_process.append(dt)
+            
+            # Process all missing hours for this kind in batch
+            if hours_to_process:
+                try:
+                    if kind == "celestial":
+                        for dt in hours_to_process:
+                            if ensure_celestial(lat, lon, elevation, dt):
+                                created += 1
+                    elif kind == "asteroids":
+                        # For asteroids/comets, we still process individually due to their caching logic
+                        for dt in hours_to_process:
+                            if ensure_asteroids(lat, lon, elevation, dt):
+                                created += 1
+                    elif kind == "comets":
+                        for dt in hours_to_process:
+                            if ensure_comets(lat, lon, elevation, dt):
+                                created += 1
+                except Exception:
+                    print(f"[{kind}] batch error for {label} (batch {batch_idx + 1})")
+                    traceback.print_exc()
+    
+    print(f"  - done {label} (created={created}, checked={checked})")
+    return created, checked
+
+
+def precompute_sweep_prioritized(kinds: List[str], horizon_hours: int, base_workers: int = 3, use_adaptive: bool = True) -> Tuple[int, int]:
+    """Run prioritized sweep with adaptive workers and batch processing.
     Returns (created_count, checked_count).
     """
     locations = get_target_locations()
@@ -279,38 +378,68 @@ def precompute_sweep(kinds: List[str], horizon_hours: int) -> Tuple[int, int]:
         return (0, 0)
 
     now = _now_utc()
-    hours = iter_hours(now, horizon_hours)
-    created = 0
-    checked = 0
+    high_priority_hours, low_priority_hours = iter_hours_prioritized(now, horizon_hours)
+    
+    # Adaptive worker count based on system load
+    if use_adaptive:
+        workers = get_adaptive_worker_count(base_workers)
+        print(f"Adaptive workers: {workers} (base: {base_workers})")
+    else:
+        workers = base_workers
+    
+    total_created = 0
+    total_checked = 0
 
-    print(f"Precompute sweep start: {len(locations)} locations, {len(hours)} hours, kinds={kinds}")
+    print(f"Precompute sweep start: {len(locations)} locations, {len(high_priority_hours)}+{len(low_priority_hours)} hours, kinds={kinds}")
 
-    for loc in locations:
-        lat = float(loc["latitude"])
-        lon = float(loc["longitude"])
-        elevation = float(loc.get("elevation", 0.0))
-        label = loc.get("name") or f"{lat:.4f},{lon:.4f},{elevation:.0f}m"
-        for dt in hours:
-            for kind in kinds:
+    # Process high priority hours first (current + next 6h)
+    if high_priority_hours:
+        print(f"Processing HIGH PRIORITY hours ({len(high_priority_hours)}h) with {workers} workers...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_location = {
+                executor.submit(_process_location_batch, loc, high_priority_hours, kinds, 3): loc
+                for loc in locations
+            }
+            
+            for future in as_completed(future_to_location):
+                loc = future_to_location[future]
                 try:
-                    if kind == "celestial":
-                        checked += 1
-                        if ensure_celestial(lat, lon, elevation, dt):
-                            created += 1
-                    elif kind == "asteroids":
-                        checked += 1
-                        if ensure_asteroids(lat, lon, elevation, dt):
-                            created += 1
-                    elif kind == "comets":
-                        checked += 1
-                        if ensure_comets(lat, lon, elevation, dt):
-                            created += 1
+                    created, checked = future.result()
+                    total_created += created
+                    total_checked += checked
                 except Exception:
+                    label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
+                    print(f"[ERROR] Failed to process high priority for location {label}")
                     traceback.print_exc()
-        print(f"  - done {label}")
 
-    print(f"Precompute sweep complete: created={created}, checked={checked}")
-    return created, checked
+    # Process low priority hours with potentially fewer workers
+    if low_priority_hours:
+        low_workers = max(1, workers // 2)  # Use fewer workers for low priority
+        print(f"Processing LOW PRIORITY hours ({len(low_priority_hours)}h) with {low_workers} workers...")
+        with ThreadPoolExecutor(max_workers=low_workers) as executor:
+            future_to_location = {
+                executor.submit(_process_location_batch, loc, low_priority_hours, kinds, 12): loc
+                for loc in locations
+            }
+            
+            for future in as_completed(future_to_location):
+                loc = future_to_location[future]
+                try:
+                    created, checked = future.result()
+                    total_created += created
+                    total_checked += checked
+                except Exception:
+                    label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
+                    print(f"[ERROR] Failed to process low priority for location {label}")
+                    traceback.print_exc()
+
+    print(f"Precompute sweep complete: created={total_created}, checked={total_checked}")
+    return total_created, total_checked
+
+
+def precompute_sweep(kinds: List[str], horizon_hours: int, max_workers: int = 3) -> Tuple[int, int]:
+    """Legacy wrapper for backward compatibility. Uses prioritized sweep."""
+    return precompute_sweep_prioritized(kinds, horizon_hours, max_workers, use_adaptive=True)
 
 
 def _parse_bucket_label(label: str) -> Optional[datetime]:
@@ -390,6 +519,14 @@ def main() -> None:
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "144"))
     except Exception:
         horizon_hours = 144
+    try:
+        max_workers = int(os.environ.get("ASCII_SKY_PRECOMPUTE_WORKERS", "3"))
+        max_workers = max(1, min(max_workers, 8))  # Clamp between 1-8
+    except Exception:
+        max_workers = 3
+    
+    adaptive_workers = os.environ.get("ASCII_SKY_ADAPTIVE_WORKERS", "1").strip() == "1"
+    
     # Optional retention
     try:
         retention_days_env = os.environ.get("ASCII_SKY_RETENTION_DAYS", "").strip()
@@ -402,6 +539,8 @@ def main() -> None:
     print("AsciiSky precompute worker starting...")
     print(f"  kinds={kinds}")
     print(f"  horizon_hours={horizon_hours}")
+    print(f"  max_workers={max_workers}")
+    print(f"  adaptive_workers={adaptive_workers}")
     if retention_days and retention_days > 0:
         print(f"  retention_days={retention_days}")
     else:
@@ -409,7 +548,7 @@ def main() -> None:
 
     # Initial sweep immediately
     try:
-        precompute_sweep(kinds, horizon_hours)
+        precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
     except Exception:
         traceback.print_exc()
 
@@ -430,7 +569,7 @@ def main() -> None:
             sleep_s = seconds_until_next_hour()
             print(f"Sleeping {sleep_s}s until next hour...")
             time.sleep(sleep_s)
-            precompute_sweep(kinds, horizon_hours)
+            precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
             if retention_days and retention_days > 0:
                 prune_old_snapshots(retention_days)
         except KeyboardInterrupt:

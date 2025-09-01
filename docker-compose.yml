@@ -22,6 +22,8 @@ services:
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=144
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
+      - ASCII_SKY_PRECOMPUTE_WORKERS=4
+      - ASCII_SKY_ADAPTIVE_WORKERS=1
       - ASCII_SKY_RETENTION_DAYS=30
     restart: unless-stopped
  
@@ -36,6 +38,8 @@ services:
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=144
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
+      - ASCII_SKY_PRECOMPUTE_WORKERS=4
+      - ASCII_SKY_ADAPTIVE_WORKERS=1
       - ASCII_SKY_RETENTION_DAYS=30
       - ASCII_SKY_WORKER_RUN_ONCE=1
     restart: "no"
