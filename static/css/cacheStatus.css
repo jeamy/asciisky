@@ -1,0 +1,114 @@
+/* Cache Status Panel styles */
+
+.main-layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.cache-status-panel {
+  width: 280px;
+  min-width: 240px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px 12px 10px 12px;
+  color: var(--primary-color);
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+}
+
+.cache-status-panel .cs-header {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.cache-status-panel .cs-subtle {
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+.cache-status-panel .cs-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.cache-status-panel .cs-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.cache-status-panel .cs-kinds {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0 0;
+}
+
+.cache-status-panel .cs-kind {
+  padding: 6px 0;
+  border-bottom: 1px dotted var(--border-color);
+}
+
+.cache-status-panel .cs-kind .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cache-status-panel .cs-kind:last-child {
+  border-bottom: none;
+}
+
+.cache-status-panel .cs-kind .name {
+  font-weight: 600;
+}
+
+.cache-status-panel .cs-kind .counts {
+  color: var(--primary-color);
+}
+
+.cache-status-panel .cs-kind .range {
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+.cache-status-panel .cs-error {
+  color: #ff7070;
+}
+
+/* Ensure the sky container flexes next to the panel */
+.main-layout .sky-container {
+  flex: 1 1 auto;
+  min-width: 0; /* allow flex overflow shrinking */
+}
+
+@media (max-width: 768px) {
+  .main-layout {
+    flex-direction: column;
+  }
+  .cache-status-panel {
+    width: 100%;
+    max-height: none;
+  }
+}
+
+/* On very wide screens, place the panel in the left free margin (outside the content box)
+   so the sky container keeps its full width. */
+@media (min-width: 1600px) {
+  .main-layout {
+    position: relative;
+  }
+  .main-layout .cache-status-panel {
+    position: absolute;
+    right: 100%; /* anchor to the left side of the content */
+    margin-right: 16px; /* keep the same gap */
+    top: 0;
+  }
+}

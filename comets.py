@@ -72,36 +72,28 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
     """
     df = comets.copy()
 
-    # Ensure 'designation' is a plain column (not also an index level) to avoid
-    # pandas ambiguity errors like: "'designation' is both an index level and a column label".
+    # Ensure 'designation' is not both an index level and a column label.
+    # 1) If any index level is named 'designation', bring it to columns.
     try:
-        idx_names = list(df.index.names) if getattr(df.index, 'names', None) is not None else []
+        idx_names = []
+        try:
+            idx_names = list(df.index.names)
+        except Exception:
+            name = getattr(df.index, 'name', None)
+            if name is not None:
+                idx_names = [name]
         if 'designation' in idx_names:
-            # Move index level(s) to columns; if a 'designation' column already exists, we'll deduplicate below.
             df = df.reset_index()
     except Exception:
-        # Be permissive; proceed even if index inspection/reset fails.
+        # Continue even if index inspection/reset fails
         pass
 
-    # If multiple 'designation' columns exist (e.g., from reset_index when one already existed),
-    # keep the first occurrence and drop the rest deterministically.
+    # 2) Drop duplicate column labels (keep first) to avoid ambiguity, especially 'designation'.
     try:
         if isinstance(df.columns, pd.Index):
-            desig_count = sum(1 for c in df.columns if c == 'designation')
-            if desig_count > 1:
-                kept = False
-                cols = []
-                for c in df.columns:
-                    if c == 'designation':
-                        if not kept:
-                            kept = True
-                            cols.append(c)
-                        else:
-                            # skip duplicate occurrences
-                            continue
-                    else:
-                        cols.append(c)
-                df = df.loc[:, cols]
+            dup_mask = df.columns.duplicated(keep='first')
+            if dup_mask.any():
+                df = df.loc[:, ~dup_mask]
     except Exception:
         pass
 
@@ -166,9 +158,9 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
                 return g.iloc[-1:]
         df = df.groupby('designation', group_keys=False).apply(_pick_last_valid)
 
-    # Ensure designation is index if present
+    # Ensure designation is index if present (do not keep it as a duplicate column)
     if 'designation' in df.columns:
-        df = df.set_index('designation', drop=False)
+        df = df.set_index('designation', drop=True)
 
     # Drop rows missing essentials; at this stage only require 'e' and 'q'.
     # Angle completeness (i/om/w) is validated later per-row before orbit build.

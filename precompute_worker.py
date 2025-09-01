@@ -324,9 +324,9 @@ def main() -> None:
     kinds_env = os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").strip()
     kinds = [k.strip() for k in kinds_env.split(",") if k.strip()]
     try:
-        horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
+        horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "144"))
     except Exception:
-        horizon_hours = 48
+        horizon_hours = 144
 
     run_once = os.environ.get("ASCII_SKY_WORKER_RUN_ONCE", "").strip() == "1"
 

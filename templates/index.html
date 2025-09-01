@@ -7,125 +7,145 @@
     <link rel="stylesheet" href="./static/css/labels.css">
     <link rel="stylesheet" href="./static/css/app.css">
     <link rel="stylesheet" href="./static/css/timeControls.css">
+    <link rel="stylesheet" href="./static/css/cacheStatus.css">
 </head>
 <body>
-    <header>
-        <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
-        <div class="header-controls">
-            <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
-            <div class="language-selector">
-                <button id="lang-de" class="lang-btn active">DE</button>
-                <button id="lang-en" class="lang-btn">EN</button>
-            </div>
+<header>
+    <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
+    <div class="header-controls">
+        <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
+        <div class="language-selector">
+            <button id="lang-de" class="lang-btn active">DE</button>
+            <button id="lang-en" class="lang-btn">EN</button>
         </div>
-        <div class="status-bar">
-            <div id="click-info">Click on any object for details</div>
-            <div id="last-updated">-</div>
-        </div>
-    </header>
-    
-    <div class="controls">
-        <div class="object-list" id="object-list">
-            <!-- Will be populated by JavaScript -->
-        </div>
-        <!-- Magnitude-Filter wurden entfernt -->
     </div>
-    
-    <!-- Simulated Time Controls (compact): << < + > >> -->
-    <div id="sim-time-controls" class="sim-time-controls sim-time-compact">
-        <button id="sim-hour-minus" class="sim-time-btn">&laquo;</button>
-        <button id="sim-minute-minus" class="sim-time-btn">&lsaquo;</button>
-        <button id="sim-now" class="sim-time-btn sim-time-now">+</button>
-        <button id="sim-minute-plus" class="sim-time-btn">&rsaquo;</button>
-        <button id="sim-hour-plus" class="sim-time-btn">&raquo;</button>
-        <div id="sim-time-local" class="sim-time-local">—</div>
+    <div class="status-bar">
+        <div id="click-info">Click on any object for details</div>
+        <div id="last-updated">-</div>
     </div>
+</header>
     
-    <div id="loading-indicator" class="loading-indicator" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span class="text">Loading...</span>
+<div class="controls">
+    <div class="object-list" id="object-list">
+        <!-- Will be populated by JavaScript -->
     </div>
+    <!-- Magnitude-Filter wurden entfernt -->
+</div>
     
+<!-- Simulated Time Controls (compact): << < + > >> -->
+<div id="sim-time-controls" class="sim-time-controls sim-time-compact">
+    <button id="sim-hour-minus" class="sim-time-btn">&laquo;</button>
+    <button id="sim-minute-minus" class="sim-time-btn">&lsaquo;</button>
+    <button id="sim-now" class="sim-time-btn sim-time-now">+</button>
+    <button id="sim-minute-plus" class="sim-time-btn">&rsaquo;</button>
+    <button id="sim-hour-plus" class="sim-time-btn">&raquo;</button>
+    <div id="sim-time-local" class="sim-time-local">—</div>
+</div>
+    
+<div id="loading-indicator" class="loading-indicator" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="text">Loading...</span>
+</div>
+    
+<div class="main-layout">
+    <aside id="cache-status-panel" class="cache-status-panel" aria-live="polite"></aside>
     <div id="sky-container" class="sky-container">
         <!-- Sky will be rendered here -->
     </div>
+</div>
     
-    <script type="module">
-        import { SkyRenderer } from './static/js/skyRenderer.js';
-        import { initializeSkyTracker, updateSky } from './static/js/skyManager.js';
-        import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
-        import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
-        import { LocationDialog } from './static/js/locationDialog.js';
-        import { settingsManager } from './static/js/settings.js';
-        
-        let renderer;
-        let locationDialog;
-        
-        // Initialize the sky tracker when the DOM is fully loaded
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 1) Einstellungen initialisieren und Session-Standort bevorzugen
-            await settingsManager.initialize();
-
-            // 2) Renderer initialisieren (nutzt jetzt den Session-Standort)
-            renderer = initializeSkyTracker();
-            
-            // 3) Standort-Dialog initialisieren
-            locationDialog = new LocationDialog(handleLocationChange);
-            
-            // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
-            setTimeout(() => {
-                setupObjectList();
-                setupLanguageButtons();
-                setupLocationButton();
-                setupSimTimeControls();
-                setupMagnitudeFilters();
-                setupNavigationArrows();
-                updateUITexts();
-                
-                // Übernehme aktuellen (Session-)Standort in UI und SkyManager
-                loadSavedLocation();
-            }, 500);
-        });
-        
-        // Funktion zum Anwenden des aktuellen (Session-präferierten) Standorts
-        function loadSavedLocation() {
-            try {
-                const loc = settingsManager.getLocation();
-                if (!loc) return;
-
-                // App-Titel aktualisieren
-                updateAppTitle(loc.name);
-
-                // Standort im SkyManager setzen und sofort updaten
-                if (renderer && renderer.skyManager) {
-                    renderer.skyManager.setLocation(loc.latitude, loc.longitude, loc.elevation);
-                    updateSky();
-                }
-
-                // Dialog-Defaults aktualisieren
-                if (locationDialog) {
-                    locationDialog.currentLocation = {
-                        lat: loc.latitude,
-                        lon: loc.longitude,
-                        elevation: loc.elevation,
-                        name: loc.name || 'Unbekannt'
-                    };
-                }
-
-                // LocalStorage aus Kompatibilitätsgründen synchron halten
-                try {
-                    const legacy = {
-                        lat: loc.latitude,
-                        lon: loc.longitude,
-                        elevation: loc.elevation,
-                        name: loc.name || 'Unbekannt'
-                    };
-                    localStorage.setItem('asciisky_location', JSON.stringify(legacy));
-                } catch (_) { /* noop */ }
-            } catch (error) {
-                console.error('Error applying location after init:', error);
+<script type="module">
+    import { SkyRenderer } from './static/js/skyRenderer.js';
+    import { initializeSkyTracker, updateSky } from './static/js/skyManager.js';
+    import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
+    import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
+    import { LocationDialog } from './static/js/locationDialog.js';
+    import { settingsManager } from './static/js/settings.js';
+    import { initCacheStatusPanel, updateCacheStatusForLocation } from './static/js/cacheStatusPanel.js';
+    
+    let renderer;
+    let locationDialog;
+    
+    function refreshCacheStatus() {
+        try {
+            const loc = settingsManager.getLocation();
+            if (loc) {
+                updateCacheStatusForLocation(loc.latitude, loc.longitude, loc.elevation, loc.name);
             }
+        } catch (_) { /* noop */ }
+    }
+
+    // Initialize app
+    document.addEventListener('DOMContentLoaded', async () => {
+        // 1) Einstellungen initialisieren und Session-Standort bevorzugen
+        await settingsManager.initialize();
+
+        // 2) Renderer initialisieren (nutzt jetzt den Session-Standort)
+        renderer = initializeSkyTracker();
+        
+        // 3) Standort-Dialog initialisieren
+        locationDialog = new LocationDialog(handleLocationChange);
+        
+        // 3b) Cache-Status-Panel initialisieren
+        initCacheStatusPanel();
+        
+        // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
+        setTimeout(() => {
+            setupObjectList();
+            setupLanguageButtons();
+            setupLocationButton();
+            setupSimTimeControls();
+            setupMagnitudeFilters();
+            updateUITexts();
+            
+            // Übernehme aktuellen (Session-)Standort in UI und SkyManager
+            loadSavedLocation();
+            // Und aktualisiere Cache-Status entsprechend
+            refreshCacheStatus();
+        }, 500);
+    });
+
+    function loadSavedLocation() {
+        try {
+            const loc = settingsManager.getLocation();
+            if (!loc) return;
+
+            // App-Titel aktualisieren
+            updateAppTitle(loc.name);
+
+            // Standort im SkyManager setzen und sofort updaten
+            if (renderer && renderer.skyManager) {
+                renderer.skyManager.setLocation(loc.latitude, loc.longitude, loc.elevation);
+                updateSky();
+            }
+
+            // Cache-Status für aktuellen Standort aktualisieren
+            try { updateCacheStatusForLocation(loc.latitude, loc.longitude, loc.elevation, loc.name); } catch (_) { /* noop */ }
+
+            // Dialog-Defaults aktualisieren
+            if (locationDialog) {
+                locationDialog.currentLocation = {
+                    lat: loc.latitude,
+                    lon: loc.longitude,
+                    elevation: loc.elevation,
+                    name: loc.name || 'Unbekannt'
+                };
+            }
+
+            // LocalStorage aus Kompatibilitätsgründen synchron halten
+            try {
+                const legacy = {
+                    lat: loc.latitude,
+                    lon: loc.longitude,
+                    elevation: loc.elevation,
+                    name: loc.name || 'Unbekannt'
+                };
+                localStorage.setItem('asciisky_location', JSON.stringify(legacy));
+            } catch (_) { /* noop */ }
+        } catch (error) {
+            console.error('Error applying location after init:', error);
         }
+    }
         
         // Funktion zum Einrichten der Sprachauswahl-Buttons
         function setupLanguageButtons() {
@@ -180,6 +200,8 @@
 
             // Simulierte Zeit: kompakte UI hat keine Labels
             updateSimPreview();
+            // Sprachenwechsel auch auf Cache-Status anwenden
+            refreshCacheStatus();
         }
         
         // Funktion zum Aktualisieren des App-Titels
@@ -220,11 +242,22 @@
                     settingsManager.setSimulatedTime(next);
                     updateSimPreview();
                     if (renderer) updateSky();
+                    // Refresh cache status to reflect (potential) background precompute triggered by simulated time
+                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
+                    // Do a second pass shortly after to pick up async updates
+                    setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 };
 
                 btnHourMinus.addEventListener('click', () => applyDelta(-60));
                 btnMinuteMinus.addEventListener('click', () => applyDelta(-1));
-                btnNow.addEventListener('click', () => { settingsManager.setSimulatedTime(0); updateSimPreview(); if (renderer) updateSky(); });
+                btnNow.addEventListener('click', () => {
+                    settingsManager.setSimulatedTime(0);
+                    updateSimPreview();
+                    if (renderer) updateSky();
+                    // Refresh cache status for returning to real-time
+                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
+                    setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
+                });
                 btnMinutePlus.addEventListener('click', () => applyDelta(1));
                 btnHourPlus.addEventListener('click', () => applyDelta(60));
 
@@ -245,7 +278,12 @@
                 const sim = settingsManager.getSimulatedTimeOffset();
                 const off = (sim && typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
                 const dt = new Date(Date.now() + off * 60000);
-                el.textContent = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                // Format date and time using current UI language
+                const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'de';
+                const locale = lang === 'en' ? 'en-US' : 'de-DE';
+                const dateStr = dt.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
+                const timeStr = dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                el.textContent = `${dateStr} ${timeStr}`;
             } catch (_) { /* noop */ }
         }
         
@@ -278,6 +316,9 @@
                 // Aktualisiere den Himmel mit der exportierten updateSky-Funktion
                 updateSky();
             }
+
+            // Aktualisiere Cache-Status für diesen Standort
+            try { updateCacheStatusForLocation(location.lat, location.lon, location.elevation, location.name); } catch (_) { /* noop */ }
             
             // Speichere den Standort im localStorage für Persistenz
             saveLocationToLocalStorage(location);

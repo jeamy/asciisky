@@ -10,7 +10,7 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
     restart: unless-stopped
-
+ 
   worker:
     image: asciisky-worker
     build: .
@@ -23,3 +23,18 @@ services:
       - ASCII_SKY_PRECOMPUTE_HOURS=144
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
     restart: unless-stopped
+ 
+  worker_once:
+    image: asciisky-worker
+    build: .
+    command: ["python", "precompute_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_PRECOMPUTE_HOURS=144
+      - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
+      - ASCII_SKY_WORKER_RUN_ONCE=1
+    restart: "no"
+    profiles: ["once"]

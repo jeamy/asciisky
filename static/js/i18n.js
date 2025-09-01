@@ -8,6 +8,16 @@ export const i18n = {
         'error_loading': 'Fehler beim Laden der Himmelsdaten. Bitte Seite neu laden.',
         'click_info': 'Klicke auf ein Objekt für Details',
         'app_title': 'ASCII Sky Tracker',
+        'cache_status': 'Cache-Status',
+        'location': 'Standort',
+        'window': 'Zeitraum',
+        'in_window': 'h',
+        'earliest': 'Frühester',
+        'latest': 'Spätester',
+        'error': 'Fehler',
+        'no_data_for_location': 'Keine Cache-Daten für diesen Standort im aktuellen Zeitraum.',
+        'snapshots': 'Einträge',
+        'overall_cache': 'Gesamter Cache',
         
         // Himmelsobjekte
         'sun': 'Sonne',
@@ -110,6 +120,16 @@ export const i18n = {
         'error_loading': 'Error loading sky data. Please refresh the page.',
         'click_info': 'Click on any object for details',
         'app_title': 'ASCII Sky Tracker',
+        'cache_status': 'Cache Status',
+        'location': 'Location',
+        'window': 'Window',
+        'in_window': 'h',
+        'earliest': 'Earliest',
+        'latest': 'Latest',
+        'error': 'Error',
+        'no_data_for_location': 'No cache data for this location in the current window.',
+        'snapshots': 'snapshots',
+        'overall_cache': 'Total cache',
         
         // Celestial objects
         'sun': 'Sun',

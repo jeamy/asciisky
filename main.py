@@ -30,7 +30,7 @@ import settings
 import bright_asteroids
 import comets
 from timezone_utils import get_tzinfo
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key
 
 # Initialisiere FastAPI
 app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung des Sternenhimmels")
@@ -46,6 +46,7 @@ API_ENDPOINT_CELESTIAL = "/api/celestial"
 API_ENDPOINT_ASTEROIDS = "/api/asteroids"
 API_ENDPOINT_COMETS = "/api/comets"
 API_ENDPOINT_BRIGHT_ASTEROIDS = "/api/bright_asteroids"
+API_ENDPOINT_CACHE_STATUS = "/api/cache_status"
 
 # Cache settings for precomputed celestial snapshots
 CELESTIAL_CACHE_BUCKET_HOURS = 1
@@ -229,6 +230,73 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
     return result
 
+# Internal helper: ensure caches and spawn background precompute window for a location
+def _hour_floor(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+def _ensure_celestial_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+    try:
+        cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
+        if not os.path.exists(cache_file):
+            snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            atomic_write_pickle(cache_file, snapshot)
+    except Exception:
+        print(f"[bg] celestial ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
+        import traceback; traceback.print_exc()
+
+def _ensure_asteroids_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+    try:
+        location = {"latitude": lat, "longitude": lon, "elevation": elevation}
+        # Module writes its cache when use_cache=True
+        _ = bright_asteroids.load_bright_asteroids(
+            LOADER, ts, eph, location,
+            max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
+            use_cache=True, current_dt=dt_utc
+        )
+    except Exception:
+        print(f"[bg] asteroids ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
+        import traceback; traceback.print_exc()
+
+def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+    try:
+        location = {"latitude": lat, "longitude": lon, "elevation": elevation}
+        _ = comets.load_comets(ts, eph, location, use_cache=True, current_dt=dt_utc)
+    except Exception:
+        print(f"[bg] comets ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
+        import traceback; traceback.print_exc()
+
+async def trigger_background_precompute_window(lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
+    """Kick off background precompute for a 48h window relative to dt_utc.
+    Forward if dt_utc >= now, otherwise backward 48h.
+    """
+    try:
+        try:
+            horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
+        except Exception:
+            horizon_hours = 48
+        now_utc = datetime.now(timezone.utc)
+        base = _hour_floor(dt_utc)
+        forward = base >= _hour_floor(now_utc)
+
+        def _do_work():
+            for i in range(horizon_hours):
+                t = base + timedelta(hours=i) if forward else base - timedelta(hours=i)
+                for k in kinds:
+                    if k == 'celestial':
+                        _ensure_celestial_cache(lat, lon, elevation, t)
+                    elif k == 'asteroids':
+                        _ensure_asteroids_cache(lat, lon, elevation, t)
+                    elif k == 'comets':
+                        _ensure_comets_cache(lat, lon, elevation, t)
+
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _do_work)
+    except Exception:
+        print("[bg] trigger failed")
+        import traceback; traceback.print_exc()
+
 # Helper: parse optional ISO 8601 datetime string (supports 'Z') into UTC-aware datetime
 def parse_time_param(time_str: Optional[str]) -> datetime:
     if not time_str:
@@ -293,7 +361,7 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
 
         dt_utc = parse_time_param(time)
 
-        # If a simulated time was provided, read from cache only (ignore TTL if necessary)
+        # If a simulated time was provided, prefer cache; on miss, compute now and trigger background precompute
         if time is not None:
             cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
             # Try fresh cache first, then fall back to any existing snapshot (old files are retained)
@@ -307,13 +375,17 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                     snapshot = None
             if isinstance(snapshot, dict) and "bodies" in snapshot:
                 return snapshot
-            # Fallback placeholder while worker prepares snapshot
-            return {
-                "time": dt_utc.isoformat(),
-                "location": {"latitude": lat, "longitude": lon, "elevation": elevation},
-                "bodies": {},
-                "loading": True
-            }
+            # Compute on-demand and store, then trigger background precompute window
+            snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            try:
+                atomic_write_pickle(cache_file, snapshot)
+            except Exception:
+                pass
+            try:
+                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            except Exception:
+                pass
+            return snapshot
 
         # Real-time: compute and store
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
@@ -349,7 +421,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
 
         dt_utc = parse_time_param(time)
 
-        # Simulated time -> cache-only
+        # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
             cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
             snapshot = read_pickle_if_fresh(cache_file, CELESTIAL_CACHE_TTL_SECONDS)
@@ -366,14 +438,23 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
                     body_out = body.copy()
                     body_out["id"] = body_id
                     return body_out
-            # Placeholder while worker prepares snapshot
-            return {
-                "id": body_id,
-                "name": body_id,
-                "symbol": BODY_SYMBOLS.get(body_id, "?"),
-                "visible": True,
-                "loading": True
-            }
+            # Compute on-demand and store, then trigger background precompute window
+            snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            try:
+                atomic_write_pickle(cache_file, snapshot)
+            except Exception:
+                pass
+            try:
+                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            except Exception:
+                pass
+            body = snapshot["bodies"].get(body_id)
+            if isinstance(body, dict):
+                body_out = body.copy()
+                body_out["id"] = body_id
+                return body_out
+            else:
+                raise HTTPException(status_code=500, detail=f"Snapshot missing body '{body_id}'")
 
         # Real-time compute
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
@@ -414,7 +495,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         
         dt_utc = parse_time_param(time)
 
-        # Simulated time -> cache-only
+        # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
             cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
             asteroid_list = None
@@ -438,12 +519,28 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                         key = f"bright_asteroid_{i}_{asteroid['name']}"
                         result["bodies"][key] = asteroid
                 return result
-            return {
+            # Compute on-demand and store, then trigger background precompute window
+            location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
+            bright_asteroid_list = bright_asteroids.load_bright_asteroids(
+                LOADER, ts, eph, location_dict,
+                max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
+                use_cache=True, current_dt=dt_utc
+            )
+            result = {
                 "time": dt_utc.isoformat(),
                 "location": {"latitude": lat, "longitude": lon, "elevation": elevation},
                 "bodies": {},
-                "loading": True
+                "loading": False
             }
+            for i, asteroid in enumerate(bright_asteroid_list):
+                if isinstance(asteroid, dict) and "name" in asteroid:
+                    key = f"bright_asteroid_{i}_{asteroid['name']}"
+                    result["bodies"][key] = asteroid
+            try:
+                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            except Exception:
+                pass
+            return result
 
         # Real-time -> compute and store via module
         loader = Loader('.')
@@ -496,7 +593,7 @@ async def get_asteroids(request: Request, lat: float = None, lon: float = None, 
         
         dt_utc = parse_time_param(time)
 
-        # Simulated time -> cache-only
+        # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
             cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
             asteroid_list = None
@@ -521,13 +618,30 @@ async def get_asteroids(request: Request, lat: float = None, lon: float = None, 
                         result["bodies"][key] = asteroid
                 print(f"Returning {len(result['bodies'])} asteroids (cache)")
                 return result
-            return {
+            # Compute on-demand and store, then trigger background precompute window
+            location = {"latitude": lat, "longitude": lon, "elevation": elevation}
+            asteroid_list = bright_asteroids.load_bright_asteroids(
+                LOADER, ts, eph, location,
+                max_magnitude=max_magnitude,
+                use_cache=True, current_dt=dt_utc
+            )
+            result = {
                 "time": dt_utc.isoformat(),
                 "location": {"latitude": lat, "longitude": lon, "elevation": elevation},
                 "max_magnitude": max_magnitude,
                 "bodies": {},
-                "loading": True
+                "loading": False
             }
+            for i, asteroid in enumerate(asteroid_list):
+                if isinstance(asteroid, dict) and "name" in asteroid:
+                    key = f"asteroid_{i}_{asteroid['name']}"
+                    result["bodies"][key] = asteroid
+            print(f"Returning {len(result['bodies'])} asteroids (simulated compute)")
+            try:
+                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            except Exception:
+                pass
+            return result
 
         # Real-time -> compute via module
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
@@ -577,7 +691,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         # Resolve simulated/current UTC time
         dt_utc = parse_time_param(time)
 
-        # Simulated time -> cache-only
+        # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
             cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
             comet_list = None
@@ -601,12 +715,25 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                         result["bodies"][key] = comet
                 print(f"Returning {len(result['bodies'])} comets (cache)")
                 return result
-            return {
+            # Compute on-demand and store, then trigger background precompute window
+            location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
+            comet_list = comets.load_comets(ts, eph, location_dict, max_comets=max_comets, use_cache=True, current_dt=dt_utc)
+            result = {
                 "time": dt_utc.isoformat(),
                 "location": {"latitude": lat, "longitude": lon, "elevation": elevation},
                 "bodies": {},
-                "loading": True
+                "loading": False
             }
+            for i, comet in enumerate(comet_list[:max_comets]):
+                if isinstance(comet, dict) and "name" in comet:
+                    key = f"comet_{i}_{comet['name']}"
+                    result["bodies"][key] = comet
+            print(f"Returning {len(result['bodies'])} comets (simulated compute)")
+            try:
+                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            except Exception:
+                pass
+            return result
 
         # Real-time -> compute and store via module
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
@@ -627,6 +754,137 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
 
     except Exception as e:
         print(f"Error in get_comets: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get(API_ENDPOINT_CACHE_STATUS)
+async def get_cache_status(time: Optional[str] = None):
+    """Report status of the precomputed cache system.
+    Returns targeted locations, configured kinds, horizon, current window, and counts of
+    cached files per kind and location within the current rolling window.
+    """
+    try:
+        # Config: kinds and horizon
+        kinds_env = os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").strip()
+        kinds = [k.strip() for k in kinds_env.split(",") if k.strip()]
+        try:
+            horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
+        except Exception:
+            horizon_hours = 48
+
+        # Time window anchored to simulated or current UTC time
+        dt_utc = parse_time_param(time)
+        now_utc = dt_utc
+        window_start = _hour_floor(dt_utc)
+        window_end = window_start + timedelta(hours=horizon_hours)
+
+        # Get target locations (lazy import to avoid circular import)
+        targets = []
+        try:
+            try:
+                from precompute_worker import get_target_locations as _get_targets  # type: ignore
+            except Exception:
+                _get_targets = None
+            if _get_targets is not None:
+                try:
+                    targets = _get_targets() or []
+                except Exception:
+                    targets = []
+        except Exception:
+            targets = []
+        # Fallback: include persisted user location if targets empty
+        if not targets:
+            try:
+                base = settings.get_location()
+                if isinstance(base, dict) and "latitude" in base and "longitude" in base:
+                    targets = [{
+                        "latitude": float(base.get("latitude", 0.0)),
+                        "longitude": float(base.get("longitude", 0.0)),
+                        "elevation": float(base.get("elevation", 0.0)),
+                        "name": base.get("name", "") or ""
+                    }]
+            except Exception:
+                targets = []
+
+        # De-duplicate by normalized cache location key
+        dedup = {}
+        for loc in targets:
+            try:
+                lat_n, lon_n, elev_n = normalize_location(loc.get("latitude", 0.0), loc.get("longitude", 0.0), loc.get("elevation", 0.0))
+                key = location_key(lat_n, lon_n, elev_n)
+                dedup[key] = {
+                    "latitude": float(lat_n),
+                    "longitude": float(lon_n),
+                    "elevation": float(elev_n),
+                    "name": loc.get("name", "") or "",
+                }
+            except Exception:
+                continue
+
+        # Helper to parse bucket label 'YYYYMMDDTHH' to UTC-aware datetime
+        def _parse_bucket(label: str) -> Optional[datetime]:
+            try:
+                dt = datetime.strptime(label, "%Y%m%dT%H")
+                return dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                return None
+
+        # Scan counts per location/kind
+        totals = {k: 0 for k in kinds}
+        locations_out = []
+        for loc_key, loc in dedup.items():
+            counts = {}
+            earliest = {}
+            latest = {}
+            for kind in kinds:
+                try:
+                    base_dir = os.path.join(CACHE_ROOT, kind, loc_key)
+                    bucket_dts = []
+                    if os.path.isdir(base_dir):
+                        for fn in os.listdir(base_dir):
+                            if not fn.endswith(".pkl"):
+                                continue
+                            label = fn[:-4]
+                            dt = _parse_bucket(label)
+                            if dt is not None:
+                                bucket_dts.append(dt)
+                    # Earliest/latest overall for this location/kind
+                    if bucket_dts:
+                        earliest[kind] = min(bucket_dts).isoformat()
+                        latest[kind] = max(bucket_dts).isoformat()
+                    else:
+                        earliest[kind] = None
+                        latest[kind] = None
+                    # Count within current window
+                    count_window = sum(1 for dt in bucket_dts if (dt >= window_start and dt < window_end))
+                    counts[kind] = int(count_window)
+                    totals[kind] = totals.get(kind, 0) + int(count_window)
+                except Exception:
+                    counts[kind] = 0
+                    earliest[kind] = None
+                    latest[kind] = None
+            locations_out.append({
+                **loc,
+                "loc_key": loc_key,
+                "counts": counts,
+                "earliest": earliest,
+                "latest": latest,
+            })
+
+        return {
+            "now_utc": now_utc.isoformat(),
+            "precompute_horizon_hours": horizon_hours,
+            "window": {
+                "start": window_start.isoformat(),
+                "end": window_end.isoformat(),
+            },
+            "kinds": kinds,
+            "locations": locations_out,
+            "totals": totals,
+        }
+    except Exception as e:
+        print(f"Error in get_cache_status: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
