@@ -1,0 +1,92 @@
+.sim-time-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  border-radius: 4px;
+  margin: 10px 0 10px 0;
+}
+
+.sim-time-controls .section-title {
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+.sim-time-controls .toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sim-time-controls .inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-time-controls input[type="number"] {
+  width: 70px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  padding: 5px;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.sim-time-controls button {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sim-time-controls button:hover {
+  background: #222;
+}
+
+.sim-time-controls .preview {
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+/* Compact variant (<< < + > >>) */
+.sim-time-compact {
+  justify-content: center;
+  gap: 6px;
+}
+
+.sim-time-btn {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  width: 36px;
+  height: 28px;
+  line-height: 1;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.sim-time-btn:hover { background: #222; }
+.sim-time-now { color: rgba(0, 255, 0, 0.9); border-color: rgba(0, 255, 0, 0.25); }
+
+/* Local time label under the arrows */
+.sim-time-local {
+  flex-basis: 100%;
+  text-align: center;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}

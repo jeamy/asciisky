@@ -71,6 +71,14 @@ export const i18n = {
         // Standort-Dialog
         'location_settings': 'Standort-Einstellungen',
         
+        // Simulierte Zeit
+        'sim_time_controls': 'Simulierte Zeit',
+        'sim_time_use': 'Simulierte Zeit verwenden',
+        'sim_time_hours': 'Stunden',
+        'sim_time_minutes': 'Minuten',
+        'sim_time_reset': 'Zurücksetzen',
+        'sim_time_preview': 'Simuliert:',
+        
         // Navigationspfeile
         'shift_left': 'Horizont nach links verschieben',
         'shift_right': 'Horizont nach rechts verschieben',
@@ -164,6 +172,14 @@ export const i18n = {
         
         // Location dialog
         'location_settings': 'Location Settings',
+        
+        // Simulated time
+        'sim_time_controls': 'Simulated Time',
+        'sim_time_use': 'Use simulated time',
+        'sim_time_hours': 'Hours',
+        'sim_time_minutes': 'Minutes',
+        'sim_time_reset': 'Reset',
+        'sim_time_preview': 'Simulated:',
         
         // Navigation arrows
         'shift_left': 'Shift horizon to the left',

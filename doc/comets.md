@@ -45,7 +45,7 @@ Cache: standardized DataFrame is stored in `cache/comets_dataframe.pkl` with a 6
 
 For each candidate comet row:
 
-- Time: `t = ts.now()` (UTC)
+- Time: `dt_utc` resolved from optional `time` query param (ISO 8601; supports trailing `Z` or TZ offset). Defaults to current UTC. `t = ts.from_datetime(dt_utc)`
 - Observer: `topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)`
   - `observer = eph['earth'] + topos`
 - Target: composite `sun + orbit` (avoids center errors and matches almanac routines)
@@ -92,7 +92,7 @@ Note: The frontend no longer exposes user-set magnitude filters. These backend t
 
 For each comet that passes filtering:
 
-- Window: 48h starting at UTC midnight of the current day.
+- Window: 48h starting at UTC midnight of the simulated day.
 - Rise/Set: `almanac.risings_and_settings(eph, sun + orbit, topos)` and `almanac.find_discrete(...)`
 - Transit: `almanac.meridian_transits(eph, sun + orbit, topos)` and `almanac.find_discrete(...)`
   - Choose the upper transit (highest altitude) that occurs on the current local day; if none, pick the best candidate.
@@ -119,9 +119,16 @@ Each comet entry returned by `load_comets()` includes:
 
 ## Endpoint
 
-- `GET /api/comets?lat=<deg>&lon=<deg>&elevation=<m>&max_comets=<N>`
+- `GET /api/comets?lat=<deg>&lon=<deg>&elevation=<m>&max_comets=<N>&time=<ISO8601>` (optional `time`)
   - Returns a JSON object with `time`, `location`, and `bodies`.
   - `max_comets` limits how many candidates are processed/returned (default 1000 at the API layer).
+  - `time` is an optional ISO 8601 UTC timestamp (e.g., `2025-01-15T21:30:00Z` or `2025-01-15T21:30:00+00:00`). When provided, all calculations and event windows use the simulated timestamp and day.
+
+Example:
+
+```
+GET /api/comets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
+```
 
 ## Frontend Integration
 

@@ -29,6 +29,11 @@ export class SettingsManager {
             },
             display: {
                 horizontalShift: 0
+            },
+            // Simulierte Zeit: deaktiviert per Default
+            simTime: {
+                enabled: false,
+                offsetMinutes: 0
             }
         };
     }
@@ -70,6 +75,51 @@ export class SettingsManager {
         return this.settings.display?.horizontalShift || 0;
     }
     
+    // --- Simulierte Zeit ---
+    // Liefert den aktuell gesetzten Versatz in Minuten und den Aktivierungsstatus
+    getSimulatedTimeOffset() {
+        const sim = this.settings.simTime || { enabled: false, offsetMinutes: 0 };
+        const off = (typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
+        // Aktiv nur, wenn Offset != 0 (kein separater Toggle mehr)
+        const autoEnabled = off !== 0;
+        return {
+            enabled: autoEnabled,
+            offsetMinutes: off
+        };
+    }
+
+    // Ob simulierte Zeit aktiviert ist
+    isSimulatedTimeEnabled() {
+        const sim = this.settings.simTime || { enabled: false, offsetMinutes: 0 };
+        const off = (typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
+        return off !== 0;
+    }
+
+    // Setzt den Versatz in Minuten; der Aktivierungsstatus ist optional.
+    // Wenn 'enabled' nicht angegeben ist, wird automatisch aktiviert, wenn offsetMinutes != 0.
+    setSimulatedTime(offsetMinutes = 0, enabled) {
+        if (!this.settings.simTime) this.settings.simTime = { enabled: false, offsetMinutes: 0 };
+        const off = Number.isFinite(offsetMinutes) ? Math.max(-2880, Math.min(2880, Math.trunc(offsetMinutes))) : 0; // clamp +/- 48h
+        const en = (typeof enabled === 'undefined') ? (off !== 0) : !!enabled;
+        this.settings.simTime.enabled = en;
+        this.settings.simTime.offsetMinutes = off;
+        this.saveSettings();
+        return this.getSimulatedTimeOffset();
+    }
+
+    // Gibt eine ISO-8601 Zeit (UTC, mit 'Z') zurück, wenn simulierte Zeit aktiv ist, sonst null
+    getSimulatedTimeISO() {
+        try {
+            const { enabled, offsetMinutes } = this.getSimulatedTimeOffset();
+            if (!enabled) return null;
+            const dt = new Date(Date.now() + (offsetMinutes || 0) * 60000);
+            return dt.toISOString(); // UTC mit Z-Suffix
+        } catch (e) {
+            console.error('Error computing simulated time ISO:', e);
+            return null;
+        }
+    }
+
     // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
     async fetchSessionLocation() {
         try {

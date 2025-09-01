@@ -15,14 +15,14 @@ import pickle
 import logging
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 import numpy as np
 import math
 
 from bright_asteroids import format_time
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
 from timezone_utils import get_tzinfo
 
 # Cache files
@@ -38,6 +38,12 @@ MAX_COMETS_DEFAULT = 200
 MAX_ABSOLUTE_MAGNITUDE = 14.0
 # Final filter by estimated apparent magnitude at current time/location
 MAX_APPARENT_MAGNITUDE = 10
+
+# Module-specific cache granularity for per-location/time comet list
+# Use a 1-hour bucket; TTL should span the 48h precompute window so that
+# snapshots remain valid when served from cache-only endpoints.
+COMET_CACHE_BUCKET_HOURS = 1
+COMET_CACHE_TTL_SECONDS = 49 * 3600
 
 # Ensure cache directory exists
 os.makedirs('cache', exist_ok=True)
@@ -339,7 +345,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         return pd.DataFrame(columns=['designation'])
 
 
-def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True) -> List[dict]:
+def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: Optional[datetime] = None) -> List[dict]:
     """
     Compute comet positions and times for the given observer location.
     Uses photometric filters similar to bright_asteroids: prefilter by M1<=MAX_ABSOLUTE_MAGNITUDE and
@@ -360,16 +366,21 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             logger.warning("Could not extract location data from observer_location")
             lat, lon, elevation = 0.0, 0.0, 0.0
 
-    # Per-location/time-bucket cache for final comet list
-    cache_file = build_cache_path('comets', lat, lon, elevation)
+    # Choose evaluation time: simulated or current UTC
+    dt_utc = current_dt or datetime.now(timezone.utc)
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+
+    # Per-location/time-bucket cache for final comet list (bucket based on simulated time if provided)
+    cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
     if use_cache:
         try:
-            cached_list = read_pickle_if_fresh(cache_file, DEFAULT_TTL_SECONDS)
+            cached_list = read_pickle_if_fresh(cache_file, COMET_CACHE_TTL_SECONDS)
             if isinstance(cached_list, list):
                 logger.debug(f"Loading {cache_file} (valid per-location/time cache)")
                 return cached_list[:max_comets]
             # Fallback to legacy global cache for migration
-            legacy = read_pickle_if_fresh(BRIGHT_COMET_CACHE_FILE, DEFAULT_TTL_SECONDS)
+            legacy = read_pickle_if_fresh(BRIGHT_COMET_CACHE_FILE, COMET_CACHE_TTL_SECONDS)
             if isinstance(legacy, list):
                 logger.debug(f"Loading legacy comet cache {BRIGHT_COMET_CACHE_FILE}")
                 return legacy[:max_comets]
@@ -392,7 +403,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         logger.warning(f"Comet prefilter failed, processing all: {e}")
         df_pref = df
 
-    t = ts.now()
+    t = ts.from_datetime(dt_utc)
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
     observer = eph['earth'] + topos
     sun = eph['sun']
@@ -546,7 +557,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 t_times, t_events = almanac.find_discrete(start_time, end_time, f)
                 chosen_local_dt = None
                 if len(t_times):
-                    now_local = datetime.now(timezone.utc).astimezone(tz)
+                    now_local = dt_utc.astimezone(tz)
                     today_local = now_local.date()
                     candidates = []
                     for ti, ev in zip(t_times, t_events):

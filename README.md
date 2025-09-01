@@ -14,6 +14,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
+- Simulated time controls (optional): view the sky at a chosen UTC time; frontend appends `?time=<ISO8601>` to API calls automatically when enabled
 - Minimalist UI design with optimized space usage
 
 ## Prerequisites
@@ -80,6 +81,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - `loadingIndicator.css` - Loading indicator styles
   - `locationDialogStyles.css` - Location dialog styles
   - `navigationArrows.css` - Navigation arrows styles
+  - `timeControls.css` - Simulated time controls styles
 - `doc/` - Documentation files
   - `plan.md` - Development plan and feature tracking
   - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
@@ -98,6 +100,22 @@ All endpoints are referenced in the frontend via `static/js/constants.js`.
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
 - `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
+
+### Simulated Time (optional)
+
+All celestial endpoints accept an optional `time` query parameter to simulate calculations at a specific UTC instant. The value must be ISO 8601 and may end with `Z` or include a timezone offset. The backend normalizes it to UTC.
+
+- Examples:
+  - `/api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+  - `/api/celestial/moon?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+  - `/api/bright_asteroids?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+  - `/api/comets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+
+Notes:
+
+- Event windows (rise/set/transit) are anchored to UTC midnight of the simulated day.
+- The response echoes `time` in UTC ISO format.
+- The frontend simulated time controls persist an offset in minutes and, when enabled, automatically append `time=<ISO8601>` to requests.
 
 Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
 

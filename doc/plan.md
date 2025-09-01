@@ -81,6 +81,7 @@
 ### Backend
 - [ ] Implement time-based simulation controls
 - [ ] Optional: Standardize logging across backend modules and set default level to INFO
+- [ ] 48h‑Vorberechnung im Hintergrund, stündlich rollierend (siehe Abschnitt „Hintergrund‑Vorberechnung für Simulation“)
 
 ### Frontend
 - [ ] Add responsive design for different screen sizes
@@ -89,6 +90,33 @@
 - [ ] Gate console logging behind a debug flag in `skyRenderer.js`/`settings.js`
 - [ ] Persist last-selected object and restore on load
 - [ ] Test comet labels and tune label thresholds if needed (labels only)
+
+## Hintergrund‑Vorberechnung für Simulation (48h, stündlich)
+
+- __Ziele__
+  - Simulierte Ansichten werden ausschließlich aus dem Cache bedient (keine On‑Demand‑Berechnung).
+  - Antwortzeiten stabil und kurz, keine langen Rechenzeiten im Request‑Pfad.
+
+- __Umfang__
+  - Alle vorhandenen/konfigurierten Orte (z. B. Liste in `config/locations.json` oder bestehende gespeicherte Orte).
+  - Daten für: Planeten/Sonne/Mond, helle Asteroiden, Kometen (inkl. Labels und Auf/Unter/Transit‑Zeiten).
+
+- __Zeit‑Raster__
+  - Stündliche Samples für die nächsten 48 Stunden (UTC‑Stundenbuckets, z. B. `YYYYMMDDTHH`).
+  - Job läuft jede volle Stunde und schiebt das 48h‑Fenster rollierend weiter.
+
+- __Cache/Storage__
+  - Persistente Dateien unter `cache/` pro Ort und Stunde, z. B. `cache/{kind}/{lat}_{lon}_{elev}/YYYYMMDDTHH.pkl`.
+  - TTL ≥ 49h oder keine TTL; separater Cleanup für Daten älter als 72h.
+  - API‑Endpoints für Simulation lesen ausschließlich aus diesem Cache.
+
+- __Orchestrierung__
+  - Stündlicher Worker (separater Docker‑Service oder In‑Process‑Scheduler).
+  - Retry/Fehlerstrategie, Logging/Metriken; Start leicht versetzt zur vollen Stunde, um Race‑Conditions zu vermeiden.
+  - Konfigurierbare Standortliste; initial alle bestehenden Orte.
+
+- __Fallbacks__
+  - Falls ein Snapshot fehlt: optional nächstgelegene Stunde verwenden oder 202/503 zurückgeben (kein On‑Demand‑Rechnen).
 
 ### UI/UX
 - [ ] Improve ASCII art for different objects

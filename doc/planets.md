@@ -5,7 +5,7 @@ This document explains how ASCII Sky computes positions, magnitudes, and event t
 ## Overview
 
 - Bodies: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune
-- Time: `t = ts.now()` (UTC)
+- Time: `dt_utc` resolved from optional `time` query param (ISO 8601; supports trailing `Z` or TZ offset). Defaults to current UTC. `t = ts.from_datetime(dt_utc)`
 - Observer: topocentric Earth location using `wgs84.latlon(lat, lon, elevation_m)`
 - Output: altitude, azimuth, Earth-center distance (AU), and magnitude, plus rise/set/transit times
 - API: `/api/celestial` (all bodies) and `/api/celestial/{body}` (single body)
@@ -42,8 +42,8 @@ Returned magnitudes are floats. They are not user-configurable.
 Times are returned as local `HH:MM` strings. The frontend appends localized labels (e.g., “Uhr”).
 
 - Rise/Set window:
-  - `/api/celestial`: search over a 48-hour window starting at UTC midnight of the current day using `almanac.risings_and_settings()` and `almanac.find_discrete()`
-  - `/api/celestial/{body}`: search from “now” to “tomorrow”
+  - `/api/celestial`: search over a 48-hour window starting at UTC midnight of the simulated day using `almanac.risings_and_settings()` and `almanac.find_discrete()`
+  - `/api/celestial/{body}`: same 48-hour window anchored at the simulated day’s UTC midnight
 - Transit (culmination):
   - `/api/celestial`: approximated as the midpoint between rise and set when both exist; otherwise fall back to “now + 12h”
   - `/api/celestial/{body}`: same midpoint approach when possible; otherwise an estimate (+6h or +18h) based on whether altitude is rising or falling
@@ -68,8 +68,15 @@ Note: Unlike asteroids/comets (which use `almanac.meridian_transits()`), planeta
 
 ## Endpoint Summary
 
-- `GET /api/celestial?lat=<deg>&lon=<deg>&elevation=<m>`
-- `GET /api/celestial/{body}?lat=<deg>&lon=<deg>&elevation=<m>`
+- `GET /api/celestial?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
+- `GET /api/celestial/{body}?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
+
+Example:
+
+```
+GET /api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
+GET /api/celestial/moon?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
+```
 
 ## Frontend Integration
 

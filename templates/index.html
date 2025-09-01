@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./static/css/loadingIndicator.css">
     <link rel="stylesheet" href="./static/css/labels.css">
     <link rel="stylesheet" href="./static/css/app.css">
+    <link rel="stylesheet" href="./static/css/timeControls.css">
 </head>
 <body>
     <header>
@@ -28,6 +29,16 @@
             <!-- Will be populated by JavaScript -->
         </div>
         <!-- Magnitude-Filter wurden entfernt -->
+    </div>
+    
+    <!-- Simulated Time Controls (compact): << < + > >> -->
+    <div id="sim-time-controls" class="sim-time-controls sim-time-compact">
+        <button id="sim-hour-minus" class="sim-time-btn">&laquo;</button>
+        <button id="sim-minute-minus" class="sim-time-btn">&lsaquo;</button>
+        <button id="sim-now" class="sim-time-btn sim-time-now">+</button>
+        <button id="sim-minute-plus" class="sim-time-btn">&rsaquo;</button>
+        <button id="sim-hour-plus" class="sim-time-btn">&raquo;</button>
+        <div id="sim-time-local" class="sim-time-local">—</div>
     </div>
     
     <div id="loading-indicator" class="loading-indicator" hidden>
@@ -66,6 +77,7 @@
                 setupObjectList();
                 setupLanguageButtons();
                 setupLocationButton();
+                setupSimTimeControls();
                 setupMagnitudeFilters();
                 setupNavigationArrows();
                 updateUITexts();
@@ -165,6 +177,9 @@
             
             // Aktualisiere den App-Titel mit i18n
             updateAppTitle();
+
+            // Simulierte Zeit: kompakte UI hat keine Labels
+            updateSimPreview();
         }
         
         // Funktion zum Aktualisieren des App-Titels
@@ -186,6 +201,52 @@
                 // Zeige den Dialog an
                 locationDialog.show();
             });
+        }
+
+        // Simulierte Zeit: kompakte UI (<< < + > >>)
+        function setupSimTimeControls() {
+            try {
+                const btnHourMinus = document.getElementById('sim-hour-minus');
+                const btnMinuteMinus = document.getElementById('sim-minute-minus');
+                const btnNow = document.getElementById('sim-now');
+                const btnMinutePlus = document.getElementById('sim-minute-plus');
+                const btnHourPlus = document.getElementById('sim-hour-plus');
+
+                if (!btnHourMinus || !btnMinuteMinus || !btnNow || !btnMinutePlus || !btnHourPlus) return;
+
+                const applyDelta = (delta) => {
+                    const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
+                    const next = Math.max(-2880, Math.min(2880, (offsetMinutes || 0) + delta));
+                    settingsManager.setSimulatedTime(next);
+                    updateSimPreview();
+                    if (renderer) updateSky();
+                };
+
+                btnHourMinus.addEventListener('click', () => applyDelta(-60));
+                btnMinuteMinus.addEventListener('click', () => applyDelta(-1));
+                btnNow.addEventListener('click', () => { settingsManager.setSimulatedTime(0); updateSimPreview(); if (renderer) updateSky(); });
+                btnMinutePlus.addEventListener('click', () => applyDelta(1));
+                btnHourPlus.addEventListener('click', () => applyDelta(60));
+
+                updateSimPreview();
+                // Laufende Aktualisierung der Anzeige jede Sekunde
+                if (!window.__simTimeTicker) {
+                    window.__simTimeTicker = setInterval(updateSimPreview, 1000);
+                }
+            } catch (e) {
+                console.error('Failed to setup simulated time controls:', e);
+            }
+        }
+
+        function updateSimPreview() {
+            try {
+                const el = document.getElementById('sim-time-local');
+                if (!el) return;
+                const sim = settingsManager.getSimulatedTimeOffset();
+                const off = (sim && typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
+                const dt = new Date(Date.now() + off * 60000);
+                el.textContent = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            } catch (_) { /* noop */ }
         }
         
         // Funktion zum Laden einer CSS-Datei

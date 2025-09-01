@@ -30,7 +30,7 @@ API endpoint: `/api/bright_asteroids` (see `main.py`).
 For each candidate asteroid row:
 
 - Build a Keplerian orbit: `orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)`.
-- Define time: `t = ts.now()` (UTC).
+- Define time: `dt_utc` resolved from optional `time` query param (ISO 8601; supports trailing `Z` or TZ offset). Defaults to current UTC. `t = ts.from_datetime(dt_utc)`.
 - Define observer:
   - `topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)`
   - `observer = eph['earth'] + topos`
@@ -76,10 +76,10 @@ Results are sorted by apparent magnitude and returned.
 
 For the asteroids that pass filtering:
 
-- Time window: compute events over a two-day window, selecting events for the current local day.
+- Window: 48h starting at UTC midnight of the simulated day.
 - Rise/Set: `almanac.risings_and_settings(eph, sun + orbit, topos)` then `almanac.find_discrete(...)`.
 - Transit: `almanac.meridian_transits(eph, sun + orbit, topos)` then `almanac.find_discrete(...)`.
-- Transit selection: choose the upper transit (highest altitude) that occurs on the current local day to avoid ~12h offsets.
+- Transit selection: choose the upper transit (highest altitude) that occurs on the simulated local day to avoid ~12h offsets.
 - Time formatting: backend returns plain local "HH:MM" strings (no localized suffix). The frontend appends the localized hour label via `buildTimeLabel()` (German: "Uhr", English: empty), ensuring it is added at most once.
 
 ## Output Shape
@@ -101,14 +101,22 @@ Frontend display: the UI simplifies display names by stripping numeric designati
 ## Caching
 
 - DataFrame cache: `cache/asteroids_dataframe.pkl` (parsed MPCORB).
-- Bright asteroid list cache: `cache/bright_asteroid_cache.pkl` (final results).
-- Default validity: 6 hours (see `CACHE_VALIDITY_HOURS`).
+- Final results: per-location and time-bucketed cache file, built via `cache_utils.build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc)`, e.g., `cache/asteroids/lat+48.2082_lon+16.3738_el+0171/20250115T18.pkl`.
+- TTL: see `cache_utils.DEFAULT_TTL_SECONDS` (default 6 hours).
+- Legacy fallback: `cache/bright_asteroid_cache.pkl` may be used if present.
 
 ## Endpoint
 
-- `GET /api/bright_asteroids?lat=<deg>&lon=<deg>&elevation=<m>`
+- `GET /api/bright_asteroids?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
   - Uses `MAX_APPARENT_MAGNITUDE` from `bright_asteroids.py` for filtering.
   - Responds with a JSON object containing `time`, `location`, and `bodies`.
+  - `time` is an optional ISO 8601 UTC timestamp (e.g., `2025-01-15T21:30:00Z`). When provided, all calculations and event windows use the simulated timestamp and day.
+
+Example:
+
+```
+GET /api/bright_asteroids?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
+```
 
 ## Notes and Tips
 

@@ -14,7 +14,8 @@ import urllib.request
 from skyfield.data import mpc
 import math
 from types import SimpleNamespace
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, DEFAULT_TTL_SECONDS
+from typing import Optional
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
 from timezone_utils import get_tzinfo
 
 # Konstanten für Cache-Dateien
@@ -35,6 +36,12 @@ GM_SUN = 1.32712440041e20
 
 # Cache-Gültigkeitsdauer in Stunden
 CACHE_VALIDITY_HOURS = 12
+
+# Module-specific cache granularity for per-location/time asteroid list
+# Use a 1-hour time bucket; TTL must cover the 48h precompute window
+# so that snapshots created up to 48h earlier remain valid.
+ASTEROID_CACHE_BUCKET_HOURS = 1
+ASTEROID_CACHE_TTL_SECONDS = 49 * 3600
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
@@ -121,7 +128,7 @@ def download_mpcorb_file():
         return False
     return True
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt: Optional[datetime] = None):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     """
@@ -138,24 +145,24 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     # Determine observer timezone from coordinates
     tz = get_tzinfo(lat, lon)
 
-    # Per-location/time-bucket cache file path
-    cache_file = build_cache_path('asteroids', lat, lon, elevation)
+    # Per-location/time-bucket cache file path (bucket based on simulated time if provided)
+    cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
     # Check for final cached asteroid list (per-location/time-bucket)
     if use_cache:
-        cached = read_pickle_if_fresh(cache_file, DEFAULT_TTL_SECONDS)
+        cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
         if isinstance(cached, list):
             print(f"Loading {cache_file} (valid per-location/time cache)")
             return cached
         # Fallback: legacy global cache for migration
-        legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, DEFAULT_TTL_SECONDS)
+        legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
         if isinstance(legacy, list):
             print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
             return legacy
 
     # --- DataFrame Loading --- 
     df = None
-    # Always re-parse for now to avoid complex cache validation logic
-    force_reload = True 
+    # Prefer using cached DataFrame to avoid expensive re-parsing on each call
+    force_reload = False 
     if not force_reload and os.path.exists(ASTEROID_DF_CACHE_FILE):
         print(f"Loading asteroid DataFrame from cache: {ASTEROID_DF_CACHE_FILE}")
         with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
@@ -193,7 +200,11 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         return []
 
     # --- Calculations ---
-    t = ts.now()
+    # Use simulated time if provided; else current UTC
+    dt_utc = current_dt or datetime.now(timezone.utc)
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    t = ts.from_datetime(dt_utc)
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
     observer = eph['earth'] + topos
     sun = eph['sun']
@@ -243,6 +254,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
 
+                # Start/end window anchored at simulated day's UTC midnight
                 start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
                 end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
                 rise_set_func = almanac.risings_and_settings(eph, target, topos)
@@ -258,7 +270,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 # Wähle die obere Kulmination (höchste Altitude) für den lokalen Tag
                 chosen_local_dt = None
                 if len(t_times):
-                    now_local = datetime.now(timezone.utc).astimezone(tz)
+                    # Select transits for the simulated local day
+                    now_local = dt_utc.astimezone(tz)
                     today_local = now_local.date()
                     candidates = []
                     for ti, ev in zip(t_times, t_events):
