@@ -32,12 +32,10 @@
     <!-- Magnitude-Filter wurden entfernt -->
 </div>
     
-<!-- Simulated Time Controls (compact): << < + > >> -->
+<!-- Simulated Time Controls (compact): << + >> -->
 <div id="sim-time-controls" class="sim-time-controls sim-time-compact">
     <button id="sim-hour-minus" class="sim-time-btn">&laquo;</button>
-    <button id="sim-minute-minus" class="sim-time-btn">&lsaquo;</button>
     <button id="sim-now" class="sim-time-btn sim-time-now">+</button>
-    <button id="sim-minute-plus" class="sim-time-btn">&rsaquo;</button>
     <button id="sim-hour-plus" class="sim-time-btn">&raquo;</button>
     <div id="sim-time-local" class="sim-time-local">—</div>
 </div>
@@ -227,16 +225,14 @@
             });
         }
 
-        // Simulierte Zeit: kompakte UI (<< < + > >>)
+        // Simulierte Zeit: kompakte UI (<< + >>)
         function setupSimTimeControls() {
             try {
                 const btnHourMinus = document.getElementById('sim-hour-minus');
-                const btnMinuteMinus = document.getElementById('sim-minute-minus');
                 const btnNow = document.getElementById('sim-now');
-                const btnMinutePlus = document.getElementById('sim-minute-plus');
                 const btnHourPlus = document.getElementById('sim-hour-plus');
 
-                if (!btnHourMinus || !btnMinuteMinus || !btnNow || !btnMinutePlus || !btnHourPlus) return;
+                if (!btnHourMinus || !btnNow || !btnHourPlus) return;
 
                 const applyDelta = (delta) => {
                     const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
@@ -252,7 +248,6 @@
                 };
 
                 btnHourMinus.addEventListener('click', () => applyDelta(-60));
-                btnMinuteMinus.addEventListener('click', () => applyDelta(-1));
                 btnNow.addEventListener('click', () => {
                     settingsManager.setSimulatedTime(0);
                     updateSimPreview();
@@ -262,7 +257,6 @@
                     try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
                     __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
-                btnMinutePlus.addEventListener('click', () => applyDelta(1));
                 btnHourPlus.addEventListener('click', () => applyDelta(60));
 
                 updateSimPreview();
