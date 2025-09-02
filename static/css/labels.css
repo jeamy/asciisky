@@ -6,7 +6,7 @@
   right: 0;
   bottom: 0;
   pointer-events: none; /* allow clicks to pass through */
-  z-index: 5000; /* above sky text but below nav arrows (9999) */
+  z-index: 500; /* above sky text but below nav arrows (9999) */
 }
 
 .object-label {

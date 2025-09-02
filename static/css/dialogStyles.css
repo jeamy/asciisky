@@ -1,11 +1,14 @@
 .multi-object-dialog, #object-dialog {
     max-width: 300px;
     min-width: 250px;
-    background-color: var(--bg-color);
-    border: 1px solid var(--primary-color);
-    color: var(--text-color);
-    padding: 10px;
-    font-family: monospace;
+    background: var(--panel-bg, #111);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    color: var(--primary-color, #00ff00);
+    padding: 12px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    line-height: 1.4;
     position: absolute;
 }
 
@@ -76,23 +79,110 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
-    z-index: 1000;
+    background-color: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
 .location-dialog {
-    background-color: var(--panel-bg, #111);
-    border: 1px solid var(--primary-color, #00ff00);
+    background: var(--panel-bg, #111);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
     color: var(--primary-color, #00ff00);
-    padding: 20px;
+    padding: 15px;
     max-width: 500px;
     width: 90%;
     max-height: 90vh;
     overflow-y: auto;
-    z-index: 1001;
-    box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+    z-index: 2001;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    box-shadow: 0 0 20px rgba(0, 255, 0, 0.6), 0 0 40px rgba(0, 255, 0, 0.3);
     position: relative;
+}
+
+/* Help Dialog Styling */
+.help-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.help-dialog {
+    background: var(--panel-bg, #111);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    color: var(--primary-color, #00ff00);
+    padding: 15px;
+    width: 80%;
+    max-width: 800px;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 2001;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    box-shadow: 0 0 20px rgba(0, 255, 0, 0.6), 0 0 40px rgba(0, 255, 0, 0.3);
+    position: relative;
+}
+
+.help-content h3 {
+    margin: 0 0 15px 0;
+    color: var(--primary-color, #00ff00);
+    font-size: 1.1rem;
+    border-bottom: 1px solid var(--primary-color, #00ff00);
+    padding-bottom: 5px;
+}
+
+.help-content h4 {
+    margin: 15px 0 8px 0;
+    color: var(--primary-color, #00ff00);
+    font-size: 1rem;
+}
+
+.help-content ul {
+    margin: 8px 0 15px 20px;
+    padding: 0;
+}
+
+.help-content li {
+    margin: 5px 0;
+    line-height: 1.3;
+}
+
+.help-content p {
+    margin: 8px 0;
+    line-height: 1.3;
+}
+
+.dialog-close {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: transparent;
+    border: none;
+    color: var(--primary-color, #00ff00);
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1.2rem;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dialog-close:hover {
+    background-color: rgba(0, 255, 0, 0.1);
 }

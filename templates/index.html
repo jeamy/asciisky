@@ -13,6 +13,7 @@
 <header>
     <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
     <div class="header-controls">
+        <button id="help-btn" class="control-btn" title="Hilfe">?</button>
         <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
         <div class="language-selector">
             <button id="lang-de" class="lang-btn active">DE</button>
@@ -93,6 +94,7 @@
         setTimeout(() => {
             setupObjectList();
             setupLanguageButtons();
+            setupHelpButton();
             setupLocationButton();
             setupSimTimeControls();
             setupMagnitudeFilters();
@@ -214,6 +216,71 @@
             }
         }
         
+        // Funktion zum Einrichten des Hilfe-Buttons
+        function setupHelpButton() {
+            const helpBtn = document.getElementById('help-btn');
+            helpBtn.addEventListener('click', () => {
+                loadCSSFile('./static/css/dialogStyles.css');
+                showHelpDialog();
+            });
+        }
+
+        // Funktion zum Anzeigen des Hilfe-Dialogs
+        function showHelpDialog() {
+            const helpContent = `
+                <h3>${t('help_title') || 'Hilfe - ASCII Sky Tracker'}</h3>
+                
+                <h4>${t('help_controls') || 'Steuerung'}</h4>
+                <ul>
+                    <li><strong>📍 ${t('location_button') || 'Standort-Button'}:</strong> ${t('help_location') || 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)'}</li>
+                    <li><strong>« + »:</strong> ${t('help_time_controls') || 'Zeitsteuerung - Stunde zurück, Jetzt (Echtzeit), Stunde vor'}</li>
+                    <li><strong>DE/EN:</strong> ${t('help_language') || 'Sprachwechsel zwischen Deutsch und Englisch'}</li>
+                </ul>
+
+                <h4>${t('help_sky_view') || 'Himmelsansicht'}</h4>
+                <ul>
+                    <li><strong>${t('help_object_click') || 'Objekt anklicken'}:</strong> ${t('help_object_click_desc') || 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten'}</li>
+                    <li><strong>${t('help_navigation') || 'Navigation'}:</strong> ${t('help_navigation_desc') || 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)'}</li>
+                    <li><strong>${t('help_symbols') || 'Symbole'}:</strong> ${t('help_symbols_desc') || '☉ Sonne, ☽ Mond, ☿♀♂♃♄ Planeten, • Asteroiden, ☄ Kometen'}</li>
+                </ul>
+
+                <h4>${t('help_object_list') || 'Objektliste'}</h4>
+                <p>${t('help_object_list_desc') || 'Klick auf Objekttyp (Sonne, Mond, Planeten, etc.) markiert alle Objekte dieses Typs im Himmel.'}</p>
+
+                <h4>${t('help_cache_status') || 'Cache-Status'}</h4>
+                <p>${t('help_cache_status_desc') || 'Zeigt verfügbare vorberechnete Daten für den aktuellen Standort. "Snapshots" sind stündliche Berechnungen für schnelle Anzeige.'}</p>
+
+                <h4>${t('help_simulation') || 'Zeitsimulation'}</h4>
+                <p>${t('help_simulation_desc') || 'Simuliert verschiedene Zeitpunkte um Himmelsbewegungen zu verfolgen. Objekte bewegen sich entsprechend ihrer realen Bahnen.'}</p>
+
+                <h4>${t('help_location_change') || 'Ortswechsel'}</h4>
+                <p>${t('help_location_change_desc') || 'Beim ersten Wechsel zu einem neuen Ort kann die Berechnung länger dauern, da Himmelsdaten für diese Position erstmalig berechnet und zwischengespeichert werden müssen.'}</p>
+
+                <h4>${t('help_github') || 'Quellcode'}</h4>
+                <p>${t('help_github_desc') || 'ASCII Sky ist Open Source. Den vollständigen Quellcode finden Sie auf GitHub:'}</p>
+                <p><a href="https://github.com/jeamy/asciisky" target="_blank" style="color: var(--primary-color); text-decoration: underline;">https://github.com/jeamy/asciisky</a></p>
+            `;
+
+            // Erstelle Dialog-Container
+            const dialog = document.createElement('div');
+            dialog.className = 'help-dialog-overlay';
+            dialog.innerHTML = `
+                <div class="help-dialog">
+                    <button class="dialog-close" onclick="this.closest('.help-dialog-overlay').remove()">×</button>
+                    <div class="help-content">${helpContent}</div>
+                </div>
+            `;
+
+            document.body.appendChild(dialog);
+
+            // Schließe Dialog bei Klick außerhalb
+            dialog.addEventListener('click', (e) => {
+                if (e.target === dialog) {
+                    dialog.remove();
+                }
+            });
+        }
+
         // Funktion zum Einrichten des Standort-Buttons
         function setupLocationButton() {
             const locationBtn = document.getElementById('location-btn');

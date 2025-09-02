@@ -109,7 +109,32 @@ export const i18n = {
         'elevation': 'Höhe (m)',
         'location_name': 'Ortsname',
         'apply': 'Übernehmen',
-        'invalid_coordinates': 'Ungültige Koordinaten'
+        'invalid_coordinates': 'Ungültige Koordinaten',
+        
+        // Hilfe-Dialog
+        'help_title': 'Hilfe - ASCII Sky Tracker',
+        'help_controls': 'Steuerung',
+        'help_sky_view': 'Himmelsansicht',
+        'help_object_list': 'Objektliste',
+        'help_cache_status': 'Cache-Status',
+        'help_simulation': 'Zeitsimulation',
+        'location_button': 'Standort-Button',
+        'help_location': 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)',
+        'help_time_controls': 'Zeitsteuerung - Stunde zurück, Jetzt (Echtzeit), Stunde vor',
+        'help_language': 'Sprachwechsel zwischen Deutsch und Englisch',
+        'help_object_click': 'Objekt anklicken',
+        'help_object_click_desc': 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten',
+        'help_navigation': 'Navigation',
+        'help_navigation_desc': 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)',
+        'help_symbols': 'Symbole',
+        'help_symbols_desc': '☉ Sonne, ☽ Mond, ☿♀♂♃♄ Planeten, • Asteroiden, ☄ Kometen',
+        'help_object_list_desc': 'Klick auf Objekttyp (Sonne, Mond, Planeten, etc.) markiert alle Objekte dieses Typs im Himmel.',
+        'help_cache_status_desc': 'Zeigt verfügbare vorberechnete Daten für den aktuellen Standort. "Snapshots" sind stündliche Berechnungen für schnelle Anzeige.',
+        'help_simulation_desc': 'Die Simulation zeigt den Himmel zu verschiedenen Zeiten. Nutzen Sie die Zeitsteuerung, um zwischen Vergangenheit und Zukunft zu wechseln.',
+        'help_location_change': 'Ortswechsel',
+        'help_location_change_desc': 'Beim ersten Wechsel zu einem neuen Ort kann die Berechnung länger dauern, da Himmelsdaten für diese Position erstmalig berechnet und zwischengespeichert werden müssen.',
+        'help_github': 'Quellcode',
+        'help_github_desc': 'ASCII Sky ist Open Source. Den vollständigen Quellcode finden Sie auf GitHub:',
     },
     
     // Englisch als Fallback
@@ -221,7 +246,32 @@ export const i18n = {
         'elevation': 'Elevation (m)',
         'location_name': 'Location Name',
         'apply': 'Apply',
-        'invalid_coordinates': 'Invalid coordinates'
+        'invalid_coordinates': 'Invalid coordinates',
+        
+        // Help Dialog
+        'help_title': 'Help - ASCII Sky Tracker',
+        'help_controls': 'Controls',
+        'help_sky_view': 'Sky View',
+        'help_object_list': 'Object List',
+        'help_cache_status': 'Cache Status',
+        'help_simulation': 'Time Simulation',
+        'location_button': 'Location Button',
+        'help_location': 'Changes the observation location (latitude/longitude and elevation)',
+        'help_time_controls': 'Time controls - hour back, Now (real-time), hour forward',
+        'help_language': 'Language switch between German and English',
+        'help_object_click': 'Click object',
+        'help_object_click_desc': 'Shows details like position, brightness and rise/set/transit times',
+        'help_navigation': 'Navigation',
+        'help_navigation_desc': 'Left/right arrows shift horizon by 5° (make N, E, S, W visible)',
+        'help_symbols': 'Symbols',
+        'help_symbols_desc': '☉ Sun, ☽ Moon, ☿♀♂♃♄ Planets, • Asteroids, ☄ Comets',
+        'help_object_list_desc': 'Click on object type (Sun, Moon, Planets, etc.) highlights all objects of this type in the sky.',
+        'help_cache_status_desc': 'Shows available precomputed data for the current location. "Snapshots" are hourly calculations for fast display.',
+        'help_simulation_desc': 'Simulates different times to track celestial movements. Objects move according to their real orbits.',
+        'help_location_change': 'Location Changes',
+        'help_location_change_desc': 'When switching to a new location for the first time, calculations may take longer as sky data for this position needs to be computed and cached initially.',
+        'help_github': 'Source Code',
+        'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:'
     }
 };
 
