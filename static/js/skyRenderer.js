@@ -663,6 +663,66 @@ export class SkyRenderer {
             console.log('No object near click position, clearing selection');
             this.clearSelection();
         });
+
+        // Touch events for sky navigation
+        this.setupTouchEvents();
+    }
+
+    setupTouchEvents() {
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchStartTime = 0;
+        const minSwipeDistance = 50; // Minimum distance for a swipe in pixels
+        const maxTapDuration = 300; // Maximum duration for a tap in milliseconds
+
+        this.container.addEventListener('touchstart', (e) => {
+            // Store the initial touch position and time
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchStartTime = Date.now();
+        }, { passive: true });
+
+        this.container.addEventListener('touchend', (e) => {
+            // Calculate touch duration
+            const touchDuration = Date.now() - touchStartTime;
+            
+            // Get the final touch position
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            // Calculate the horizontal distance moved
+            const touchDistanceX = touchEndX - touchStartX;
+            
+            // If it's a short tap (not a swipe), let the click handler take care of it
+            if (touchDuration < maxTapDuration && Math.abs(touchDistanceX) < minSwipeDistance) {
+                return;
+            }
+            
+            // If it's a horizontal swipe with enough distance
+            if (Math.abs(touchDistanceX) >= minSwipeDistance) {
+                // Prevent the default behavior (page scrolling)
+                e.preventDefault();
+                
+                if (touchDistanceX > 0) {
+                    // Swipe right -> shift horizon left
+                    this.shiftHorizonLeft();
+                } else {
+                    // Swipe left -> shift horizon right
+                    this.shiftHorizonRight();
+                }
+            }
+        });
+
+        // Prevent default on touchmove to avoid page scrolling while swiping
+        this.container.addEventListener('touchmove', (e) => {
+            const touchCurrentX = e.touches[0].clientX;
+            const touchDistanceX = touchCurrentX - touchStartX;
+            
+            // If it seems like a horizontal swipe, prevent default scrolling
+            if (Math.abs(touchDistanceX) > Math.abs(e.touches[0].clientY - touchStartY)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
     }
 
     // Formatiert einen Zeitstring im ISO-Format in das Format HH:MM
@@ -750,10 +810,7 @@ export class SkyRenderer {
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
             
-            // Positioniere den Dialog neben der oberen rechten Ecke der Himmelsansicht
-            const skyRect = this.container.getBoundingClientRect();
-            dialog.style.top = `${skyRect.top}px`;
-            dialog.style.left = `${skyRect.right + 10}px`; // 10px Abstand zur rechten Kante
+            // Dialog wird durch CSS positioniert (als Overlay über der Himmelsansicht)
             
             // Close-Button-Event hinzufügen
             document.getElementById('dialog-close').addEventListener('click', () => {
@@ -810,10 +867,7 @@ export class SkyRenderer {
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
             
-            // Positioniere den Dialog neben der oberen rechten Ecke der Himmelsansicht
-            const skyRect = this.container.getBoundingClientRect();
-            dialog.style.top = `${skyRect.top}px`;
-            dialog.style.left = `${skyRect.right + 10}px`;
+            // Dialog wird durch CSS positioniert (als Overlay über der Himmelsansicht)
             
             // Lade die externen Styles für den Dialog
             const linkElem = document.createElement('link');

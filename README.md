@@ -1,6 +1,6 @@
 # ASCII Sky - Celestial Tracker
 
-A web application that displays the current positions of celestial bodies (Sun, Moon, planets) in ASCII art.
+A web application that displays the current positions of celestial bodies (Sun, Moon, planets, asteroids, comets) in ASCII art.
 
 ## Features
 
@@ -16,6 +16,10 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Internationalization (i18n) with German as default language
 - Simulated time controls (optional): view the sky at a chosen UTC time; frontend appends `?time=<ISO8601>` to API calls automatically when enabled
 - Minimalist UI design with optimized space usage
+- Cache status panel showing precomputed data availability
+- Horizontal navigation with arrow controls
+- Labels for bright asteroids and comets
+- Responsive design with mobile/tablet support
 
 ## Prerequisites
 

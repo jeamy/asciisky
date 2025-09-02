@@ -11,31 +11,31 @@
 }
 
 .nav-arrow {
-    font-size: 1rem;
-    background-color: transparent; /* nur Pfeile, keine Box */
-    border: none; /* kein Border */
+    font-size: 1.2rem;
+    background-color: rgba(0, 20, 0, 0.5); /* Leicht sichtbarer Hintergrund */
+    border: none;
     color: rgba(0, 255, 0, 0.85);
-    border-radius: 0;
-    width: auto;
-    height: auto;
-    padding: 4px; /* unsichtbare Klickfläche */
+    border-radius: 50%;
+    width: 44px; /* Standard minimum touch target size */
+    height: 44px;
+    padding: 8px; /* Größere Klickfläche */
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     opacity: 0.95;
-    transition: color 0.15s ease-in-out;
+    transition: all 0.15s ease-in-out;
     pointer-events: auto; /* Damit die Pfeile klickbar sind */
     position: absolute;
-    margin-top: -16px;
+    margin-top: -22px; /* Angepasst für größere Höhe */
 }
 
 .nav-arrow-left {
-    left: 8px; /* Am linken Rand, leicht eingerückt */
+    left: 10px; /* Am linken Rand, leicht eingerückt */
 }
 
 .nav-arrow-right {
-    right: 8px; /* Am rechten Rand, leicht eingerückt */
+    right: 10px; /* Am rechten Rand, leicht eingerückt */
 }
 
 .nav-arrow:hover { color: rgba(0, 255, 0, 1); }
@@ -44,7 +44,9 @@
 
 @media (max-width: 768px) {
     .nav-arrow {
-        font-size: 1rem;
-        padding: 3px;
+        font-size: 1.5rem;
+        padding: 10px;
+        width: 50px;
+        height: 50px;
     }
 }

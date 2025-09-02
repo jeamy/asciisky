@@ -112,10 +112,12 @@ h1 {
     background: var(--panel-bg);
     border: 1px solid var(--border-color);
     color: var(--primary-color);
-    padding: 5px 10px;
-    border-radius: 3px;
+    padding: 8px 12px;
+    border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
+    min-height: 36px;
+    min-width: 44px;
 }
 
 .object-btn:hover {
@@ -145,12 +147,14 @@ h1 {
     background: var(--panel-bg);
     border: 1px solid var(--border-color);
     color: var(--primary-color);
-    padding: 3px 8px;
-    border-radius: 3px;
+    padding: 8px 12px;
+    border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
     font-weight: bold;
     font-size: 1rem;
+    min-height: 36px;
+    min-width: 44px;
 }
 
 .control-btn:hover {
@@ -161,11 +165,13 @@ h1 {
     background: var(--panel-bg);
     border: 1px solid var(--border-color);
     color: var(--primary-color);
-    padding: 3px 8px;
-    border-radius: 3px;
+    padding: 8px 12px;
+    border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
     font-weight: bold;
+    min-height: 36px;
+    min-width: 44px;
 }
 
 .lang-btn:hover {
@@ -202,11 +208,15 @@ h1 {
     position: absolute;
     top: 5px;
     right: 5px;
-    background: transparent;
+    background: rgba(0, 20, 0, 0.5);
     border: none;
     color: var(--primary-color);
     cursor: pointer;
     font-weight: bold;
+    padding: 8px;
+    min-height: 36px;
+    min-width: 36px;
+    border-radius: 4px;
 }
 
 @media (max-width: 768px) {
@@ -214,12 +224,57 @@ h1 {
         padding: 10px;
     }
 
+    header {
+        margin-top: 50px; /* Add space above header for controls */
+        padding-top: 10px;
+    }
+    
+    .header-controls {
+        top: 10px;
+        right: 10px;
+    }
+
     .controls {
         flex-direction: column;
+        gap: 15px;
     }
 
     .sky-container {
         font-size: 0.7rem;
         padding: 10px;
+        margin-top: 10px;
+    }
+    
+    .object-btn,
+    .control-btn,
+    .lang-btn {
+        padding: 10px 15px;
+        font-size: 1.1rem;
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    .filter-controls {
+        gap: 20px;
+    }
+    
+    .magnitude-filter {
+        gap: 12px;
+    }
+    
+    .magnitude-filter input {
+        width: 70px;
+        padding: 10px;
+        font-size: 1.1rem;
+    }
+    
+    #object-dialog button {
+        padding: 10px;
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    .object-list {
+        gap: 15px;
     }
 }
