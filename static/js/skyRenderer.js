@@ -548,11 +548,23 @@ export class SkyRenderer {
     }
     
     removeDialog() {
-        // Entferne vorhandenen Dialog, falls vorhanden
-        const existingDialog = document.getElementById('object-dialog');
-        if (existingDialog) {
-            existingDialog.remove();
+        const dialog = document.getElementById('object-dialog');
+        if (dialog) dialog.remove();
+    }
+    
+    // Positioniert einen Dialog je nach Bildschirmgröße
+    positionDialog(dialog) {
+        const isMobile = window.innerWidth <= 768;
+        const skyRect = this.container.getBoundingClientRect();
+        
+        if (!isMobile) {
+            // Desktop: Neben der Himmelsansicht
+            dialog.style.top = `${skyRect.top}px`;
+            dialog.style.left = `${skyRect.right + 10}px`; // 10px Abstand zur rechten Kante
+            // Entferne mobile-spezifische Styles
+            dialog.style.transform = '';
         }
+        // Mobile: Overlay wird durch CSS positioniert
     }
 
     clearSelection() {
@@ -810,7 +822,15 @@ export class SkyRenderer {
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
             
-            // Dialog wird durch CSS positioniert (als Overlay über der Himmelsansicht)
+            // Positioniere den Dialog je nach Bildschirmgröße
+            const isMobile = window.innerWidth <= 768;
+            const skyRect = this.container.getBoundingClientRect();
+            
+            if (!isMobile) {
+                // Desktop: Neben der Himmelsansicht
+                dialog.style.top = `${skyRect.top}px`;
+                dialog.style.left = `${skyRect.right + 10}px`;
+            }
             
             // Close-Button-Event hinzufügen
             document.getElementById('dialog-close').addEventListener('click', () => {
@@ -867,7 +887,15 @@ export class SkyRenderer {
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
             
-            // Dialog wird durch CSS positioniert (als Overlay über der Himmelsansicht)
+            // Positioniere den Dialog je nach Bildschirmgröße
+            const isMobile = window.innerWidth <= 768;
+            const skyRect = this.container.getBoundingClientRect();
+            
+            if (!isMobile) {
+                // Desktop: Neben der Himmelsansicht
+                dialog.style.top = `${skyRect.top}px`;
+                dialog.style.left = `${skyRect.right + 10}px`;
+            }
             
             // Lade die externen Styles für den Dialog
             const linkElem = document.createElement('link');

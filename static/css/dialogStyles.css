@@ -9,8 +9,12 @@
     font-family: 'Courier New', monospace;
     font-size: 0.8rem;
     line-height: 1.4;
-    position: absolute;
+    position: fixed; /* Use fixed positioning */
     box-shadow: 0 0 15px rgba(0, 255, 0, 0.4);
+    /* Desktop positioning by default */
+    top: 20px;
+    right: auto;
+    left: auto; /* Will be set by JS */
 }
 
 .object-list {
@@ -196,10 +200,12 @@
 }
 
 /* Mobile optimizations */
+/* Remove this section as we're using the base styles for desktop */
+
 @media (max-width: 768px) {
     .multi-object-dialog, #object-dialog {
         position: absolute;
-        top: 70% !important;
+        top: 50% !important;
         left: 50% !important;
         transform: translate(-50%, -50%);
         width: 90%;
