@@ -777,6 +777,14 @@ export class SkyRenderer {
                 existingDialog.remove();
             }
             
+            // Stelle sicher, dass die Dialog-Styles geladen sind
+            if (!document.querySelector('link[href="/static/css/dialogStyles.css"]')) {
+                const linkElem = document.createElement('link');
+                linkElem.rel = 'stylesheet';
+                linkElem.href = '/static/css/dialogStyles.css';
+                document.head.appendChild(linkElem);
+            }
+            
             // Dialog-Inhalt erstellen
             const displayName = this.getLocalizedDisplayName(obj.name);
             const info = [
