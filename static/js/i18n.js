@@ -26,6 +26,7 @@ export const i18n = {
         'enter_both_dates': 'Bitte geben Sie sowohl Start- als auch Enddatum ein',
         'task_started': 'Aufgabe gestartet...',
         'task_completed': 'Aufgabe abgeschlossen!',
+        'task_not_found_server_restart': 'Die Vorberechnungsaufgabe ist nicht mehr aktiv (Server wurde möglicherweise neu gestartet). Sie können bei Bedarf eine neue Vorberechnung starten.',
         'status': 'Status',
         
         // Himmelsobjekte
@@ -133,6 +134,8 @@ export const i18n = {
         'help_sky_view': 'Himmelsansicht',
         'help_object_list': 'Objektliste',
         'help_cache_status': 'Cache-Status',
+        'help_cache_precompute': 'Cache-Vorberechnung',
+        'help_cache_precompute_desc': 'Mit der Cache-Vorberechnung können Sie Himmelsdaten für einen bestimmten Zeitraum im Voraus berechnen lassen. Wählen Sie Start- und Enddatum und klicken Sie auf "Berechnung starten". Der Fortschritt wird angezeigt und die Daten stehen nach Abschluss für schnelle Anzeige zur Verfügung.',
         'help_simulation': 'Zeitsimulation',
         'location_button': 'Standort-Button',
         'help_location': 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)',
@@ -181,6 +184,7 @@ export const i18n = {
         'enter_both_dates': 'Please enter both start and end dates',
         'task_started': 'Task started...',
         'task_completed': 'Task completed!',
+        'task_not_found_server_restart': 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.',
         'status': 'Status',
         
         // Celestial objects

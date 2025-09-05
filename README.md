@@ -134,6 +134,26 @@ Notes:
 
 Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
 
+## Environment Variables
+
+The application can be configured using the following environment variables in `docker-compose.yml`:
+
+### Cache Configuration
+- `ASCII_SKY_PRECOMPUTE_HOURS` - Number of hours to precompute in the rolling window (default: 144)
+- `ASCII_SKY_MAX_PRECOMPUTE_HOURS` - Maximum allowed hours for custom date range precomputation (default: 168)
+- `ASCII_SKY_PRECOMPUTE_KINDS` - Types of data to precompute (default: "celestial,asteroids,comets")
+- `ASCII_SKY_RETENTION_DAYS` - Number of days to retain cached data (default: 30)
+
+### Worker Configuration
+- `ASCII_SKY_PRECOMPUTE_WORKERS` - Number of worker threads for precomputation (default: 4)
+- `ASCII_SKY_ADAPTIVE_WORKERS` - Enable adaptive worker count based on CPU cores (default: 1)
+- `ASCII_SKY_WORKER_RUN_ONCE` - Run worker once and exit (default: not set, only for worker_once service)
+
+### General Configuration
+- `PYTHONUNBUFFERED` - Python output buffering (default: 1)
+- `TZ` - Timezone for the application (default: Europe/Berlin)
+- `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (default: "dev-secret-please-change")
+
 ## Technologies Used
 
 - Backend: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/)

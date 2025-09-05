@@ -113,6 +113,9 @@ function renderError(err, locationName) {
 let activePrecomputeTask = null;
 let precomputeTaskCheckInterval = null;
 
+// LocalStorage keys
+const STORAGE_KEY_ACTIVE_TASK = 'asciisky_active_precompute_task';
+
 function renderStatus(data, currentLocKey, locationName) {
   const el = ensurePanel();
   if (!el) return;
@@ -125,6 +128,10 @@ function renderStatus(data, currentLocKey, locationName) {
 
   const kinds = Array.isArray(data?.kinds) ? data.kinds : [];
 
+  // We'll set this to true only if we confirm the task exists on the server
+  // This ensures the UI starts in a clean state
+  const hasActiveTask = false;
+  
   // Prepare the precompute section
   const precomputeSection = `
     <div class="cache-precompute">
@@ -132,23 +139,25 @@ function renderStatus(data, currentLocKey, locationName) {
       <div class="cache-precompute-form">
         <div class="cache-precompute-row">
           <label class="cache-precompute-label">${t('start_date') || 'Start Date'}:</label>
-          <input type="date" id="cache-start-date" class="cache-precompute-input">
+          <input type="date" id="cache-start-date" class="cache-precompute-input" ${hasActiveTask ? 'disabled' : ''}>
         </div>
         <div class="cache-precompute-row">
           <label class="cache-precompute-label">${t('end_date') || 'End Date'}:</label>
-          <input type="date" id="cache-end-date" class="cache-precompute-input">
+          <input type="date" id="cache-end-date" class="cache-precompute-input" ${hasActiveTask ? 'disabled' : ''}>
         </div>
-        <button id="cache-precompute-button" class="cache-precompute-button">${t('start_precompute') || 'Start Precompute'}</button>
+        <button id="cache-precompute-button" class="cache-precompute-button" ${hasActiveTask ? 'disabled' : ''}>
+          ${hasActiveTask ? (t('processing') || 'Processing...') : (t('start_precompute') || 'Start Precompute')}
+        </button>
       </div>
-      <div id="cache-progress" class="cache-progress" style="display: none;">
+      <div id="cache-progress" class="cache-progress" style="display: ${hasActiveTask ? 'block' : 'none'};">
         <div class="cache-progress-bar">
-          <div id="cache-progress-fill" class="cache-progress-fill"></div>
+          <div id="cache-progress-fill" class="cache-progress-fill" style="width: 0%"></div>
         </div>
         <div class="cache-progress-status">
           <span id="cache-progress-percent">0%</span>
           <span id="cache-progress-hours">0/0 hours</span>
         </div>
-        <div id="cache-progress-details" class="cache-progress-details"></div>
+        <div id="cache-progress-details" class="cache-progress-details">${hasActiveTask ? (t('loading') || 'Loading...') : ''}</div>
       </div>
     </div>
   `;
@@ -206,11 +215,117 @@ function renderStatus(data, currentLocKey, locationName) {
 export function initCacheStatusPanel(elementId = 'cache-status-panel') {
   const el = document.getElementById(elementId);
   if (el) setPanel(el);
+  
+  // Start checking for active task immediately
+  const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
+  if (savedTaskId) {
+    console.log('Found active task on init:', savedTaskId);
+    
+    // First check if the task still exists on the server
+    fetch(`${API_ENDPOINTS.PRECOMPUTE_RANGE}/${savedTaskId}`)
+      .then(response => {
+        if (response.status === 404) {
+          // Task doesn't exist anymore (server restarted)
+          console.log('Task not found on server (server may have restarted)');
+          localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
+          // Don't need to reset UI here as it will be rendered fresh
+          
+          // Show a user-friendly message
+          setTimeout(() => {
+            const message = t('task_not_found_server_restart') || 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.';
+            alert(message);
+          }, 1000); // Delay to ensure UI is ready
+          
+          return null;
+        } else if (response.ok) {
+          return response.json();
+        } else {
+          throw new Error('Failed to check task status');
+        }
+      })
+      .then(taskStatus => {
+        if (taskStatus) {
+          // Task exists, set up polling
+          activePrecomputeTask = savedTaskId;
+          
+          // Start checking progress
+          if (precomputeTaskCheckInterval) {
+            clearInterval(precomputeTaskCheckInterval);
+          }
+          
+          // Start polling for updates
+          precomputeTaskCheckInterval = setInterval(async () => {
+            await checkPrecomputeTaskProgress();
+          }, 2000); // Check every 2 seconds
+        }
+      })
+      .catch(error => {
+        console.error('Error checking task status:', error);
+        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
+      });
+  }
+}
+
+// Function to restore active precompute task from localStorage
+async function restoreActivePrecomputeTask() {
+  const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
+  if (!savedTaskId) return;
+  
+  try {
+    console.log('Restoring active precompute task:', savedTaskId);
+    // Set the active task ID
+    activePrecomputeTask = savedTaskId;
+    
+    // Wait for the precompute section to be rendered
+    setTimeout(async () => {
+      // Show progress container
+      const progressContainer = document.getElementById('cache-progress');
+      if (progressContainer) {
+        progressContainer.style.display = 'block';
+      } else {
+        console.error('Progress container not found');
+      }
+      
+      // Disable inputs during processing
+      const startDateInput = document.getElementById('cache-start-date');
+      const endDateInput = document.getElementById('cache-end-date');
+      const precomputeButton = document.getElementById('cache-precompute-button');
+      
+      if (startDateInput && endDateInput && precomputeButton) {
+        startDateInput.disabled = true;
+        endDateInput.disabled = true;
+        precomputeButton.disabled = true;
+        precomputeButton.textContent = t('processing') || 'Processing...';
+      } else {
+        console.error('Precompute inputs not found');
+      }
+      
+      // Start checking progress
+      if (precomputeTaskCheckInterval) {
+        clearInterval(precomputeTaskCheckInterval);
+      }
+      
+      // Check progress immediately
+      await checkPrecomputeTaskProgress();
+      
+      // Then start interval
+      precomputeTaskCheckInterval = setInterval(async () => {
+        await checkPrecomputeTaskProgress();
+      }, 2000); // Check every 2 seconds
+    }, 500); // Wait for DOM to be ready
+    
+  } catch (error) {
+    console.error('Error restoring precompute task:', error);
+    localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
+  }
 }
 
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName = '') {
   try {
     renderLoading(locationName);
+    
+    // Store current location for potential task restoration
+    window.currentCacheLocation = { lat, lon, elevation, locationName };
     let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
     // Restrict backend scan to just this location via loc_key
     try {
@@ -223,6 +338,10 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     const data = await resp.json();
     const key = buildLocKey(lat, lon, elevation);
     renderStatus(data, key, locationName);
+    
+    // Now that the panel is rendered, check for active precompute task
+    // This ensures all DOM elements are available
+    setTimeout(() => restoreActivePrecomputeTask(), 100);
   } catch (err) {
     renderError(err, locationName);
   }
@@ -244,7 +363,19 @@ function setupPrecomputeHandlers(locationName) {
   const progressHours = document.getElementById('cache-progress-hours');
   const progressDetails = document.getElementById('cache-progress-details');
   
-  // Format dates for input fields (YYYY-MM-DD)
+  if (!startDateInput || !endDateInput || !precomputeButton) return;
+  
+  // Reset UI to default state
+  startDateInput.disabled = false;
+  endDateInput.disabled = false;
+  precomputeButton.disabled = false;
+  precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
+  
+  if (progressContainer) {
+    progressContainer.style.display = 'none';
+  }
+  
+  // Format dates as YYYY-MM-DD for input fields
   startDateInput.value = today.toISOString().split('T')[0];
   endDateInput.value = nextWeek.toISOString().split('T')[0];
   
@@ -292,8 +423,14 @@ function setupPrecomputeHandlers(locationName) {
       const result = await response.json();
       activePrecomputeTask = result.task_id;
       
+      // Save task ID to localStorage
+      localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
+      
       // Show progress container
-      progressContainer.style.display = 'block';
+      const progressContainer = document.getElementById('cache-progress');
+      if (progressContainer) {
+        progressContainer.style.display = 'block';
+      }
       progressFill.style.width = '0%';
       progressPercent.textContent = '0%';
       progressHours.textContent = `0/${result.hours_total} hours`;
@@ -325,12 +462,52 @@ async function checkPrecomputeTaskProgress() {
   if (!activePrecomputeTask) return;
   
   try {
+    console.log('Checking progress for task:', activePrecomputeTask);
     const response = await fetch(`${API_ENDPOINTS.PRECOMPUTE_RANGE}/${activePrecomputeTask}`);
+    
+    // Handle 404 Not Found (task doesn't exist on server, likely after restart)
+    if (response.status === 404) {
+      console.log('Task not found on server (server may have restarted)');
+      // Clear the task from localStorage
+      localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
+      activePrecomputeTask = null;
+      
+      // Stop checking progress
+      if (precomputeTaskCheckInterval) {
+        clearInterval(precomputeTaskCheckInterval);
+        precomputeTaskCheckInterval = null;
+      }
+      
+      // Re-enable inputs
+      const startDateInput = document.getElementById('cache-start-date');
+      const endDateInput = document.getElementById('cache-end-date');
+      const precomputeButton = document.getElementById('cache-precompute-button');
+      const progressContainer = document.getElementById('cache-progress');
+      
+      if (startDateInput && endDateInput && precomputeButton) {
+        startDateInput.disabled = false;
+        endDateInput.disabled = false;
+        precomputeButton.disabled = false;
+        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
+      }
+      
+      if (progressContainer) {
+        progressContainer.style.display = 'none';
+      }
+      
+      // Show a user-friendly message
+      const message = t('task_not_found_server_restart') || 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.';
+      alert(message);
+      
+      return;
+    }
+    
     if (!response.ok) {
       throw new Error('Failed to check task progress');
     }
     
     const taskStatus = await response.json();
+    console.log('Task status:', taskStatus);
     
     // Update progress UI
     const progressFill = document.getElementById('cache-progress-fill');
@@ -340,6 +517,13 @@ async function checkPrecomputeTaskProgress() {
     const precomputeButton = document.getElementById('cache-precompute-button');
     const startDateInput = document.getElementById('cache-start-date');
     const endDateInput = document.getElementById('cache-end-date');
+    
+    console.log('DOM elements found:', {
+      progressFill: !!progressFill,
+      progressPercent: !!progressPercent,
+      progressHours: !!progressHours,
+      progressDetails: !!progressDetails
+    });
     
     if (progressFill && progressPercent && progressHours && progressDetails) {
       progressFill.style.width = `${taskStatus.percent_complete}%`;
@@ -359,6 +543,9 @@ async function checkPrecomputeTaskProgress() {
         clearInterval(precomputeTaskCheckInterval);
         precomputeTaskCheckInterval = null;
         activePrecomputeTask = null;
+        
+        // Remove task ID from localStorage
+        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
         
         // Refresh cache status after a delay
         setTimeout(() => {
@@ -381,6 +568,9 @@ async function checkPrecomputeTaskProgress() {
         clearInterval(precomputeTaskCheckInterval);
         precomputeTaskCheckInterval = null;
         activePrecomputeTask = null;
+        
+        // Remove task ID from localStorage
+        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
         
       } else {
         progressDetails.textContent = `${t('status') || 'Status'}: ${taskStatus.status}`;
