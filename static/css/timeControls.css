@@ -89,4 +89,20 @@
   font-size: 0.95rem;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 3px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.sim-time-local:hover {
+  background-color: rgba(0, 255, 0, 0.1);
+  color: var(--primary-color);
+}
+
+.sim-time-local::after {
+  content: '✎';
+  margin-left: 5px;
+  font-size: 0.8em;
+  opacity: 0.6;
 }

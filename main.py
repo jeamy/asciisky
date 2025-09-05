@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from skyfield import almanac
@@ -37,6 +37,61 @@ app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung 
 SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET", "dev-secret-please-change")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
+# Helper function to get location from request, query params, or settings
+async def get_location_from_request(request: Request, lat: float = None, lon: float = None, elevation: float = None) -> Dict[str, Any]:
+    """
+    Get location data from query params, session, or settings file.
+    Priority: query params > session > settings file
+    
+    Returns a dict with latitude, longitude, elevation, and optional name.
+    """
+    try:
+        # 1. Try query parameters first
+        if lat is not None and lon is not None:
+            return {
+                "latitude": float(lat),
+                "longitude": float(lon),
+                "elevation": float(elevation if elevation is not None else 0.0),
+                "name": ""
+            }
+        
+        # 2. Try session
+        session = request.session
+        if "location" in session:
+            try:
+                loc = session["location"]
+                if isinstance(loc, dict) and "latitude" in loc and "longitude" in loc:
+                    return {
+                        "latitude": float(loc["latitude"]),
+                        "longitude": float(loc["longitude"]),
+                        "elevation": float(loc.get("elevation", 0.0)),
+                        "name": loc.get("name", "")
+                    }
+            except Exception:
+                pass
+        
+        # 3. Fall back to settings file
+        import settings as app_settings
+        loc = app_settings.get_location()
+        if loc and "latitude" in loc and "longitude" in loc:
+            return {
+                "latitude": float(loc["latitude"]),
+                "longitude": float(loc["longitude"]),
+                "elevation": float(loc.get("elevation", 0.0)),
+                "name": loc.get("name", "")
+            }
+        
+        # 4. Default to Vienna if all else fails
+        return {
+            "latitude": 48.2082,
+            "longitude": 16.3738,
+            "elevation": 171.0,
+            "name": "Vienna"
+        }
+    except Exception as e:
+        print(f"Error getting location: {str(e)}")
+        return None
+
 # Statische Dateien und Templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -47,6 +102,7 @@ API_ENDPOINT_ASTEROIDS = "/api/asteroids"
 API_ENDPOINT_COMETS = "/api/comets"
 API_ENDPOINT_BRIGHT_ASTEROIDS = "/api/bright_asteroids"
 API_ENDPOINT_CACHE_STATUS = "/api/cache_status"
+API_ENDPOINT_PRECOMPUTE_RANGE = "/api/precompute_range"
 
 # Cache settings for precomputed celestial snapshots
 CELESTIAL_CACHE_BUCKET_HOURS = 1
@@ -280,7 +336,7 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
         base = _hour_floor(dt_utc)
         forward = base >= _hour_floor(now_utc)
 
-        def _do_work():
+        def _do_work_sync():
             for i in range(horizon_hours):
                 t = base + timedelta(hours=i) if forward else base - timedelta(hours=i)
                 for k in kinds:
@@ -292,10 +348,109 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
                         _ensure_comets_cache(lat, lon, elevation, t)
 
         loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _do_work)
+        loop.run_in_executor(None, _do_work_sync)
     except Exception:
         print("[bg] trigger failed")
         import traceback; traceback.print_exc()
+
+async def trigger_background_precompute_range(lat: float, lon: float, elevation: float, start_dt_utc: datetime, end_dt_utc: datetime, kinds: list[str]) -> dict:
+    """Kick off background precompute for a custom date range.
+    Returns status information about the precompute task.
+    """
+    try:
+        # Ensure both datetimes are UTC-aware
+        if start_dt_utc.tzinfo is None:
+            start_dt_utc = start_dt_utc.replace(tzinfo=timezone.utc)
+        if end_dt_utc.tzinfo is None:
+            end_dt_utc = end_dt_utc.replace(tzinfo=timezone.utc)
+        
+        # Normalize to hour boundaries
+        start_dt_utc = _hour_floor(start_dt_utc)
+        end_dt_utc = _hour_floor(end_dt_utc)
+        
+        # Ensure start is before end
+        if start_dt_utc > end_dt_utc:
+            start_dt_utc, end_dt_utc = end_dt_utc, start_dt_utc
+        
+        # Calculate number of hours to process
+        delta_hours = int((end_dt_utc - start_dt_utc).total_seconds() / 3600) + 1
+        
+        # Cap at reasonable limit (default: 7 days = 168 hours)
+        try:
+            max_hours = int(os.environ.get("ASCII_SKY_MAX_PRECOMPUTE_HOURS", "168"))
+        except Exception:
+            max_hours = 168
+            
+        if delta_hours > max_hours:
+            delta_hours = max_hours
+            end_dt_utc = start_dt_utc + timedelta(hours=max_hours-1)
+        
+        # Create a unique ID for this precompute task
+        task_id = f"precompute_{int(time.time())}_{delta_hours}h"
+        
+        # Store task info in a global dict for status checking
+        if not hasattr(app, 'precompute_tasks'):
+            app.precompute_tasks = {}
+        
+        app.precompute_tasks[task_id] = {
+            'id': task_id,
+            'status': 'starting',
+            'start_time': datetime.now(timezone.utc),
+            'location': {'lat': lat, 'lon': lon, 'elevation': elevation},
+            'date_range': {'start': start_dt_utc.isoformat(), 'end': end_dt_utc.isoformat()},
+            'hours_total': delta_hours,
+            'hours_completed': 0,
+            'percent_complete': 0
+        }
+        
+        # Define a synchronous function for the background task
+        def _do_work_sync():
+            try:
+                app.precompute_tasks[task_id]['status'] = 'running'
+                
+                current_dt = start_dt_utc
+                hours_completed = 0
+                
+                while current_dt <= end_dt_utc:
+                    for k in kinds:
+                        if k == 'celestial':
+                            _ensure_celestial_cache(lat, lon, elevation, current_dt)
+                        elif k == 'asteroids':
+                            _ensure_asteroids_cache(lat, lon, elevation, current_dt)
+                        elif k == 'comets':
+                            _ensure_comets_cache(lat, lon, elevation, current_dt)
+                    
+                    current_dt += timedelta(hours=1)
+                    hours_completed += 1
+                    
+                    # Update progress
+                    app.precompute_tasks[task_id]['hours_completed'] = hours_completed
+                    app.precompute_tasks[task_id]['percent_complete'] = int((hours_completed / delta_hours) * 100)
+                
+                app.precompute_tasks[task_id]['status'] = 'completed'
+                app.precompute_tasks[task_id]['end_time'] = datetime.now(timezone.utc)
+                
+            except Exception as e:
+                app.precompute_tasks[task_id]['status'] = 'error'
+                app.precompute_tasks[task_id]['error'] = str(e)
+                print(f"Error in background precompute range task {task_id}")
+                import traceback; traceback.print_exc()
+
+        # Start the background task
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _do_work_sync)
+        
+        return {
+            'task_id': task_id,
+            'status': 'started',
+            'message': f'Background precompute started for {delta_hours} hours from {start_dt_utc.isoformat()} to {end_dt_utc.isoformat()}',
+            'hours_total': delta_hours
+        }
+        
+    except Exception as e:
+        print("Error starting background precompute range")
+        import traceback; traceback.print_exc()
+        return {'error': str(e), 'status': 'failed to start'}
 
 # Helper: parse optional ISO 8601 datetime string (supports 'Z') into UTC-aware datetime
 def parse_time_param(time_str: Optional[str]) -> datetime:
@@ -758,14 +913,86 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# Request body model for precompute range
+class PrecomputeRangeRequest(BaseModel):
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    elevation: Optional[float] = None
+    start_date: str
+    end_date: str
+
+# Precompute range API endpoint
+@app.post(API_ENDPOINT_PRECOMPUTE_RANGE)
+async def precompute_range(request: Request, body: PrecomputeRangeRequest):
+    """Trigger background precomputation of celestial data for a date range.
+    
+    Parameters:
+    - lat, lon, elevation: Location coordinates
+    - start_date: ISO 8601 date string for start of range
+    - end_date: ISO 8601 date string for end of range
+    
+    Returns status information about the precompute task.
+    """
+    try:
+        # Get location data from request body or session/settings
+        location = await get_location_from_request(request, body.lat, body.lon, body.elevation)
+        if not location:
+            return JSONResponse(status_code=400, content={'error': 'Invalid location'})
+        
+        lat = location['latitude']
+        lon = location['longitude']
+        elevation = location['elevation']
+        
+        # Parse date strings
+        try:
+            start_dt = parse_time_param(body.start_date)
+            end_dt = parse_time_param(body.end_date)
+        except Exception as e:
+            return JSONResponse(status_code=400, content={'error': f'Invalid date format: {str(e)}'})
+        
+        print(f"Precomputing cache for range: {body.start_date} to {body.end_date}")
+        print(f"Location: {lat}, {lon}, {elevation}")
+        
+        
+        # Trigger background precomputation
+        result = await trigger_background_precompute_range(
+            lat, lon, elevation, start_dt, end_dt, 
+            kinds=['celestial', 'asteroids', 'comets']
+        )
+        
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={'error': str(e)})
+
+# Get precompute task status
+@app.get(API_ENDPOINT_PRECOMPUTE_RANGE + "/{task_id}")
+async def get_precompute_status(task_id: str):
+    """Get status of a background precompute task by its ID.
+    
+    Returns the current status, progress, and other details of the task.
+    """
+    try:
+        if not hasattr(app, 'precompute_tasks'):
+            return JSONResponse(status_code=404, content={'error': 'No precompute tasks found'})
+        
+        if task_id not in app.precompute_tasks:
+            return JSONResponse(status_code=404, content={'error': f'Task {task_id} not found'})
+        
+        return app.precompute_tasks[task_id]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={'error': str(e)})
+
+# Cache status API endpoint
 @app.get(API_ENDPOINT_CACHE_STATUS)
-async def get_cache_status(time: Optional[str] = None, lat: Optional[float] = None, lon: Optional[float] = None, elevation: Optional[float] = None, loc_key: Optional[str] = None):
+async def get_cache_status(request: Request, loc_key: Optional[str] = None):
     """Report status of the precomputed cache system.
     Returns targeted locations, configured kinds, horizon, current window, and counts of
     cached files per kind and location within the current rolling window.
     """
     try:
-        # Config: kinds and horizon
+        # Get time parameter (optional)
+        time = request.query_params.get('time')
+        
         kinds_env = os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").strip()
         kinds = [k.strip() for k in kinds_env.split(",") if k.strip()]
         try:

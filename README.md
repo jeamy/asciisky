@@ -14,9 +14,13 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
-- Simulated time controls (optional): view the sky at a chosen UTC time; frontend appends `?time=<ISO8601>` to API calls automatically when enabled
+- Simulated time controls (optional): view the sky at a chosen UTC time
+  - Quick controls: hour back, reset to current time, hour forward
+  - Clickable time display for entering any custom date and time
+  - Frontend appends `?time=<ISO8601>` to API calls automatically when enabled
 - Minimalist UI design with optimized space usage
 - Cache status panel showing precomputed data availability
+- Custom date range cache precomputation with progress tracking
 - Horizontal navigation with arrow controls
 - Labels for bright asteroids and comets
 - Responsive design with mobile/tablet support
@@ -40,6 +44,13 @@ A web application that displays the current positions of celestial bodies (Sun, 
 ### First Run and Caching
 
 - The first startup can take longer because the app downloads and parses MPC orbital data and creates caches.
+
+- Cache Precomputation
+  - The cache status panel allows precomputing celestial data for a custom date range
+  - Select start and end dates, then click "Start Precompute" to begin background calculation
+  - Progress is displayed in real-time with a progress bar
+  - Maximum range is 7 days (168 hours) to prevent excessive resource usage
+  - Precomputed data is stored in location-specific cache files for fast retrieval
 
 - Asteroids
   - `cache/asteroids_dataframe.pkl` (parsed MPCORB)

@@ -85,6 +85,96 @@
   color: #ff7070;
 }
 
+/* Cache precompute section */
+.cache-precompute {
+  margin-top: 15px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.cache-precompute-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.cache-precompute-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cache-precompute-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cache-precompute-label {
+  flex: 0 0 80px;
+  font-size: 0.8rem;
+}
+
+.cache-precompute-input {
+  flex: 1;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  color: var(--primary-color);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+}
+
+.cache-precompute-button {
+  background: var(--panel-bg);
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  margin-top: 5px;
+  align-self: flex-end;
+}
+
+.cache-precompute-button:hover {
+  background: rgba(0, 255, 0, 0.1);
+}
+
+/* Progress indicator */
+.cache-progress {
+  margin-top: 10px;
+}
+
+.cache-progress-bar {
+  height: 8px;
+  background: var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 5px 0;
+}
+
+.cache-progress-fill {
+  height: 100%;
+  background: var(--primary-color);
+  width: 0%;
+  transition: width 0.5s ease;
+}
+
+.cache-progress-status {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.cache-progress-details {
+  margin-top: 5px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
 /* Ensure the sky container flexes next to the panel */
 .main-layout .sky-container {
   flex: 1 1 auto;

@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="./static/css/app.css">
     <link rel="stylesheet" href="./static/css/timeControls.css">
     <link rel="stylesheet" href="./static/css/cacheStatus.css">
+    <link rel="stylesheet" href="./static/css/timeInputDialog.css">
 </head>
 <body>
 <header>
@@ -60,6 +61,7 @@
     import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
     import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
     import { LocationDialog } from './static/js/locationDialog.js';
+    import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
     import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     
@@ -235,6 +237,7 @@
                 <ul>
                     <li><strong>📍 ${t('location_button') || 'Standort-Button'}:</strong> ${t('help_location') || 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)'}</li>
                     <li><strong>« + »:</strong> ${t('help_time_controls') || 'Zeitsteuerung - Stunde zurück, Jetzt (Echtzeit), Stunde vor'}</li>
+                    <li><strong>${t('help_time_display') || 'Zeitanzeige'}:</strong> ${t('help_time_display_desc') || 'Klickbar, um ein beliebiges Datum und eine beliebige Uhrzeit für die Simulation einzugeben'}</li>
                     <li><strong>DE/EN:</strong> ${t('help_language') || 'Sprachwechsel zwischen Deutsch und Englisch'}</li>
                 </ul>
 
@@ -250,6 +253,9 @@
 
                 <h4>${t('help_cache_status') || 'Cache-Status'}</h4>
                 <p>${t('help_cache_status_desc') || 'Zeigt verfügbare vorberechnete Daten für den aktuellen Standort. "Snapshots" sind stündliche Berechnungen für schnelle Anzeige.'}</p>
+                
+                <h4>${t('help_cache_precompute') || 'Cache-Vorberechnung'}</h4>
+                <p>${t('help_cache_precompute_desc') || 'Mit der Cache-Vorberechnung können Sie Himmelsdaten für einen bestimmten Zeitraum im Voraus berechnen lassen. Wählen Sie Start- und Enddatum und klicken Sie auf "Berechnung starten". Der Fortschritt wird angezeigt und die Daten stehen nach Abschluss für schnelle Anzeige zur Verfügung.'}</p>
 
                 <h4>${t('help_simulation') || 'Zeitsimulation'}</h4>
                 <p>${t('help_simulation_desc') || 'Simuliert verschiedene Zeitpunkte um Himmelsbewegungen zu verfolgen. Objekte bewegen sich entsprechend ihrer realen Bahnen.'}</p>
@@ -299,8 +305,20 @@
                 const btnHourMinus = document.getElementById('sim-hour-minus');
                 const btnNow = document.getElementById('sim-now');
                 const btnHourPlus = document.getElementById('sim-hour-plus');
+                const timeDisplay = document.getElementById('sim-time-local');
 
-                if (!btnHourMinus || !btnNow || !btnHourPlus) return;
+                if (!btnHourMinus || !btnNow || !btnHourPlus || !timeDisplay) return;
+                
+                // Erstelle den TimeInputDialog
+                const timeInputDialog = new TimeInputDialog((offsetMinutes) => {
+                    // Callback für Zeitänderungen
+                    updateSimPreview();
+                    if (renderer) updateSky();
+                    // Refresh cache status
+                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
+                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
+                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
+                });
 
                 const applyDelta = (delta) => {
                     const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
@@ -326,6 +344,15 @@
                     __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
                 btnHourPlus.addEventListener('click', () => applyDelta(60));
+                
+                // Mache die Zeitanzeige klickbar
+                timeDisplay.addEventListener('click', () => {
+                    // Lade die CSS-Datei für den Zeit-Dialog
+                    loadCSSFile('./static/css/timeInputDialog.css');
+                    // Zeige den Dialog an
+                    timeInputDialog.show();
+                });
+                timeDisplay.title = t('click_to_set_time') || 'Klicken, um eine benutzerdefinierte Zeit einzugeben';
 
                 updateSimPreview();
                 // Laufende Aktualisierung der Anzeige jede Sekunde
