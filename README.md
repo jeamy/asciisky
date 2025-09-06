@@ -24,6 +24,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Horizontal navigation with arrow controls
 - Labels for bright asteroids and comets
 - Responsive design with mobile/tablet support
+- SQLite database backend for efficient data storage and retrieval
 
 ## Prerequisites
 
@@ -50,18 +51,30 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Select start and end dates, then click "Start Precompute" to begin background calculation
   - Progress is displayed in real-time with a progress bar
   - Maximum range is 7 days (168 hours) to prevent excessive resource usage
-  - Precomputed data is stored in location-specific cache files for fast retrieval
+  - Precomputed data is stored in SQLite database and location-specific cache files for fast retrieval
 
-- Asteroids
-  - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
-  - `cache/bright_asteroid_cache.pkl` (final filtered results; ~6h TTL)
-  - If you change thresholds in `bright_asteroids.py` (`MAX_ABSOLUTE_MAGNITUDE`, `MAX_APPARENT_MAGNITUDE`), delete asteroid cache files under `cache/`.
+- SQLite Database Cache
+  - Primary cache backend for all astronomical data
+  - Stored in `cache/asciisky.db`
+  - Provides efficient storage and retrieval of asteroid/comet orbital data
+  - Caches computed positions for specific locations and time buckets
+  - See `doc/sqlite.md` for detailed schema and implementation
 
-- Comets
-  - `cache/CometEls.txt` (download-once copy of MPC comet elements)
-  - `cache/comets_dataframe.pkl` (standardized DataFrame; ~6h TTL)
-  - `cache/bright_comet_cache.pkl` (final comet list; ~6h TTL; not keyed by location)
-  - Thresholds are defined in `comets.py` (`MAX_ABSOLUTE_MAGNITUDE = 14.0`, `MAX_APPARENT_MAGNITUDE = 10.0`). Delete the comet cache files under `cache/` to force recompute with new thresholds.
+- Pickle Cache (Fallback)
+  - Asteroids
+    - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
+    - `cache/asteroids/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
+  - Comets
+    - `cache/CometEls.txt` (download-once copy of MPC comet elements)
+    - `cache/comets_dataframe.pkl` (standardized DataFrame; ~6h TTL)
+    - `cache/comets/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
+  - Celestial
+    - `cache/celestial/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
+
+- Thresholds
+  - Asteroids: `MAX_ABSOLUTE_MAGNITUDE = 12.0`, `MAX_APPARENT_MAGNITUDE = 10.0` in `bright_asteroids.py`
+  - Comets: `MAX_ABSOLUTE_MAGNITUDE = 14.0`, `MAX_APPARENT_MAGNITUDE = 10.0` in `comets.py`
+  - To force recomputation with new thresholds, delete both SQLite database and pickle cache files
 
 ### Without Docker
 
@@ -80,6 +93,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 - `main.py` - FastAPI application with celestial object calculation logic
 - `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
+- `db_utils.py` - SQLite database utilities for efficient data storage and retrieval
 - `settings.py` - User/location settings; persists to `user_settings.json`
 - `de421.bsp` - JPL ephemeris used by Skyfield
 - `templates/` - HTML templates
@@ -103,6 +117,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - `comets.md` - Comet position and magnitude pipeline (M1/k1 model)
   - `planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
   - `cache.md` - Technical documentation of the cache system architecture
+  - `sqlite.md` - SQLite database schema and implementation details
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
@@ -136,7 +151,7 @@ Notes:
 
 Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
 
-## Environment Variables
+### Environment Variables
 
 The application can be configured using the following environment variables in `docker-compose.yml`:
 
@@ -145,6 +160,11 @@ The application can be configured using the following environment variables in `
 - `ASCII_SKY_MAX_PRECOMPUTE_HOURS` - Maximum allowed hours for custom date range precomputation (default: 168)
 - `ASCII_SKY_PRECOMPUTE_KINDS` - Types of data to precompute (default: "celestial,asteroids,comets")
 - `ASCII_SKY_RETENTION_DAYS` - Number of days to retain cached data (default: 30)
+
+### Database Configuration
+- `ASTEROID_USE_SQLITE` - Enable SQLite backend for asteroids (default: 1)
+- `COMET_USE_SQLITE` - Enable SQLite backend for comets (default: 1)
+- `CELESTIAL_USE_SQLITE` - Enable SQLite backend for celestial objects (default: 1)
 
 ### Worker Configuration
 - `ASCII_SKY_PRECOMPUTE_WORKERS` - Number of worker threads for precomputation (default: 4)
@@ -158,7 +178,7 @@ The application can be configured using the following environment variables in `
 
 ## Technologies Used
 
-- Backend: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/)
+- Backend: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), SQLite
 - Frontend: HTML, CSS, JavaScript
 - Containerization: Docker, Docker Compose
 
