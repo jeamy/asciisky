@@ -102,6 +102,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
   - `comets.md` - Comet position and magnitude pipeline (M1/k1 model)
   - `planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
+  - `cache.md` - Technical documentation of the cache system architecture
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
@@ -115,6 +116,7 @@ All endpoints are referenced in the frontend via `static/js/constants.js`.
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
 - `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
+- `GET /api/cache_status` — cache status and precomputed data availability; see `doc/cache.md`
 
 ### Simulated Time (optional)
 
