@@ -249,31 +249,33 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
             # Moon phase details
             if name == 'moon':
                 try:
-                    import math
+                    # Verwende Skyfield's eingebaute fraction_illuminated Methode
+                    illumination = astrometric.fraction_illuminated(eph['sun'])
+                    
+                    # Berechne Phasenwinkel für Phasennamen
                     moon_phase = almanac.moon_phase(eph, t)
-                    moon_phase_angle = float(moon_phase.radians)
+                    phase_degrees = float(moon_phase.degrees)
                     
-                    # Normalisieren auf 0-100%
-                    phase_percent = (moon_phase_angle / (2 * math.pi)) * 100
-                    
-                    # Korrekte Phasennamen basierend auf dem normalisierten Prozentsatz
-                    if phase_percent < 1 or phase_percent > 99:
+                    # Bestimme Phasenname basierend auf dem Phasenwinkel (0-360°)
+                    # 0° = Neumond, 90° = Erstes Viertel, 180° = Vollmond, 270° = Letztes Viertel
+                    if phase_degrees < 22.5 or phase_degrees >= 337.5:
                         phase_name = "new_moon"
-                    elif phase_percent < 25:
+                    elif phase_degrees < 67.5:
                         phase_name = "waxing_crescent"
-                    elif phase_percent < 35:
+                    elif phase_degrees < 112.5:
                         phase_name = "first_quarter"
-                    elif phase_percent < 65:
+                    elif phase_degrees < 157.5:
                         phase_name = "waxing_gibbous"
-                    elif phase_percent < 75:
+                    elif phase_degrees < 202.5:
                         phase_name = "full_moon"
-                    elif phase_percent < 90:
+                    elif phase_degrees < 247.5:
                         phase_name = "waning_gibbous"
-                    elif phase_percent < 99:
+                    elif phase_degrees < 292.5:
                         phase_name = "last_quarter"
                     else:
                         phase_name = "waning_crescent"
-                    body_entry["phase"] = phase_percent / 100
+                    
+                    body_entry["phase"] = illumination
                     body_entry["phase_name"] = phase_name
                 except Exception:
                     pass

@@ -578,7 +578,6 @@ async function checkPrecomputeTaskProgress() {
     }
     
     const taskStatus = await response.json();
-    console.log('Task status:', taskStatus);
     
     // Update progress UI
     const progressFill = document.getElementById('cache-progress-fill');
@@ -588,13 +587,6 @@ async function checkPrecomputeTaskProgress() {
     const precomputeButton = document.getElementById('cache-precompute-button');
     const startDateInput = document.getElementById('cache-start-date');
     const endDateInput = document.getElementById('cache-end-date');
-    
-    console.log('DOM elements found:', {
-      progressFill: !!progressFill,
-      progressPercent: !!progressPercent,
-      progressHours: !!progressHours,
-      progressDetails: !!progressDetails
-    });
     
     if (progressFill && progressPercent && progressHours && progressDetails) {
       progressFill.style.width = `${taskStatus.percent_complete}%`;
