@@ -444,6 +444,9 @@
             
             // Verwende OBJECT_SYMBOLS direkt, nicht über CONFIG
             Object.entries(OBJECT_SYMBOLS).forEach(([name, symbol]) => {
+                // Asteroiden und Kometen nicht anzeigen
+                if (name === 'asteroid' || name === 'comet') return;
+                
                 const btn = document.createElement('button');
                 btn.className = 'object-btn';
                 btn.dataset.objectName = name; // Speichere den originalen Namen als Datensatz

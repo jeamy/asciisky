@@ -314,11 +314,6 @@ export class SkyRenderer {
                 layer.appendChild(label);
                 renderedCount++;
             }
-            if (renderedCount === 0) {
-                console.log('[labels] no labels rendered');
-            } else {
-                console.log('[labels] rendered labels:', renderedCount);
-            }
         } catch (e) {
             console.error('Error rendering labels:', e);
         }
@@ -431,13 +426,18 @@ export class SkyRenderer {
                 // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
                 
-                // Wenn kein Backend-Symbol vorhanden ist, prüfe den Typ
-                if (!backendSymbol && obj.type) {
+                // Prüfe zuerst auf Backend-Symbol, dann auf Typ, dann auf Namen
+                if (backendSymbol) {
+                    symbol = backendSymbol;
+                } else if (obj.type && CONFIG.OBJECT_SYMBOLS[obj.type.toLowerCase()]) {
                     // Verwende Symbol basierend auf dem Typ (asteroid oder comet)
-                    symbol = CONFIG.OBJECT_SYMBOLS[obj.type.toLowerCase()] || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                    symbol = CONFIG.OBJECT_SYMBOLS[obj.type.toLowerCase()];
+                } else if (CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()]) {
+                    symbol = CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()];
                 } else {
-                    symbol = backendSymbol || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                    symbol = '★'; // Fallback auf Stern-Symbol
                 }
+               
             }
             
             this.sky[row][col] = symbol;
@@ -1140,7 +1140,6 @@ export class SkyRenderer {
                 this.render();
             }
             
-            console.log('Sky data updated successfully');
         } catch (error) {
             console.error('Error updating sky data:', error);
             this.container.textContent = t('error_loading');

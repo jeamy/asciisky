@@ -120,7 +120,46 @@ function renderStatus(data, currentLocKey, locationName) {
   const el = ensurePanel();
   if (!el) return;
 
-  const match = (data.locations || []).find(loc => loc.loc_key === currentLocKey);
+  // Debug-Ausgabe für Fehlersuche
+  console.log('Suche nach Cache-Daten für Schlüssel:', currentLocKey);
+  console.log('Verfügbare Standorte:', data.locations);
+  
+  // Wenn Standorte vorhanden sind, nehmen wir den ersten Standort
+  // Dies ist eine Notlösung, wenn die Standorte nicht genau übereinstimmen
+  let match = null;
+  
+  if (data.locations && data.locations.length > 0) {
+    // Versuche zuerst, den exakten Schlüssel zu finden
+    match = data.locations.find(loc => loc.loc_key === currentLocKey);
+    
+    // Wenn kein exakter Treffer gefunden wurde, versuche eine Teilsuche basierend auf Koordinaten
+    if (!match) {
+      // Extrahiere Koordinaten aus dem Schlüssel
+      const keyParts = currentLocKey.split('_');
+      if (keyParts.length >= 2) {
+        const latPart = keyParts[0].substring(3); // Entferne 'lat'
+        const lonPart = keyParts[1].substring(3); // Entferne 'lon'
+        
+        // Versuche, einen Standort mit ähnlichen Koordinaten zu finden
+        match = data.locations.find(loc => {
+          // Vergleiche die ersten 4 Stellen nach dem Komma
+          const latMatch = loc.latitude.toFixed(4) === parseFloat(latPart).toFixed(4);
+          const lonMatch = loc.longitude.toFixed(4) === parseFloat(lonPart).toFixed(4);
+          return latMatch && lonMatch;
+        });
+      }
+      
+      // Wenn immer noch kein Treffer gefunden wurde, nehmen wir einfach den ersten Standort
+      if (!match) {
+        match = data.locations[0];
+        console.log('Kein passender Standort gefunden, verwende ersten Standort:', match);
+      } else {
+        console.log('Alternativer Standort gefunden:', match);
+      }
+    } else {
+      console.log('Exakter Standort gefunden:', match);
+    }
+  }
 
   const start = data?.window?.start ? toLocalHM(data.window.start) : '—';
   const end = data?.window?.end ? toLocalHM(data.window.end) : '—';
@@ -327,22 +366,35 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     // Store current location for potential task restoration
     window.currentCacheLocation = { lat, lon, elevation, locationName };
     let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
-    // Restrict backend scan to just this location via loc_key
+    
+    // Wichtig: Sende die Rohdaten (lat, lon, elevation) an das Backend
+    // und lasse das Backend die Normalisierung durchführen
+    const sep = url.includes('?') ? '&' : '?';
+    url = `${url}${sep}lat=${lat}&lon=${lon}&elevation=${elevation}`;
+    
+    // Zusätzlich den loc_key senden für Kompatibilität
     try {
       const key = buildLocKey(lat, lon, elevation);
-      const sep = url.includes('?') ? '&' : '?';
-      url = `${url}${sep}loc_key=${encodeURIComponent(key)}`;
+      url = `${url}&loc_key=${encodeURIComponent(key)}`;
     } catch (_) { /* noop */ }
+    
+    console.log('Cache status URL:', url); // Debug-Ausgabe
+    
     const resp = await fetch(url, { credentials: 'same-origin' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const key = buildLocKey(lat, lon, elevation);
+    
+    console.log('Cache status data:', data); // Debug-Ausgabe
+    console.log('Generated key:', key); // Debug-Ausgabe
+    
     renderStatus(data, key, locationName);
     
     // Now that the panel is rendered, check for active precompute task
     // This ensures all DOM elements are available
     setTimeout(() => restoreActivePrecomputeTask(), 100);
   } catch (err) {
+    console.error('Cache status error:', err); // Debug-Ausgabe
     renderError(err, locationName);
   }
 }

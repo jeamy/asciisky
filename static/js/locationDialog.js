@@ -247,20 +247,26 @@ export class LocationDialog {
         document.getElementById('lat-input').value = this.currentLocation.lat;
         document.getElementById('lon-input').value = this.currentLocation.lon;
         document.getElementById('location-name-input').value = this.currentLocation.name;
+        document.getElementById('elevation-input').value = elevation; // Setze zunächst den Standardwert
+        
+        // Callback mit Standard-Höhe aufrufen, damit die Cache-Anzeige sofort aktualisiert wird
+        if (this.onLocationChange) {
+            this.onLocationChange(this.currentLocation);
+        }
         
         // Höhe automatisch ermitteln
         const fetchedElevation = await this.getElevationForCoordinates(location.lat, location.lon);
         if (fetchedElevation !== null) {
             elevation = fetchedElevation;
             this.currentLocation.elevation = elevation;
-        }
-        
-        // Höhe aktualisieren
-        document.getElementById('elevation-input').value = this.currentLocation.elevation;
-        
-        // Callback aufrufen
-        if (this.onLocationChange) {
-            this.onLocationChange(this.currentLocation);
+            
+            // Höhe aktualisieren
+            document.getElementById('elevation-input').value = this.currentLocation.elevation;
+            
+            // Callback erneut aufrufen mit der aktualisierten Höhe
+            if (this.onLocationChange) {
+                this.onLocationChange(this.currentLocation);
+            }
         }
     }
     

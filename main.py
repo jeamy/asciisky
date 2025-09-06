@@ -983,7 +983,7 @@ async def get_precompute_status(task_id: str):
 
 # Cache status API endpoint
 @app.get(API_ENDPOINT_CACHE_STATUS)
-async def get_cache_status(request: Request, loc_key: Optional[str] = None):
+async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat: Optional[float] = None, lon: Optional[float] = None, elevation: Optional[float] = None):
     """Report status of the precomputed cache system.
     Returns targeted locations, configured kinds, horizon, current window, and counts of
     cached files per kind and location within the current rolling window.
