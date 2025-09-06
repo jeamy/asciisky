@@ -430,7 +430,14 @@ export class SkyRenderer {
             } else {
                 // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
-                symbol = backendSymbol || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                
+                // Wenn kein Backend-Symbol vorhanden ist, prüfe den Typ
+                if (!backendSymbol && obj.type) {
+                    // Verwende Symbol basierend auf dem Typ (asteroid oder comet)
+                    symbol = CONFIG.OBJECT_SYMBOLS[obj.type.toLowerCase()] || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                } else {
+                    symbol = backendSymbol || CONFIG.OBJECT_SYMBOLS[obj.name.toLowerCase()] || '★';
+                }
             }
             
             this.sky[row][col] = symbol;

@@ -149,6 +149,11 @@ export class LocationDialog {
         // Maximal 5 Ergebnisse anzeigen
         const limitedResults = results.slice(0, 5);
         
+        // Überschrift für Suchergebnisse hinzufügen
+        const resultsHeader = document.createElement('h4');
+        resultsHeader.textContent = t('search_results') || 'Search Results';
+        resultsContainer.appendChild(resultsHeader);
+        
         limitedResults.forEach(result => {
             const resultItem = document.createElement('div');
             resultItem.className = 'location-result-item';
@@ -157,19 +162,80 @@ export class LocationDialog {
                 <div class="location-coords">${parseFloat(result.lat).toFixed(4)}, ${parseFloat(result.lon).toFixed(4)}</div>
             `;
             
-            resultItem.addEventListener('click', () => {
+            // Vorschau-Container für diesen Standort
+            const previewContainer = document.createElement('div');
+            previewContainer.className = 'location-preview-container';
+            previewContainer.style.display = 'none'; // Standardmäßig ausgeblendet
+            previewContainer.innerHTML = `
+                <div class="location-preview">
+                    <h5>${t('location_preview') || 'Location Preview'}</h5>
+                    <div class="preview-map" id="preview-map-${result.place_id}"></div>
+                    <div class="preview-info">
+                        <p><strong>${t('name') || 'Name'}:</strong> ${result.display_name.split(',')[0]}</p>
+                        <p><strong>${t('coordinates') || 'Coordinates'}:</strong> ${parseFloat(result.lat).toFixed(4)}, ${parseFloat(result.lon).toFixed(4)}</p>
+                        <p><strong>${t('elevation') || 'Elevation'}:</strong> <span id="elevation-preview-${result.place_id}">${t('fetching') || 'Fetching...'}</span></p>
+                    </div>
+                </div>
+            `;
+            
+            resultItem.addEventListener('click', async () => {
+                // Alle anderen Vorschauen ausblenden
+                document.querySelectorAll('.location-preview-container').forEach(container => {
+                    container.style.display = 'none';
+                });
+                
+                // Diese Vorschau einblenden
+                previewContainer.style.display = 'block';
+                
+                // Höhe abrufen und anzeigen
+                const elevationSpan = document.getElementById(`elevation-preview-${result.place_id}`);
+                if (elevationSpan) {
+                    elevationSpan.textContent = t('fetching_elevation') || 'Fetching elevation...';
+                    const elevation = await this.getElevationForCoordinates(result.lat, result.lon);
+                    if (elevation !== null) {
+                        elevationSpan.textContent = `${elevation} m`;
+                    } else {
+                        elevationSpan.textContent = t('elevation_not_available') || 'Not available';
+                    }
+                }
+                
+                // Standort auswählen
                 this.selectLocation(result);
             });
             
             resultsContainer.appendChild(resultItem);
+            resultsContainer.appendChild(previewContainer);
         });
     }
     
-    selectLocation(location) {
+    // Funktion zur Höhenermittlung über Open-Elevation API
+    async getElevationForCoordinates(lat, lon) {
+        try {
+            // Status anzeigen
+            const elevationInput = document.getElementById('elevation-input');
+            if (elevationInput) {
+                elevationInput.value = t('fetching_elevation') || 'Fetching elevation...';
+            }
+            
+            const response = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`);
+            const data = await response.json();
+            if (data && data.results && data.results.length > 0) {
+                return data.results[0].elevation;
+            }
+        } catch (error) {
+            console.error('Error fetching elevation:', error);
+        }
+        return null;
+    }
+    
+    async selectLocation(location) {
+        // Höhe abrufen
+        let elevation = ASTRO_CONSTANTS.VIENNA_ELEVATION; // Standard-Höhe als Fallback
+        
         this.currentLocation = {
             lat: parseFloat(location.lat),
             lon: parseFloat(location.lon),
-            elevation: ASTRO_CONSTANTS.VIENNA_ELEVATION, // Standard-Höhe, da OSM keine Höheninformation liefert
+            elevation: elevation, // Vorläufig Standard-Höhe
             name: location.display_name.split(',')[0]
         };
         
@@ -180,8 +246,17 @@ export class LocationDialog {
         // Aktualisiere die Eingabefelder
         document.getElementById('lat-input').value = this.currentLocation.lat;
         document.getElementById('lon-input').value = this.currentLocation.lon;
-        document.getElementById('elevation-input').value = this.currentLocation.elevation;
         document.getElementById('location-name-input').value = this.currentLocation.name;
+        
+        // Höhe automatisch ermitteln
+        const fetchedElevation = await this.getElevationForCoordinates(location.lat, location.lon);
+        if (fetchedElevation !== null) {
+            elevation = fetchedElevation;
+            this.currentLocation.elevation = elevation;
+        }
+        
+        // Höhe aktualisieren
+        document.getElementById('elevation-input').value = this.currentLocation.elevation;
         
         // Callback aufrufen
         if (this.onLocationChange) {

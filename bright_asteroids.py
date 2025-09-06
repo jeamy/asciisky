@@ -300,7 +300,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     "altitude": alt.degrees, "azimuth": az.degrees,
                     "distance": round(distance.au, 3), "rise_time": format_time(rise_time, tz),
                     "set_time": format_time(set_time, tz), "transit_time": format_time(transit_time, tz),
-                    "type": "asteroid", "symbol": "•"
+                    "type": "asteroid", "symbol": "⚸"  # Unicode U+26B8 (Asteroid)
                 })
             except Exception as e:
                 print(f"Error in final processing for {row['designation']}: {e}")

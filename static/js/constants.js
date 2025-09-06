@@ -31,8 +31,9 @@ export const OBJECT_SYMBOLS = {
     'jupiter': '♃',
     'saturn': '♄',
     'uranus': '♅',
-    'neptune': '♆'
-    // Removed asteroid and comet as they are displayed automatically
+    'neptune': '♆',
+    'asteroid': '⚸',  // Unicode U+26B8 (Asteroid)
+    'comet': '☄️'  // Unicode U+2604 (Komet)
 };
 
 // Display Configuration

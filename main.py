@@ -137,8 +137,8 @@ BODY_SYMBOLS = {
     'saturn': '♄',
     'uranus': '♅',
     'neptune': '♆',
-    'asteroid': '•',
-    'comet': '☄️'
+    'comet': '☄️',  # Unicode U+2604 (Komet)
+    'asteroid': '⚸'  # Unicode U+26B8 (Asteroid)
 }
 
 # Compute planetary snapshot for a given location and time (UTC)
@@ -252,25 +252,24 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
                     import math
                     moon_phase = almanac.moon_phase(eph, t)
                     moon_phase_angle = float(moon_phase.radians)
-                    phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
-                    phase_percent = (1 - phase_factor * 2) * 100
-                    if phase_percent < 0:
-                        phase_percent = 0
-                    if phase_percent > 100:
-                        phase_percent = 100
-                    if phase_percent < 5:
+                    
+                    # Normalisieren auf 0-100%
+                    phase_percent = (moon_phase_angle / (2 * math.pi)) * 100
+                    
+                    # Korrekte Phasennamen basierend auf dem normalisierten Prozentsatz
+                    if phase_percent < 1 or phase_percent > 99:
                         phase_name = "new_moon"
-                    elif phase_percent < 45:
+                    elif phase_percent < 25:
                         phase_name = "waxing_crescent"
-                    elif phase_percent < 55:
+                    elif phase_percent < 35:
                         phase_name = "first_quarter"
-                    elif phase_percent < 95:
+                    elif phase_percent < 65:
                         phase_name = "waxing_gibbous"
-                    elif phase_percent < 100:
+                    elif phase_percent < 75:
                         phase_name = "full_moon"
-                    elif phase_percent < 145:
+                    elif phase_percent < 90:
                         phase_name = "waning_gibbous"
-                    elif phase_percent < 155:
+                    elif phase_percent < 99:
                         phase_name = "last_quarter"
                     else:
                         phase_name = "waning_crescent"
