@@ -44,7 +44,8 @@ function formatSignedFixed(x, decimals = 4) {
 function normalizeLocation(lat, lon, elevation) {
   const latN = Number(lat).toFixed(4);
   const lonN = Number(lon).toFixed(4);
-  const elevN = Math.round(Number(elevation) / 10) * 10;
+  // Simple ceiling approach - always round up to next 10m step
+  const elevN = Math.ceil(Number(elevation) / 10) * 10;
   return { lat: Number(latN), lon: Number(lonN), elev: elevN };
 }
 
@@ -121,44 +122,62 @@ function renderStatus(data, currentLocKey, locationName) {
   if (!el) return;
 
   // Debug-Ausgabe für Fehlersuche
+  console.log('=== CACHE STATUS DEBUG ===');
   console.log('Suche nach Cache-Daten für Schlüssel:', currentLocKey);
   console.log('Verfügbare Standorte:', data.locations);
+  console.log('Anzahl verfügbare Standorte:', data.locations ? data.locations.length : 0);
   
-  // Wenn Standorte vorhanden sind, nehmen wir den ersten Standort
-  // Dies ist eine Notlösung, wenn die Standorte nicht genau übereinstimmen
+  // Intelligente Standortsuche mit mehreren Strategien
   let match = null;
   
   if (data.locations && data.locations.length > 0) {
-    // Versuche zuerst, den exakten Schlüssel zu finden
+    console.log('Suche Match für Schlüssel:', currentLocKey);
+    console.log('Verfügbare Standorte:', data.locations.map(loc => loc.loc_key));
+    
+    // Strategie 1: Exakter Schlüssel-Match
     match = data.locations.find(loc => loc.loc_key === currentLocKey);
     
-    // Wenn kein exakter Treffer gefunden wurde, versuche eine Teilsuche basierend auf Koordinaten
     if (!match) {
-      // Extrahiere Koordinaten aus dem Schlüssel
+      // Strategie 2: Koordinaten-basierter Match (ignoriere Höhe)
       const keyParts = currentLocKey.split('_');
       if (keyParts.length >= 2) {
         const latPart = keyParts[0].substring(3); // Entferne 'lat'
         const lonPart = keyParts[1].substring(3); // Entferne 'lon'
         
-        // Versuche, einen Standort mit ähnlichen Koordinaten zu finden
-        match = data.locations.find(loc => {
-          // Vergleiche die ersten 4 Stellen nach dem Komma
-          const latMatch = loc.latitude.toFixed(4) === parseFloat(latPart).toFixed(4);
-          const lonMatch = loc.longitude.toFixed(4) === parseFloat(lonPart).toFixed(4);
+        // Finde alle Standorte mit ähnlichen Koordinaten
+        const coordMatches = data.locations.filter(loc => {
+          const latMatch = Math.abs(loc.latitude - parseFloat(latPart)) < 0.0001;
+          const lonMatch = Math.abs(loc.longitude - parseFloat(lonPart)) < 0.0001;
           return latMatch && lonMatch;
         });
+        
+        if (coordMatches.length > 0) {
+          // Bevorzuge Standorte mit den meisten Snapshots
+          match = coordMatches.reduce((best, current) => {
+            const bestTotal = (best.counts?.celestial || 0) + (best.counts?.asteroids || 0) + (best.counts?.comets || 0);
+            const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
+            return currentTotal > bestTotal ? current : best;
+          });
+          console.log('Koordinaten-Match gefunden:', match.loc_key, 'Snapshots:', match.counts);
+        }
       }
-      
-      // Wenn immer noch kein Treffer gefunden wurde, nehmen wir einfach den ersten Standort
-      if (!match) {
-        match = data.locations[0];
-        console.log('Kein passender Standort gefunden, verwende ersten Standort:', match);
-      } else {
-        console.log('Alternativer Standort gefunden:', match);
-      }
-    } else {
-      console.log('Exakter Standort gefunden:', match);
     }
+    
+    // Strategie 3: Fallback auf besten verfügbaren Standort
+    if (!match) {
+      match = data.locations.reduce((best, current) => {
+        const bestTotal = (best.counts?.celestial || 0) + (best.counts?.asteroids || 0) + (best.counts?.comets || 0);
+        const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
+        return currentTotal > bestTotal ? current : best;
+      });
+      console.log('Fallback auf besten Standort:', match.loc_key, 'Snapshots:', match.counts);
+    }
+    
+    console.log('=== FINALER MATCH ===');
+    console.log('Gewählter Standort:', match ? match.loc_key : 'KEIN MATCH');
+    console.log('Vollständiges Match-Objekt:', match);
+    console.log('Snapshot-Counts:', match ? match.counts : 'KEINE DATEN');
+    console.log('========================');
   }
 
   const start = data?.window?.start ? toLocalHM(data.window.start) : '—';

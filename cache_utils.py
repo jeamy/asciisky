@@ -19,9 +19,10 @@ DEFAULT_TTL_SECONDS = 6 * 3600  # 6 hours
 
 def normalize_location(lat: float, lon: float, elevation: float,
                         latlon_decimals: int = 4, elevation_step: int = 10) -> Tuple[float, float, int]:
-    """Round lat/lon to 4 decimals (~11 m) and elevation to nearest 10 m.
+    """Round lat/lon to 4 decimals (~11 m) and elevation to next higher 10 m step.
     Returns (lat_norm, lon_norm, elev_norm_int).
     """
+    import math
     try:
         lat_f = float(lat)
         lon_f = float(lon)
@@ -30,7 +31,7 @@ def normalize_location(lat: float, lon: float, elevation: float,
         lat_f, lon_f, elev_f = 0.0, 0.0, 0.0
     lat_n = round(lat_f, latlon_decimals)
     lon_n = round(lon_f, latlon_decimals)
-    elev_n = int(round(elev_f / float(elevation_step)) * elevation_step)
+    elev_n = int(math.ceil(elev_f / float(elevation_step)) * elevation_step)
     return lat_n, lon_n, elev_n
 
 
