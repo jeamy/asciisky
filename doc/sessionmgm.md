@@ -1,72 +1,100 @@
-# Server-Side Session- und Location-Caching-Plan
+# Server-Side Session and Location Caching Plan
 
-Dieser Plan definiert, wie serverseitige Sessions und pro-Standort-Caches für Kometen und (helle) Asteroiden umgesetzt werden. Ziel ist es, für gleiche Locations innerhalb eines Zeitfensters identische Ergebnisse wiederzuverwenden und Rechenzeit zu sparen.
+This plan defines how server-side sessions and per-location caches for comets and (bright) asteroids are implemented. The goal is to reuse identical results for the same locations within a time window and save computation time. The system uses a hybrid approach with SQLite as the primary storage and pickle files as fallback.
 
-## Ziele
-- Separate, wiederverwendbare Datensätze je Beobachterstandort und Zeitfenster.
-- Minimale Änderungen an bestehenden Endpoints; Frontend gibt weiterhin Location mit, oder nutzt Session-Fallback.
-- TTL-kompatibel (~6h) und stabil gegenüber Nebenläufigkeit.
+## Goals
+- Separate, reusable datasets for each observer location and time window.
+- Minimal changes to existing endpoints; frontend continues to provide location or uses session fallback.
+- TTL-compatible (~6h) and stable against concurrency.
 
 ## Scope
-- Kometen (`comets.load_comets()`): per-Location und Zeit-Bucket cachen (finale Liste inkl. Alt/Az, Ereigniszeiten).
-- Helle Asteroiden (`bright_asteroids.load_bright_asteroids()`): per-Location und Zeit-Bucket cachen (finale Liste).
-- Planeten (in `main.py`): vorerst live berechnen (geringer Aufwand). Optional: kleiner In-Memory-Cache per Location (60–120s).
-- Globale DataFrame-Caches (MPC/MPCORB) bleiben unverändert global (~6h) und ortsunabhängig.
+- Comets (`comets.load_comets()`): cache per location and time bucket in SQLite and pickle (final list including Alt/Az, event times).
+- Bright asteroids (`bright_asteroids.load_bright_asteroids()`): cache per location and time bucket in SQLite and pickle (final list).
+- Planets (in `main.py`): cache in SQLite `celestial_snapshots` table with fallback to pickle files.
+- Global DataFrame caches (MPC/MPCORB) remain unchanged globally (~6h) and location-independent, stored in both SQLite and pickle format.
 
-## Cache-Key-Strategie
-- Location-Normalisierung:
-  - Latitude/Longitude: auf 4 Dezimalstellen runden (`~11 m`).
-  - Elevation: auf 10 m runden.
-  - Beispiel-String: `lat{lat:.4f}_lon{lon:.4f}_el{int(round(elev/10)*10)}`.
-- Zeit-Bucket (UTC): 6-Stunden-Fenster passend zur TTL.
+## Cache Key Strategy
+- Location normalization:
+  - Latitude/Longitude: round to 4 decimal places (`~11 m`).
+  - Elevation: round to 10 m.
+  - Example string: `lat{lat:.4f}_lon{lon:.4f}_el{int(round(elev/10)*10)}`.
+- Time bucket (UTC): 6-hour window matching the TTL.
   - Buckets: 00, 06, 12, 18 UTC.
-  - Format: `YYYYMMDD_HH` (z. B. `20250830_18`).
-- Ergebnis: gleicher Standort im selben 6h-Bucket → gleicher Cache.
+  - Format: `YYYYMMDD_HH` (e.g., `20250830_18`).
+- Result: same location in the same 6h bucket → same cache.
 
-## Speicherlayout
-- Kometen: `cache/bright_comets/<loc_key>/<bucket>.pkl`
-- Asteroiden: `cache/bright_asteroids/<loc_key>/<bucket>.pkl`
-- Beispiele:
+## Storage Layout
+
+### SQLite Database (Primary)
+- Database file: `cache/asciisky.db`
+- Tables:
+  - `asteroid_positions`: Keyed by (asteroid_id, location_key, time_bucket)
+  - `comet_positions`: Keyed by (comet_id, location_key, time_bucket)
+  - `celestial_snapshots`: Keyed by (location_key, time_bucket)
+
+### Pickle Files (Fallback)
+- Comets: `cache/bright_comets/<loc_key>/<bucket>.pkl`
+- Asteroids: `cache/bright_asteroids/<loc_key>/<bucket>.pkl`
+- Examples:
   - `cache/bright_comets/lat48.2082_lon16.3738_el170/20250830_18.pkl`
   - `cache/bright_asteroids/lat48.2082_lon16.3738_el170/20250830_18.pkl`
 
-## TTL und Invalidation
-- TTL: ~6h (konsistent mit bestehenden globalen DataFrame-Caches).
-- Lesen: Cache als „fresh“, wenn Datei-`mtime` < 6h alt.
-- Aufräumen: periodisch alte Bucket-Dateien löschen (z. B. beim Startup und opportunistisch alle N Requests).
+## TTL and Invalidation
+- TTL: ~6h (consistent with existing global DataFrame caches).
+- Reading: Cache considered "fresh" if file `mtime` < 6h old.
+- Cleanup: periodically delete old bucket files (e.g., at startup and opportunistically every N requests).
 
-## Nebenläufigkeit und atomare Writes
-- Schreiben: immer atomar (Tempfile + `os.replace`) um Race Conditions zu vermeiden.
-- Optional: Datei-basierte Locks bei sehr hoher Parallelität.
+## Concurrency and Atomic Writes
 
-## API-Integration (Backend)
+### SQLite (Primary)
+- Database transactions with automatic rollback on error
+- Thread-local connections with proper configuration
+- PRAGMA settings for optimal concurrency
+
+### Pickle Files (Fallback)
+- Writing: always atomic (Tempfile + `os.replace`) to avoid race conditions
+- Optional: File-based locks for very high parallelism
+
+## API Integration (Backend)
+
+### Database Integration
+- `db_utils.py`:
+  - Provides database connection and transaction management
+  - Functions for storing and retrieving asteroid/comet data
+  - Functions for caching computed positions
+
+### Cache Integration
 - `comets.py`:
-  - Vor Laden/Speichern Cache-Pfad per Location+Bucket bestimmen.
-  - Beim Lesen zuerst neuen Pfad prüfen; optional einmaliger Fallback auf alten globalen Cache (Migration).
-  - Globale MPC-DataFrame-Caches unverändert lassen.
+  - Try SQLite first via `db_utils.get_comet_positions()`
+  - Fall back to pickle cache if not found in database
+  - Store results in both SQLite and pickle for backward compatibility
 - `bright_asteroids.py`:
-  - Analog zu Kometen: per-Location/Bucket Cache für finalen Datensatz; globaler MPCORB-Cache bleibt.
-- `main.py` (Sessions, optional aber empfohlen):
-  - SessionMiddleware (Cookie-basiert) hinzufügen.
+  - Try SQLite first via `db_utils.get_asteroid_positions()`
+  - Fall back to pickle cache if not found in database
+  - Store results in both SQLite and pickle for backward compatibility
+
+### Session Management
+- `main.py` (Sessions, optional but recommended):
+  - Add SessionMiddleware (cookie-based)
   - Endpoints:
-    - `GET /api/session/location` → gibt gespeicherte Session-Location zurück.
-    - `POST /api/session/location` → setzt Session-Location.
-  - Bestehende Endpoints (`/api/comets`, `/api/bright_asteroids`, `/api/celestial`):
-    - Location aus Query verwenden; falls fehlt → Session-Location als Fallback; falls keine Session → `settings.get_location()`.
+    - `GET /api/session/location` → returns stored session location
+    - `POST /api/session/location` → sets session location
+  - Existing endpoints (`/api/comets`, `/api/bright_asteroids`, `/api/celestial`):
+    - Use location from query; if missing → session location as fallback; if no session → `settings.get_location()`
 
-WICHTIG (Frontend-Regel): API-Endpunkte immer zentral in `static/js/constants.js` pflegen.
+IMPORTANT (Frontend rule): Always maintain API endpoints centrally in `static/js/constants.js`.
 
-## Frontend-Integration (minimal)
-- `static/js/constants.js`: neue Session-Endpunkte hinzufügen.
-- `static/js/locationDialog.js`: bei Änderung `POST /api/session/location`.
-- `static/js/skyManager.js` (oder Initialisierer): beim Start `GET /api/session/location` laden und als Default setzen.
-- Weiterhin dürfen Requests explizite `lat/lon/elevation` Parameter schicken (überschreiben Session-Fallback).
+## Frontend Integration (minimal)
+- `static/js/constants.js`: add new session endpoints.
+- `static/js/locationDialog.js`: `POST /api/session/location` on change.
+- `static/js/skyManager.js` (or initializer): load `GET /api/session/location` at startup and set as default.
+- Requests may continue to send explicit `lat/lon/elevation` parameters (override session fallback).
 
-## Utility-Modul: `cache_utils.py`
-Gemeinsame Helfer für Kometen und Asteroiden.
+## Utility Module: `cache_utils.py`
+Shared helpers for comets and asteroids.
 
 ```python
-# cache_utils.py (Skizze)
+# cache_utils.py (Sketch)
 from __future__ import annotations
 import os, json, tempfile, time, hashlib
 from datetime import datetime, timezone
@@ -116,7 +144,7 @@ def atomic_write_pickle(path: str, obj: Any) -> None:
     os.replace(tmp_path, path)  # atomic on same filesystem
 
 def cleanup_cache(kind: str, max_age_hours: int = 24) -> int:
-    """Entfernt alte Dateien; gibt Anzahl gelöschter Dateien zurück."""
+    """Removes old files; returns number of deleted files."""
     import glob
     cutoff = time.time() - max_age_hours * 3600
     root = os.path.join(CACHE_ROOT, kind)
@@ -131,44 +159,63 @@ def cleanup_cache(kind: str, max_age_hours: int = 24) -> int:
     return removed
 ```
 
-## Implementierungsschritte
-1. `cache_utils.py` hinzufügen (gemeinsame Key-/I/O-Funktionen).
-2. `comets.py`:
-   - Cache-Pfad via `normalize_location()` + `time_bucket()` + `cache_path()` bestimmen.
-   - Beim Lesen: neuen Pfad prüfen; optional einmalig globalen Altpfad als Fallback Lesen (Migration), dann im neuen Schema schreiben.
-   - Atomare Writes mit `atomic_write_pickle()`.
-3. `bright_asteroids.py` analog zu (2).
-4. `main.py` (optional Session):
-   - `SessionMiddleware` hinzufügen, Secret Key aus Env oder Konstante.
-   - `GET/POST /api/session/location` implementieren.
-   - In `/api/comets`, `/api/bright_asteroids`, `/api/celestial` Location-Fallback auf Session.
+## Implementation Steps
+1. Add `db_utils.py` for SQLite database operations:
+   - Create schema with tables for asteroids, comets, and position caches
+   - Implement thread-safe connection management
+   - Provide transaction support with automatic rollback
+
+2. Add `cache_utils.py` (shared key/I/O functions for pickle fallback):
+   - Implement location normalization and time bucketing
+   - Provide atomic file operations
+   - Support both SQLite and pickle cache paths
+
+3. Update `comets.py` and `bright_asteroids.py`:
+   - Try SQLite first via `db_utils` functions
+   - Fall back to pickle cache via `cache_utils` functions
+   - Store results in both SQLite and pickle for backward compatibility
+
+4. Update `main.py` (optional Session):
+   - Add `SessionMiddleware`, Secret Key from Env or constant
+   - Implement `GET/POST /api/session/location`
+   - In `/api/comets`, `/api/bright_asteroids`, `/api/celestial` location fallback to session
+
 5. Frontend:
-   - `static/js/constants.js`: neue Session-Endpoints eintragen.
-   - `static/js/locationDialog.js`: `POST /api/session/location` bei Änderung.
-   - Initialisierung: `GET /api/session/location` als Default (wenn keine Query-Location).
-6. Doku aktualisieren: `README.md`, `doc/plan.md`, `doc/comets.md`, `doc/asteroids.md`.
+   - `static/js/constants.js`: add new session endpoints
+   - `static/js/locationDialog.js`: `POST /api/session/location` on change
+   - Initialization: `GET /api/session/location` as default (if no query location)
+
+6. Update documentation: `README.md`, `doc/plan.md`, `doc/comets.md`, `doc/asteroids.md`, `doc/sqlite.md`, `doc/cache.md`
 
 ## Tests & Benchmarking
-- Gleiches `lat/lon/elev` + gleicher Bucket: zweiter Aufruf muss Cache-Hit sein (Messung End-to-End-Zeit << erster Aufruf).
-- Andere Location: Cache-Miss, aber globaler DataFrame-Cache verwendet (schneller als Kaltstart).
-- Nach TTL > 6h: Cache-Miss (Neuberechnung).
-- Parallelität: gleichzeitige Anfragen → keine korrupten Dateien, genau eine finale Cache-Datei.
+- Same `lat/lon/elev` + same bucket: second call must be cache hit (measuring end-to-end time << first call).
+- Different location: cache miss, but global DataFrame cache used (faster than cold start).
+- After TTL > 6h: cache miss (recalculation).
+- Parallelism: simultaneous requests → no corrupt files, exactly one final cache file.
 
-## Migration & Rückwärtskompatibilität
-- Beim ersten Zugriff: 
-  - Falls neuer Pfad fehlt, optional den bisherigen globalen Cache (`cache/bright_comet_cache.pkl` / `cache/bright_asteroid_cache.pkl`) einmalig lesen, dann unter neuem Schema schreiben.
-  - Danach nur noch per-Location/Bucket verwenden.
+## Migration & Backward Compatibility
+- On first access: 
+  - If new path is missing, optionally read the previous global cache (`cache/bright_comet_cache.pkl` / `cache/bright_asteroid_cache.pkl`) once, then write under new schema.
+  - Afterward, only use per-location/bucket.
 
-## Konfiguration (Defaults)
-- Location-Rundung: lat/lon 4 Nachkommastellen, elevation auf 10 m.
-- Bucket: 6h (UTC), Buckets um 00/06/12/18.
-- TTL: 6h.
-- Optional In-Memory-LRU: 60–120s pro Location/Bucket um Disk-I/O zu sparen.
+## Configuration (Defaults)
+- Location rounding: lat/lon 4 decimal places, elevation to 10 m
+- Bucket: 6h (UTC), buckets at 00/06/12/18
+- TTL: 6h
+- Optional In-Memory LRU: 60-120s per location/bucket to save disk I/O
+- SQLite configuration:
+  - `ASTEROID_USE_SQLITE`: 1 (enabled)
+  - `COMET_USE_SQLITE`: 1 (enabled)
+  - `CELESTIAL_USE_SQLITE`: 1 (enabled)
+  - Database PRAGMA settings:
+    - `synchronous=NORMAL`: Balance safety/performance
+    - `cache_size=10000`: 10MB cache
+    - `temp_store=MEMORY`: Use RAM for temp tables
 
-## Sicherheit & Datenschutz
-- Session speichert nur Standortkoordinaten und optionalen Namen (kein PII darüber hinaus).
-- Cookie-signed (kein sensibler Inhalt im Klartext erforderlich; Server verwaltet Session-Store).
+## Security & Privacy
+- Session stores only location coordinates and optional name (no PII beyond that).
+- Cookie-signed (no sensitive content in plain text required; server manages session store).
 
-## Hinweise
-- Alt/Az und Ereigniszeiten hängen von der Zeit ab; durch 6h-Buckets können Werte im Laufe des Buckets driften. Das ist konsistent mit heutigem TTL-Verhalten.
-- Erweiterungsidee (später): RA/Dec-orientiertes Caching und Alt/Az-„Reprojection“ zur Antwortzeit, falls feinere Aktualität benötigt wird (komplexer, aber genauer).
+## Notes
+- Alt/Az and event times depend on time; with 6h buckets, values can drift over the course of the bucket. This is consistent with current TTL behavior.
+- Extension idea (later): RA/Dec-oriented caching and Alt/Az "reprojection" at response time, if finer accuracy is needed (more complex, but more accurate).

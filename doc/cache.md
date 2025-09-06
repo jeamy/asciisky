@@ -1,84 +1,101 @@
-# AsciiSky Cache-System Dokumentation
+# AsciiSky Cache System Documentation
 
-## Überblick
+## Overview
 
-Das AsciiSky Cache-System verwendet eine hierarchische Struktur zur effizienten Speicherung astronomischer Berechnungen. Das System basiert auf **standort- und zeitbasierten Buckets** mit **Pickle-Serialisierung**.
+The AsciiSky cache system uses a hybrid approach combining **SQLite database** and **hierarchical file structure** for efficient storage of astronomical calculations. The system is based on **location and time-based buckets** with both **SQLite storage** (primary) and **Pickle serialization** (fallback).
 
-## Cache-Verzeichnisstruktur
+## Hybrid Cache Structure
+
+### SQLite Database (Primary)
+
+```
+cache/asciisky.db               # Main SQLite database file
+```
+
+The SQLite database contains tables for:
+- `asteroids` - Asteroid orbital data
+- `comets` - Comet orbital data
+- `asteroid_positions` - Cached asteroid positions by location and time
+- `comet_positions` - Cached comet positions by location and time
+- `celestial_snapshots` - Cached celestial body positions by location and time
+
+See `doc/sqlite.md` for detailed schema information.
+
+### Pickle Files (Fallback)
 
 ```
 cache/
-├── celestial/                    # Planeten und Sterne
+├── celestial/                    # Planets and stars
 │   └── lat+52.5200_lon+13.4050_el+0040/
 │       ├── 20250906T00.pkl      # 00:00-05:59 UTC
 │       ├── 20250906T06.pkl      # 06:00-11:59 UTC
 │       ├── 20250906T12.pkl      # 12:00-17:59 UTC
 │       └── 20250906T18.pkl      # 18:00-23:59 UTC
-├── asteroids/                   # Asteroiden
+├── asteroids/                   # Asteroids
 │   └── lat+52.5200_lon+13.4050_el+0040/
-│       ├── 20250906T00.pkl      # Stündliche Buckets
+│       ├── 20250906T00.pkl      # Hourly buckets
 │       ├── 20250906T01.pkl
 │       └── ...
-├── comets/                      # Kometen
+├── comets/                      # Comets
 │   └── lat+52.5200_lon+13.4050_el+0040/
-│       ├── 20250906T00.pkl      # Stündliche Buckets
+│       ├── 20250906T00.pkl      # Hourly buckets
 │       ├── 20250906T01.pkl
 │       └── ...
-├── asteroids_dataframe.pkl     # Globaler Asteroiden-Katalog
-├── comets_dataframe.pkl        # Globaler Kometen-Katalog
-├── MPCORB.DAT                  # Minor Planet Center Daten
-└── CometEls.txt                # Kometen-Elemente
+├── asteroids_dataframe.pkl     # Global asteroid catalog
+├── comets_dataframe.pkl        # Global comet catalog
+├── MPCORB.DAT                  # Minor Planet Center data
+└── CometEls.txt                # Comet elements
 ```
 
-## Standort-Normalisierung
+## Location Normalization
 
 ### Location Key Format
 ```
 lat{±DD.DDDD}_lon{±DD.DDDD}_el{±DDDDD}
 ```
 
-**Beispiel:** `lat+52.5200_lon+13.4050_el+0040`
+**Example:** `lat+52.5200_lon+13.4050_el+0040`
 
-### Normalisierungsregeln
+### Normalization Rules
 ```python
 # cache_utils.py: normalize_location()
-lat_n = round(lat, 4)           # 4 Dezimalstellen (~11m Genauigkeit)
-lon_n = round(lon, 4)           # 4 Dezimalstellen (~11m Genauigkeit)  
-elev_n = math.ceil(elev / 10) * 10  # Aufrunden auf nächste 10m
+lat_n = round(lat, 4)           # 4 decimal places (~11m accuracy)
+lon_n = round(lon, 4)           # 4 decimal places (~11m accuracy)  
+elev_n = math.ceil(elev / 10) * 10  # Round up to next 10m
 ```
 
-**Beispiele:**
+**Examples:**
 - `405m` → `410m`
 - `415m` → `420m`
 - `425m` → `430m`
 
-## Zeit-Bucketing
+## Time Bucketing
 
-### Bucket-Größen nach Datentyp
+### Bucket Sizes by Data Type
 
-| Datentyp | Bucket-Größe | Grund |
+| Data Type | Bucket Size | Reason |
 |----------|--------------|-------|
-| **celestial** | 6 Stunden | Langsame Änderung der Planetenpositionen |
-| **asteroids** | 1 Stunde | Schnellere Bewegung, präzisere Tracking |
-| **comets** | 1 Stunde | Schnellere Bewegung, präzisere Tracking |
+| **celestial** | 6 hours | Slow change in planet positions |
+| **asteroids** | 1 hour | Faster movement, more precise tracking |
+| **comets** | 1 hour | Faster movement, more precise tracking |
 
-### Bucket-Label Format
+### Bucket Label Format
 ```
 YYYYMMDDTHH
 ```
 
-**Beispiele:**
+**Examples:**
 - `20250906T00` = 06.09.2025, 00:00-05:59 UTC (celestial)
 - `20250906T13` = 06.09.2025, 13:00-13:59 UTC (asteroids/comets)
 
-### Bucket-Berechnung
+### Bucket Calculation
 ```python
 # cache_utils.py: time_bucket_utc()
 bucket_hour = (dt.hour // bucket_hours) * bucket_hours
 return f"{dt:%Y%m%d}T{bucket_hour:02d}"
 ```
 
-## Cache-Dateien Inhalt
+## Cache File Contents
 
 ### Celestial Cache (.pkl)
 ```python
@@ -93,7 +110,7 @@ return f"{dt:%Y%m%d}T{bucket_hour:02d}"
         "sun": {"alt": 45.2, "az": 180.5, "magnitude": -26.7},
         "moon": {"alt": -12.3, "az": 95.1, "magnitude": -12.1, "phase": 0.85},
         "mercury": {"alt": 5.2, "az": 200.1, "magnitude": 0.1},
-        # ... weitere Planeten
+        # ... other planets
     },
     "loading": false
 }
@@ -111,53 +128,61 @@ return f"{dt:%Y%m%d}T{bucket_hour:02d}"
         "set_time": "2025-09-07T06:15:00+02:00",
         "transit_time": "2025-09-07T00:22:00+02:00"
     },
-    # ... weitere Objekte
+    # ... other objects
 ]
 ```
 
-## Cache-Verwaltung
+## Cache Management
 
 ### TTL (Time To Live)
 
-| Cache-Typ | TTL | Grund |
+| Cache Type | TTL | Reason |
 |-----------|-----|-------|
-| **celestial** | 6 Stunden | Bucket-Größe |
-| **asteroids** | 49 Stunden | Precompute-Fenster + Puffer |
-| **comets** | 49 Stunden | Precompute-Fenster + Puffer |
-| **dataframes** | 12 Stunden | Katalog-Updates |
+| **celestial** | 6 hours | Bucket size |
+| **asteroids** | 49 hours | Precompute window + buffer |
+| **comets** | 49 hours | Precompute window + buffer |
+| **dataframes** | 12 hours | Catalog updates |
 
-### Automatische Bereinigung
+### Automatic Cleanup
 ```yaml
 # docker-compose.yml
-ASCII_SKY_RETENTION_DAYS: 30  # Lösche Dateien älter als 30 Tage
+ASCII_SKY_RETENTION_DAYS: 30  # Delete data older than 30 days
+```
+
+### Database Configuration
+```yaml
+# docker-compose.yml
+ASTEROID_USE_SQLITE: 1       # Enable SQLite backend for asteroids
+COMET_USE_SQLITE: 1          # Enable SQLite backend for comets
+CELESTIAL_USE_SQLITE: 1      # Enable SQLite backend for celestial objects
 ```
 
 ## Precompute Worker
 
-### Konfiguration
+### Configuration
 ```yaml
 # docker-compose.yml
-ASCII_SKY_PRECOMPUTE_HOURS: 144      # 6 Tage Vorlauf
+ASCII_SKY_PRECOMPUTE_HOURS: 144      # 6 days lead time
 ASCII_SKY_PRECOMPUTE_KINDS: celestial,asteroids,comets
-ASCII_SKY_PRECOMPUTE_WORKERS: 4      # Parallel-Threads
-ASCII_SKY_ADAPTIVE_WORKERS: 1        # Dynamische Skalierung
+ASCII_SKY_PRECOMPUTE_WORKERS: 4      # Parallel threads
+ASCII_SKY_ADAPTIVE_WORKERS: 1        # Dynamic scaling
 ```
 
-### Standort-Discovery
-Der Worker findet Zielstandorte aus drei Quellen:
+### Location Discovery
+The worker finds target locations from three sources:
 
-1. **Benutzer-Standort** (`settings.get_location()`)
-2. **Konfigurierte Listen** (ENV/Datei)
-3. **Existierende Caches** (scannt `cache/<kind>/*` Verzeichnisse)
+1. **User location** (`settings.get_location()`)
+2. **Configured lists** (ENV/file)
+3. **Existing caches** (scans `cache/<kind>/*` directories)
 
 ### Rolling Window
-- **Fenster:** 144 Stunden (6 Tage)
-- **Update:** Stündlich
-- **Strategie:** Vorwärts wenn `dt >= now`, sonst rückwärts
+- **Window:** 144 hours (6 days)
+- **Update:** Hourly
+- **Strategy:** Forward if `dt >= now`, otherwise backward
 
 ## API Integration
 
-### Cache-Status Endpoint
+### Cache Status Endpoint
 ```
 GET /api/cache_status?lat=52.52&lon=13.41&elevation=35
 ```
@@ -201,9 +226,9 @@ GET /api/cache_status?lat=52.52&lon=13.41&elevation=35
 }
 ```
 
-## Cache-Pfad Generierung
+## Cache Path Generation
 
-### Funktionen
+### Functions
 ```python
 # cache_utils.py
 def build_cache_path(kind, lat, lon, elevation, dt=None, bucket_hours=6):
@@ -213,7 +238,7 @@ def build_cache_path(kind, lat, lon, elevation, dt=None, bucket_hours=6):
     return f"cache/{kind}/{loc_key}/{bucket}.pkl"
 ```
 
-### Beispiel-Aufruf
+### Example Call
 ```python
 path = build_cache_path(
     'celestial', 
@@ -224,57 +249,104 @@ path = build_cache_path(
 # → "cache/celestial/lat+52.5200_lon+13.4050_el+0040/20250906T12.pkl"
 ```
 
-## Atomare Schreibvorgänge
+## Atomic Write Operations
 
+### Pickle Files
 ```python
 # cache_utils.py: atomic_write_pickle()
 def atomic_write_pickle(path, data):
     tmp_path = f"{path}.tmp-{os.getpid()}-{int(time.time())}"
     with open(tmp_path, 'wb') as f:
         pickle.dump(data, f)
-    os.replace(tmp_path, path)  # Atomarer Austausch
+    os.replace(tmp_path, path)  # Atomic replacement
 ```
 
-**Vorteile:**
-- Keine korrupten Dateien bei Unterbrechungen
-- Thread-sicher
-- Konsistente Daten
+### SQLite Database
+```python
+# db_utils.py: db_transaction()
+@contextmanager
+def db_transaction():
+    """Context manager for database transactions with automatic rollback on error."""
+    conn = get_db_connection()
+    try:
+        conn.execute("BEGIN")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+```
 
-## Performance-Optimierungen
+**Benefits:**
+- No corrupt files or database entries during interruptions
+- Thread-safe operations
+- Consistent data with transaction support
+- Automatic rollback on errors
+
+## Performance Optimizations
+
+### SQLite Optimizations
+- Indexed queries for efficient data retrieval
+- Prepared statements for repeated operations
+- Connection pooling with thread-local storage
+- Optimized PRAGMA settings for performance
 
 ### Lazy Loading
-- Dataframes werden nur bei Bedarf geladen
-- In-Memory Caching für häufig verwendete Daten
+- Dataframes are loaded only when needed
+- In-memory caching for frequently used data
 
-### Parallele Verarbeitung
-- Multi-Threading im Precompute Worker
-- Adaptive Worker-Skalierung basierend auf Systemlast
+### Parallel Processing
+- Multi-threading in the precompute worker
+- Adaptive worker scaling based on system load
 
-### Effiziente Suche
-- Hierarchische Verzeichnisstruktur
-- Schnelle Standort-Normalisierung
-- Zeit-Bucket Alignment
+### Efficient Search
+- SQL queries for filtering by magnitude, location, and time
+- Hierarchical directory structure (fallback cache)
+- Fast location normalization
+- Time bucket alignment
 
-## Fehlerbehandlung
+## Error Handling
 
-### Cache Miss Strategien
-1. **Real-time:** Berechne on-demand und schreibe in Cache
-2. **Simulated-time:** Nur aus Cache lesen, kein Fallback
-3. **Background:** Trigger Precompute für fehlendes Zeitfenster
+### Cache Miss Strategies
+1. **Real-time:** Calculate on-demand and write to cache (both SQLite and pickle)
+2. **Simulated-time:** Read only from cache, no fallback
+3. **Background:** Trigger precompute for missing time window
 
-### Korrupte Dateien
-- Automatisches Überspringen bei Pickle-Fehlern
-- Neuberechnung bei nächstem Zugriff
-- Logging für Debugging
+### Hybrid Fallback
+- Try SQLite first, fall back to pickle files if not found
+- Migrate data from pickle to SQLite when encountered
+- Consistent cache keys between both systems
+
+### Error Recovery
+- Automatically skip on pickle errors or database corruption
+- Transaction rollback on database errors
+- Recalculate on next access
+- Logging for debugging
 
 ## Monitoring
 
-### Cache-Statistiken
-- Anzahl Snapshots pro Standort/Art
-- Zeitspanne der verfügbaren Daten
-- Cache-Hit/Miss Raten
+### Cache Statistics
+- Number of snapshots per location/type
+- Time span of available data
+- Cache hit/miss rates
+- Database size and row counts
 
-### Worker-Status
-- Fortschritt der Vorberechnung
-- Verarbeitete Stunden
-- Fehlerrate pro Standort/Art
+### Worker Status
+- Precomputation progress
+- Processed hours
+- Error rate per location/type
+
+### Database Stats API
+```python
+# From db_utils.py: get_database_stats()
+{
+    'asteroids_count': 1234,
+    'comets_count': 56,
+    'positions_count': 4567,
+    'comet_positions_count': 890,
+    'celestial_snapshots_count': 123,
+    'db_size_mb': 42.5,
+    'cache_oldest': '2025-09-01T00:00:00+00:00',
+    'cache_newest': '2025-09-06T23:00:00+00:00'
+}
+```
