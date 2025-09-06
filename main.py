@@ -258,15 +258,16 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
                     
                     # Bestimme Phasenname basierend auf dem Phasenwinkel (0-360°)
                     # 0° = Neumond, 90° = Erstes Viertel, 180° = Vollmond, 270° = Letztes Viertel
+                    # 0°-180° = zunehmend (waxing), 180°-360° = abnehmend (waning)
                     if phase_degrees < 22.5 or phase_degrees >= 337.5:
                         phase_name = "new_moon"
                     elif phase_degrees < 67.5:
                         phase_name = "waxing_crescent"
                     elif phase_degrees < 112.5:
                         phase_name = "first_quarter"
-                    elif phase_degrees < 157.5:
+                    elif phase_degrees < 177.5:
                         phase_name = "waxing_gibbous"
-                    elif phase_degrees < 202.5:
+                    elif phase_degrees < 182.5:
                         phase_name = "full_moon"
                     elif phase_degrees < 247.5:
                         phase_name = "waning_gibbous"
