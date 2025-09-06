@@ -22,7 +22,7 @@ import numpy as np
 import math
 
 from bright_asteroids import format_time
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 
 # Cache files
@@ -44,6 +44,9 @@ MAX_APPARENT_MAGNITUDE = 12
 # snapshots remain valid when served from cache-only endpoints.
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_CACHE_TTL_SECONDS = 49 * 3600
+
+# SQLite backend configuration
+COMET_USE_SQLITE = os.getenv('COMET_USE_SQLITE', 'true').lower() == 'true'
 
 # Ensure cache directory exists
 os.makedirs('cache', exist_ok=True)
@@ -397,8 +400,24 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
 
     # Per-location/time-bucket cache for final comet list (bucket based on simulated time if provided)
-    cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
     if use_cache:
+        if COMET_USE_SQLITE:
+            # Try SQLite cache first
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
+            
+            try:
+                from db_utils import get_comet_positions
+                cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
+                if cached_positions:
+                    logger.debug(f"Loading SQLite comet cache for {loc_key}/{time_bucket}")
+                    return cached_positions[:max_comets]
+            except Exception as e:
+                logger.debug(f"SQLite comet cache failed: {e}")
+        
+        # Fallback to pickle cache
+        cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
         try:
             cached_list = read_pickle_if_fresh(cache_file, COMET_CACHE_TTL_SECONDS)
             if isinstance(cached_list, list):
@@ -412,14 +431,24 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         except Exception as e:
             logger.debug(f"Error reading comet caches: {e}")
 
+    # Load comet dataframe and store in SQLite if enabled
     df = load_comet_dataframe()
     if df is None or df.empty:
         return []
+    
+    # Store comet data in SQLite for future use
+    if COMET_USE_SQLITE:
+        try:
+            from db_utils import store_comet_dataframe
+            stored_count = store_comet_dataframe(df)
+            logger.debug(f"Stored {stored_count} comets in SQLite database")
+        except Exception as e:
+            logger.debug(f"Failed to store comets in SQLite: {e}")
 
     # Prefilter by photometric parameters to reduce heavy computations
     try:
         # Do not require k1; use default n=4.0 later if missing (align with example in c.py)
-        df_pref = df[df['M1'].notna() & (df['M1'] <= MAX_ABSOLUTE_MAGNITUDE)].copy()
+        df_pref = df[(df['M1'].notna()) & (df['M1'] <= MAX_ABSOLUTE_MAGNITUDE)].copy()
         # Process intrinsically brighter comets first
         if 'M1' in df_pref.columns:
             df_pref = df_pref.sort_values('M1')
@@ -634,11 +663,28 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             })
             count += 1
 
-    # Save final list to per-location/time cache for faster subsequent loads
+    # Save final list to cache for faster subsequent loads
+    if COMET_USE_SQLITE:
+        # Store in SQLite cache
+        try:
+            from db_utils import store_comet_positions
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
+            
+            # We need comet IDs for SQLite storage - use a dummy approach for now
+            # In a full implementation, we'd match comets to database IDs
+            store_comet_positions(0, loc_key, time_bucket, lat, lon, elevation, comet_list)
+            logger.debug(f"Saved {len(comet_list)} bright comets to SQLite cache ({loc_key}/{time_bucket})")
+        except Exception as e:
+            logger.debug(f"Failed to write SQLite comet cache: {e}")
+    
+    # Also save to pickle cache as fallback
     try:
+        cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
         atomic_write_pickle(cache_file, comet_list)
-        logger.debug(f"Saved {len(comet_list)} bright comets to cache ({cache_file}).")
+        logger.debug(f"Saved {len(comet_list)} bright comets to pickle cache ({cache_file})")
     except Exception as e:
-        logger.debug(f"Failed to write comet cache {cache_file}: {e}")
+        logger.debug(f"Failed to write comet pickle cache {cache_file}: {e}")
 
     return comet_list

@@ -121,19 +121,10 @@ function renderStatus(data, currentLocKey, locationName) {
   const el = ensurePanel();
   if (!el) return;
 
-  // Debug-Ausgabe für Fehlersuche
-  console.log('=== CACHE STATUS DEBUG ===');
-  console.log('Suche nach Cache-Daten für Schlüssel:', currentLocKey);
-  console.log('Verfügbare Standorte:', data.locations);
-  console.log('Anzahl verfügbare Standorte:', data.locations ? data.locations.length : 0);
-  
   // Intelligente Standortsuche mit mehreren Strategien
   let match = null;
   
   if (data.locations && data.locations.length > 0) {
-    console.log('Suche Match für Schlüssel:', currentLocKey);
-    console.log('Verfügbare Standorte:', data.locations.map(loc => loc.loc_key));
-    
     // Strategie 1: Exakter Schlüssel-Match
     match = data.locations.find(loc => loc.loc_key === currentLocKey);
     
@@ -158,7 +149,6 @@ function renderStatus(data, currentLocKey, locationName) {
             const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
             return currentTotal > bestTotal ? current : best;
           });
-          console.log('Koordinaten-Match gefunden:', match.loc_key, 'Snapshots:', match.counts);
         }
       }
     }
@@ -170,14 +160,8 @@ function renderStatus(data, currentLocKey, locationName) {
         const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
         return currentTotal > bestTotal ? current : best;
       });
-      console.log('Fallback auf besten Standort:', match.loc_key, 'Snapshots:', match.counts);
     }
     
-    console.log('=== FINALER MATCH ===');
-    console.log('Gewählter Standort:', match ? match.loc_key : 'KEIN MATCH');
-    console.log('Vollständiges Match-Objekt:', match);
-    console.log('Snapshot-Counts:', match ? match.counts : 'KEINE DATEN');
-    console.log('========================');
   }
 
   const start = data?.window?.start ? toLocalHM(data.window.start) : '—';
@@ -244,10 +228,11 @@ function renderStatus(data, currentLocKey, locationName) {
     const c = match.counts?.[k] ?? 0;
     const e = match.earliest?.[k] ? toLocalHM(match.earliest[k]) : '—';
     const l = match.latest?.[k] ? toLocalHM(match.latest[k]) : '—';
+    const kindName = t(k) || k; // Use i18n translation for kind name
     return `
       <li class="cs-kind">
         <div class="head">
-          <span class="name">${k}</span>
+          <span class="name">${kindName}</span>
           <span class="counts">${c} ${(t('snapshots') || 'snapshots')}</span>
         </div>
         <div class="cs-row range"><span>${t('earliest') || 'Earliest'}:</span><span>${e}</span></div>

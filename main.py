@@ -30,7 +30,7 @@ import settings
 import bright_asteroids
 import comets
 from timezone_utils import get_tzinfo
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
 
 # Initialisiere FastAPI
 app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung des Sternenhimmels")
@@ -107,6 +107,9 @@ API_ENDPOINT_PRECOMPUTE_RANGE = "/api/precompute_range"
 # Cache settings for precomputed celestial snapshots
 CELESTIAL_CACHE_BUCKET_HOURS = 1
 CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
+
+# SQLite backend configuration for celestial cache
+CELESTIAL_USE_SQLITE = os.getenv('CELESTIAL_USE_SQLITE', 'true').lower() == 'true'
 
 # Lade Skyfield-Daten (use local Loader to avoid network download)
 LOADER = Loader('.')
@@ -294,18 +297,56 @@ def _hour_floor(dt: datetime) -> datetime:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.replace(minute=0, second=0, microsecond=0)
 
-def _ensure_celestial_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+def ensure_celestial_cache(lat: float, lon: float, elevation: float, dt_utc: datetime):
+    """Ensure celestial cache exists for given location/time."""
     try:
+        # Check SQLite cache first if enabled
+        if CELESTIAL_USE_SQLITE:
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
+            
+            try:
+                from db_utils import get_celestial_snapshot
+                cached_snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
+                if cached_snapshot:
+                    return  # Cache exists
+            except Exception as e:
+                print(f"[bg] SQLite celestial cache check failed: {e}")
+        
+        # Check pickle cache as fallback
         cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
         if not os.path.exists(cache_file):
             snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            
+            # Store in SQLite if enabled
+            if CELESTIAL_USE_SQLITE:
+                try:
+                    from db_utils import store_celestial_snapshot
+                    store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
+                except Exception as e:
+                    print(f"[bg] Failed to store celestial snapshot in SQLite: {e}")
+            
+            # Also store in pickle as fallback
             atomic_write_pickle(cache_file, snapshot)
     except Exception:
         print(f"[bg] celestial ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
         import traceback; traceback.print_exc()
 
-def _ensure_asteroids_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+def _ensure_asteroids_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
+    """Ensure asteroid cache exists. Returns True if cache was already present, False if generated."""
     try:
+        # Check if SQLite cache already exists
+        if bright_asteroids.ASTEROID_USE_SQLITE:
+            from cache_utils import normalize_location, location_key, time_bucket_utc
+            from db_utils import get_asteroid_positions
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+            cached_positions = get_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
+            if cached_positions:
+                return True  # Cache already exists
+        
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
         # Module writes its cache when use_cache=True
         _ = bright_asteroids.load_bright_asteroids(
@@ -313,17 +354,33 @@ def _ensure_asteroids_cache(lat: float, lon: float, elevation: float, dt_utc: da
             max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
             use_cache=True, current_dt=dt_utc
         )
+        return False  # Cache was generated
     except Exception:
         print(f"[bg] asteroids ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
         import traceback; traceback.print_exc()
+        return False
 
-def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> None:
+def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
+    """Ensure comet cache exists. Returns True if cache was already present, False if generated."""
     try:
+        # Check if SQLite cache already exists
+        if comets.COMET_USE_SQLITE:
+            from cache_utils import normalize_location, location_key, time_bucket_utc
+            from db_utils import get_comet_positions
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
+            cached_positions = get_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
+            if cached_positions:
+                return True  # Cache already exists
+        
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
         _ = comets.load_comets(ts, eph, location, use_cache=True, current_dt=dt_utc)
+        return False  # Cache was generated
     except Exception:
         print(f"[bg] comets ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
         import traceback; traceback.print_exc()
+        return False
 
 async def trigger_background_precompute_window(lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
     """Kick off background precompute for a 48h window relative to dt_utc.
@@ -343,7 +400,7 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
                 t = base + timedelta(hours=i) if forward else base - timedelta(hours=i)
                 for k in kinds:
                     if k == 'celestial':
-                        _ensure_celestial_cache(lat, lon, elevation, t)
+                        ensure_celestial_cache(lat, lon, elevation, t)
                     elif k == 'asteroids':
                         _ensure_asteroids_cache(lat, lon, elevation, t)
                     elif k == 'comets':
@@ -412,22 +469,59 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
                 
                 current_dt = start_dt_utc
                 hours_completed = 0
+                hours_skipped = 0
                 
                 while current_dt <= end_dt_utc:
+                    hour_had_cache = True  # Track if all kinds had cache for this hour
+                    
                     for k in kinds:
+                        kind_had_cache = False
+                        
                         if k == 'celestial':
-                            _ensure_celestial_cache(lat, lon, elevation, current_dt)
+                            # Check if celestial cache exists
+                            if CELESTIAL_USE_SQLITE:
+                                from cache_utils import normalize_location, location_key, time_bucket_utc
+                                from db_utils import get_celestial_snapshot
+                                lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                                loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                                time_bucket = time_bucket_utc(current_dt, CELESTIAL_CACHE_BUCKET_HOURS)
+                                cached_snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
+                                if cached_snapshot:
+                                    kind_had_cache = True
+                                    print(f"[precompute] celestial cache exists for {loc_key}/{time_bucket}")
+                                else:
+                                    ensure_celestial_cache(lat, lon, elevation, current_dt)
+                                    print(f"[precompute] generated celestial cache for {loc_key}/{time_bucket}")
+                            else:
+                                ensure_celestial_cache(lat, lon, elevation, current_dt)
+                                print(f"[precompute] generated celestial cache (pickle mode)")
                         elif k == 'asteroids':
-                            _ensure_asteroids_cache(lat, lon, elevation, current_dt)
+                            cache_existed = _ensure_asteroids_cache(lat, lon, elevation, current_dt)
+                            if cache_existed:
+                                kind_had_cache = True
+                                print(f"[precompute] asteroid cache exists for {current_dt.isoformat()}")
+                            else:
+                                print(f"[precompute] generated asteroid cache for {current_dt.isoformat()}")
                         elif k == 'comets':
-                            _ensure_comets_cache(lat, lon, elevation, current_dt)
+                            cache_existed = _ensure_comets_cache(lat, lon, elevation, current_dt)
+                            if cache_existed:
+                                kind_had_cache = True
+                                print(f"[precompute] comet cache exists for {current_dt.isoformat()}")
+                            else:
+                                print(f"[precompute] generated comet cache for {current_dt.isoformat()}")
+                        
+                        if not kind_had_cache:
+                            hour_had_cache = False
                     
                     current_dt += timedelta(hours=1)
                     hours_completed += 1
+                    if hour_had_cache:
+                        hours_skipped += 1
                     
                     # Update progress
                     app.precompute_tasks[task_id]['hours_completed'] = hours_completed
-                    app.precompute_tasks[task_id]['percent_complete'] = int((hours_completed / delta_hours) * 100)
+                    app.precompute_tasks[task_id]['hours_skipped'] = hours_skipped
+                    app.precompute_tasks[task_id]['percent_complete'] = round((hours_completed / delta_hours) * 100, 1)
                 
                 app.precompute_tasks[task_id]['status'] = 'completed'
                 app.precompute_tasks[task_id]['end_time'] = datetime.now(timezone.utc)
@@ -518,8 +612,23 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
 
         dt_utc = parse_time_param(time)
 
-        # If a simulated time was provided, prefer cache; on miss, compute now and trigger background precompute
+        # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
+            # Try SQLite cache first if enabled
+            if CELESTIAL_USE_SQLITE:
+                try:
+                    from db_utils import get_celestial_snapshot
+                    lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                    time_bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
+                    
+                    snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
+                    if isinstance(snapshot, dict) and "bodies" in snapshot:
+                        return snapshot
+                except Exception as e:
+                    print(f"SQLite celestial cache failed: {e}")
+            
+            # Fallback to pickle cache
             cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
             # Try fresh cache first, then fall back to any existing snapshot (old files are retained)
             snapshot = read_pickle_if_fresh(cache_file, CELESTIAL_CACHE_TTL_SECONDS)
@@ -532,14 +641,25 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                     snapshot = None
             if isinstance(snapshot, dict) and "bodies" in snapshot:
                 return snapshot
+            
             # Compute on-demand and store, then trigger background precompute window
             snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            
+            # Store in SQLite if enabled
+            if CELESTIAL_USE_SQLITE:
+                try:
+                    from db_utils import store_celestial_snapshot
+                    store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
+                except Exception as e:
+                    print(f"Failed to store celestial snapshot in SQLite: {e}")
+            
+            # Also store in pickle as fallback
             try:
                 atomic_write_pickle(cache_file, snapshot)
             except Exception:
                 pass
             try:
-                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+                await trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])
             except Exception:
                 pass
             return snapshot
@@ -580,6 +700,25 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
 
         # Simulated time -> prefer cache; on miss compute and trigger background precompute
         if time is not None:
+            # Try SQLite cache first if enabled
+            if CELESTIAL_USE_SQLITE:
+                try:
+                    from db_utils import get_celestial_snapshot
+                    lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                    time_bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
+                    
+                    snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
+                    if isinstance(snapshot, dict) and isinstance(snapshot.get("bodies"), dict):
+                        body = snapshot["bodies"].get(body_id)
+                        if isinstance(body, dict):
+                            body_out = body.copy()
+                            body_out["id"] = body_id
+                            return body_out
+                except Exception as e:
+                    print(f"SQLite celestial cache failed: {e}")
+            
+            # Fallback to pickle cache
             cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
             snapshot = read_pickle_if_fresh(cache_file, CELESTIAL_CACHE_TTL_SECONDS)
             if snapshot is None:
@@ -595,14 +734,25 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
                     body_out = body.copy()
                     body_out["id"] = body_id
                     return body_out
+            
             # Compute on-demand and store, then trigger background precompute window
             snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            
+            # Store in SQLite if enabled
+            if CELESTIAL_USE_SQLITE:
+                try:
+                    from db_utils import store_celestial_snapshot
+                    store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
+                except Exception as e:
+                    print(f"Failed to store celestial snapshot in SQLite: {e}")
+            
+            # Also store in pickle as fallback
             try:
                 atomic_write_pickle(cache_file, snapshot)
             except Exception:
                 pass
             try:
-                asyncio.create_task(trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+                await trigger_background_precompute_window(lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])
             except Exception:
                 pass
             body = snapshot["bodies"].get(body_id)
@@ -1105,7 +1255,14 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
             except Exception:
                 return None
 
-        # Scan counts per location/kind
+        # Get SQLite database statistics
+        try:
+            from db_utils import get_database_stats
+            db_stats = get_database_stats()
+        except Exception:
+            db_stats = {}
+
+        # Scan counts per location/kind (hybrid: SQLite + pickle)
         totals = {k: 0 for k in kinds}
         locations_out = []
         for loc_key, loc in dedup.items():
@@ -1114,6 +1271,73 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
             latest = {}
             for kind in kinds:
                 try:
+                    # Check SQLite cache first for supported kinds
+                    sqlite_count = 0
+                    sqlite_earliest = None
+                    sqlite_latest = None
+                    
+                    if kind == "asteroids" and bright_asteroids.ASTEROID_USE_SQLITE:
+                        try:
+                            from db_utils import get_db_connection
+                            conn = get_db_connection()
+                            cursor = conn.execute("""
+                                SELECT COUNT(*) as count, 
+                                       MIN(computed_at) as earliest,
+                                       MAX(computed_at) as latest
+                                FROM asteroid_positions 
+                                WHERE location_key = ?
+                            """, (loc_key,))
+                            row = cursor.fetchone()
+                            if row:
+                                sqlite_count = row['count'] or 0
+                                sqlite_earliest = row['earliest']
+                                sqlite_latest = row['latest']
+                        except Exception:
+                            pass
+                    
+                    elif kind == "comets" and comets.COMET_USE_SQLITE:
+                        try:
+                            from db_utils import get_db_connection
+                            conn = get_db_connection()
+                            cursor = conn.execute("""
+                                SELECT COUNT(*) as count,
+                                       MIN(computed_at) as earliest,
+                                       MAX(computed_at) as latest
+                                FROM comet_positions 
+                                WHERE location_key = ?
+                            """, (loc_key,))
+                            row = cursor.fetchone()
+                            if row:
+                                sqlite_count = row['count'] or 0
+                                sqlite_earliest = row['earliest']
+                                sqlite_latest = row['latest']
+                        except Exception:
+                            pass
+                    
+                    elif kind == "celestial" and CELESTIAL_USE_SQLITE:
+                        try:
+                            from db_utils import get_db_connection
+                            conn = get_db_connection()
+                            cursor = conn.execute("""
+                                SELECT COUNT(*) as count,
+                                       MIN(computed_at) as earliest,
+                                       MAX(computed_at) as latest
+                                FROM celestial_snapshots 
+                                WHERE location_key = ?
+                            """, (loc_key,))
+                            row = cursor.fetchone()
+                            if row:
+                                sqlite_count = row['count'] or 0
+                                sqlite_earliest = row['earliest']
+                                sqlite_latest = row['latest']
+                        except Exception:
+                            pass
+                    
+                    # Fallback to pickle cache scanning
+                    pickle_count = 0
+                    pickle_earliest = None
+                    pickle_latest = None
+                    
                     base_dir = os.path.join(CACHE_ROOT, kind, loc_key)
                     bucket_dts = []
                     if os.path.isdir(base_dir):
@@ -1124,17 +1348,33 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
                             dt = _parse_bucket(label)
                             if dt is not None:
                                 bucket_dts.append(dt)
-                    # Earliest/latest overall for this location/kind
+                    
                     if bucket_dts:
-                        earliest[kind] = min(bucket_dts).isoformat()
-                        latest[kind] = max(bucket_dts).isoformat()
+                        pickle_earliest = min(bucket_dts).isoformat()
+                        pickle_latest = max(bucket_dts).isoformat()
+                        pickle_count = sum(1 for dt in bucket_dts if (dt >= window_start and dt < window_end))
+                    
+                    # Combine SQLite and pickle counts
+                    total_count = sqlite_count + pickle_count
+                    
+                    # Use SQLite timestamps if available, otherwise pickle
+                    if sqlite_earliest:
+                        earliest[kind] = sqlite_earliest
+                    elif pickle_earliest:
+                        earliest[kind] = pickle_earliest
                     else:
                         earliest[kind] = None
+                        
+                    if sqlite_latest:
+                        latest[kind] = sqlite_latest
+                    elif pickle_latest:
+                        latest[kind] = pickle_latest
+                    else:
                         latest[kind] = None
-                    # Count within current window
-                    count_window = sum(1 for dt in bucket_dts if (dt >= window_start and dt < window_end))
-                    counts[kind] = int(count_window)
-                    totals[kind] = totals.get(kind, 0) + int(count_window)
+                    
+                    counts[kind] = int(total_count)
+                    totals[kind] = totals.get(kind, 0) + int(total_count)
+                    
                 except Exception:
                     counts[kind] = 0
                     earliest[kind] = None
@@ -1157,6 +1397,7 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
             "kinds": kinds,
             "locations": locations_out,
             "totals": totals,
+            "database": db_stats,  # Include SQLite database statistics
         }
     except Exception as e:
         print(f"Error in get_cache_status: {str(e)}")

@@ -17,6 +17,11 @@ from types import SimpleNamespace
 from typing import Optional
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
 from timezone_utils import get_tzinfo
+from db_utils import (
+    get_asteroids_by_magnitude, get_asteroid_orbit_data, 
+    store_asteroid_dataframe, store_asteroid_positions,
+    get_asteroid_positions, migrate_from_pickle_cache
+)
 
 # Konstanten für Cache-Dateien
 ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
@@ -29,8 +34,6 @@ MAX_ASTEROIDS = 1000
 MAX_ABSOLUTE_MAGNITUDE = 12.0
 # V-limit for final apparent magnitude filtering
 MAX_APPARENT_MAGNITUDE = 10.0
-# Backward-compatibility alias (legacy name used earlier in this module)
-MAX_ASTEROIDS_MAGNITUDE = MAX_ABSOLUTE_MAGNITUDE
 # Gravitationskonstante der Sonne für Skyfield
 GM_SUN = 1.32712440041e20
 
@@ -42,10 +45,12 @@ CACHE_VALIDITY_HOURS = 12
 # so that snapshots created up to 48h earlier remain valid.
 ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 49 * 3600
-# Bump cache kind to avoid reusing stale files from previous schema/logic
-ASTEROID_CACHE_KIND = 'asteroids_v2'
+# Cache kind for consistency with celestial/comets naming
+ASTEROID_CACHE_KIND = 'asteroids'
 # Disable reading of legacy global cache by default to force recompute per location/time
 ASTEROID_ENABLE_LEGACY_FALLBACK = False
+# Enable SQLite backend (set to False to use legacy pickle cache)
+ASTEROID_USE_SQLITE = True
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
@@ -149,59 +154,143 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     # Determine observer timezone from coordinates
     tz = get_tzinfo(lat, lon)
 
-    # Per-location/time-bucket cache file path (bucket based on simulated time if provided)
-    cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
-    # Check for final cached asteroid list (per-location/time-bucket)
+    # Check cache based on backend type
     if use_cache:
-        cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
-        if isinstance(cached, list):
-            print(f"Loading {cache_file} (valid per-location/time cache)")
-            return cached
-        # Optional legacy global cache fallback (disabled by default)
-        if ASTEROID_ENABLE_LEGACY_FALLBACK:
-            legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
-            if isinstance(legacy, list):
-                print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
-                return legacy
+        if ASTEROID_USE_SQLITE:
+            # SQLite backend: check for cached positions
+            from cache_utils import normalize_location, location_key, time_bucket_utc
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
+            
+            cached_positions = get_asteroid_positions(loc_key, time_bucket, ASTEROID_CACHE_TTL_SECONDS)
+            if cached_positions:
+                print(f"Loading SQLite cache for {loc_key}/{time_bucket} ({len(cached_positions)} objects)")
+                return cached_positions
+        else:
+            # Legacy pickle backend
+            cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
+            cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
+            if isinstance(cached, list):
+                print(f"Loading {cache_file} (valid per-location/time cache)")
+                return cached
+            # Optional legacy global cache fallback (disabled by default)
+            if ASTEROID_ENABLE_LEGACY_FALLBACK:
+                legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
+                if isinstance(legacy, list):
+                    print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
+                    return legacy
 
     # --- DataFrame Loading --- 
+    # Initialize variables
+    asteroid_rows = []
     df = None
-    # Prefer using cached DataFrame to avoid expensive re-parsing on each call
-    force_reload = False 
-    if not force_reload and os.path.exists(ASTEROID_DF_CACHE_FILE):
-        print(f"Loading asteroid DataFrame from cache: {ASTEROID_DF_CACHE_FILE}")
-        with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
-            df = pickle.load(f)
-    else:
-        if not os.path.exists(MPCORB_FILE):
-            if not download_mpcorb_file():
-                return []
+    
+    if ASTEROID_USE_SQLITE:
+        # SQLite backend: get asteroids from database
         try:
-            print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
-            with gzip.open(MPCORB_FILE, 'rb') as f:
-                df = mpc.load_mpcorb_dataframe(f)
+            asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+            print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
             
-            df = df.iloc[:MAX_ASTEROIDS]
+            # If no data in DB, try to migrate from pickle cache
+            if not asteroid_rows:
+                print("No asteroids in database, attempting migration from pickle cache...")
+                migration_stats = migrate_from_pickle_cache()
+                print(f"Migration completed: {migration_stats}")
+                
+                # Retry loading from database
+                asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+                print(f"After migration: {len(asteroid_rows)} asteroids available")
             
-            # Convert types
-            numeric_cols = [
-                'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
-                'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
-                'mean_daily_motion_degrees', 'semimajor_axis_au'
-            ]
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-
-            with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
-                pickle.dump(df, f)
-            print(f"Saved {len(df)} asteroids to DataFrame cache.")
         except Exception as e:
-            print(f"Error processing MPCORB data: {e}")
-            return []
+            print(f"Error loading from SQLite database: {e}")
+            print("Falling back to pickle cache for this request...")
+            asteroid_rows = []
+    
+    if not ASTEROID_USE_SQLITE or not asteroid_rows:
+        # Legacy pickle backend: load DataFrame
+        force_reload = False 
+        if not force_reload and os.path.exists(ASTEROID_DF_CACHE_FILE):
+            print(f"Loading asteroid DataFrame from cache: {ASTEROID_DF_CACHE_FILE}")
+            with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
+                df = pickle.load(f)
+        else:
+            if not os.path.exists(MPCORB_FILE):
+                if not download_mpcorb_file():
+                    return []
+            try:
+                print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
+                with gzip.open(MPCORB_FILE, 'rb') as f:
+                    df = mpc.load_mpcorb_dataframe(f)
+                
+                df = df.iloc[:MAX_ASTEROIDS]
+            
+                # Convert types
+                numeric_cols = [
+                    'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
+                    'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
+                    'mean_daily_motion_degrees', 'semimajor_axis_au'
+                ]
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
 
-    if df is None:
+                with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
+                    pickle.dump(df, f)
+                print(f"Saved {len(df)} asteroids to DataFrame cache.")
+                
+                # Also store in SQLite database for future use
+                if ASTEROID_USE_SQLITE:
+                    try:
+                        count = store_asteroid_dataframe(df)
+                        print(f"Stored {count} asteroids in SQLite database")
+                    except Exception as e:
+                        print(f"Error storing in SQLite: {e}")
+                        
+            except Exception as e:
+                print(f"Error processing MPCORB data: {e}")
+                return []
+
+    # Process asteroids based on backend type
+    if ASTEROID_USE_SQLITE and 'asteroid_rows' in locals() and asteroid_rows:
+        # SQLite backend: process database rows
+        asteroid_list = process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz)
+        
+        # Cache the results for future requests
+        if use_cache:
+            from cache_utils import normalize_location, location_key, time_bucket_utc
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(current_dt or datetime.now(timezone.utc), ASTEROID_CACHE_BUCKET_HOURS)
+            
+            # Store all computed positions in database as single entry
+            try:
+                # Use first asteroid's ID as representative (all share same location/time)
+                representative_id = asteroid_rows[0]['id'] if asteroid_rows else 0
+                store_asteroid_positions(
+                    representative_id, loc_key, time_bucket,
+                    lat, lon, elevation, asteroid_list
+                )
+            except (IndexError, KeyError):
+                pass  # Skip if mapping fails
+            
+            # Also save to pickle cache as fallback (for consistency with comets/celestial)
+            try:
+                cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt or datetime.now(timezone.utc), bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
+                atomic_write_pickle(cache_file, asteroid_list)
+                print(f"Saved {len(asteroid_list)} bright asteroids to pickle fallback cache ({cache_file})")
+            except Exception as e:
+                print(f"Failed to write asteroid pickle cache {cache_file}: {e}")
+        
+        return asteroid_list
+    
+    elif not ASTEROID_USE_SQLITE and df is not None:
+        # Legacy DataFrame backend
+        pass  # Continue with existing logic below
+    else:
+        print("No asteroid data available from any backend")
         return []
 
     # --- Calculations ---
@@ -334,3 +423,142 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     except Exception as e:
         print(f"An unexpected error occurred during asteroid calculation: {e}")
         return []
+
+
+def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz):
+    """Process asteroids from SQLite database rows and compute positions."""
+    from skyfield.api import load
+    from skyfield.data import mpc
+    from skyfield.toposlib import Topos
+    from skyfield import almanac
+    import pickle
+    
+    # Initialize Skyfield objects
+    ts = load.timescale()
+    eph = load('de421.bsp')
+    sun = eph['sun']
+    
+    dt_utc = current_dt or datetime.now(timezone.utc)
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    t = ts.from_datetime(dt_utc)
+    topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
+    observer = eph['earth'] + topos
+    
+    asteroid_list = []
+    
+    for row in asteroid_rows:
+        try:
+            # Deserialize orbit data
+            orbit_row = pickle.loads(row['orbit_data'])
+            
+            # Create Skyfield orbit object
+            orbit = mpc.mpcorb_orbit(orbit_row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+            
+            # Calculate apparent magnitude
+            astrometric = observer.at(t).observe(sun + orbit)
+            r = astrometric.distance().au  # Distance from Sun
+            delta = astrometric.radec()[2].au  # Distance from Earth
+            phase_angle = math.degrees(math.acos(
+                max(-1, min(1, (r**2 + delta**2 - 1) / (2 * r * delta)))
+            ))
+            
+            apparent_mag = asteroid_apparent_magnitude(
+                H=row['magnitude_h'], G=row['magnitude_g'] or 0.15, 
+                r=r, delta=delta, phase_angle_deg=phase_angle
+            )
+            
+            # Skip if too faint
+            if apparent_mag > max_magnitude:
+                continue
+                
+            # Calculate position
+            center_code = int(getattr(orbit, 'center', 10))
+            target = (sun + orbit) if center_code != 0 else orbit
+            astrometric = observer.at(t).observe(target)
+            apparent = astrometric.apparent()
+            ra, dec, distance = apparent.radec()
+            alt, az, _ = apparent.altaz()
+            
+            # Calculate rise/set/transit times (same logic as before)
+            start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+            end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+            rise_set_func = almanac.risings_and_settings(eph, target, topos)
+            times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+            
+            rise_time, set_time = None, None
+            for ti, event in zip(times, events):
+                if event == 1 and rise_time is None: 
+                    rise_time = ti.utc_datetime()
+                elif event == 0 and set_time is None: 
+                    set_time = ti.utc_datetime()
+            
+            # Determine next night window for transit
+            night_start_utc, night_end_utc = None, None
+            last_rise_utc = None
+            for ti_rs, ev_rs in zip(times, events):
+                ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
+                if ev_rs == 1:  # rise
+                    last_rise_utc = ev_dt_utc
+                elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
+                    if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
+                        night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
+                        break
+            
+            if night_start_utc is None or night_end_utc is None:
+                night_start_utc, night_end_utc = rise_time, set_time
+            
+            # Calculate transit time
+            f = almanac.meridian_transits(eph, target, topos)
+            t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+            chosen_time_utc = None
+            
+            if len(t_times):
+                now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
+                candidates = []
+                for ti, ev in zip(t_times, t_events):
+                    utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                    try:
+                        alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                    except Exception:
+                        alt_deg = float('-inf')
+                    candidates.append((utc_dt, alt_deg, int(ev)))
+                
+                # Filter to night window if available
+                if night_start_utc is not None and night_end_utc is not None:
+                    if night_end_utc < night_start_utc:  # Crosses midnight
+                        pool = [c for c in candidates if c[0] >= night_start_utc or c[0] <= night_end_utc]
+                    else:
+                        pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
+                else:
+                    pool = [c for c in candidates if c[0] >= now_utc]
+                    if not pool:
+                        pool = candidates
+                
+                if pool:
+                    pool.sort(key=lambda x: (-x[1], x[0]))
+                    chosen_time_utc = pool[0][0]
+            
+            transit_time = chosen_time_utc
+            
+            asteroid_list.append({
+                "name": row['designation'], 
+                "number": str(row['number']) if row['number'] else '',
+                "magnitude": round(apparent_mag, 1),
+                "ra": ra.hours * 15.0, 
+                "dec": dec.degrees,
+                "altitude": alt.degrees, 
+                "azimuth": az.degrees,
+                "distance": round(distance.au, 3), 
+                "rise_time": format_time(rise_time, tz),
+                "set_time": format_time(set_time, tz), 
+                "transit_time": format_time(transit_time, tz),
+                "type": "asteroid", 
+                "symbol": "⚸"
+            })
+            
+        except Exception as e:
+            print(f"Error processing asteroid {row.get('designation', 'unknown')}: {e}")
+            continue
+    
+    return asteroid_list

@@ -413,15 +413,31 @@ export class SkyRenderer {
                               existingContent !== 'O' && 
                               existingContent !== 'W';
             
+            
             // Wähle Symbol basierend auf Auswahl und Überlappung
             let symbol;
             if (isSelected) {
                 symbol = ASCII_ART.SELECTED_OBJECT;
             } else if (isOccupied) {
-                // Wenn bereits ein Objekt an dieser Position ist, verwende ein spezielles Symbol für Überlappung
-                symbol = '*';
-                // Markiere, dass hier mehrere Objekte sind
-                obj.isOverlapping = true;
+                // Wenn bereits ein Objekt an dieser Position ist, prüfe Priorität
+                const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
+                const isAsteroid = obj.type === 'asteroid' || backendSymbol === '⚸';
+                // WICHTIG: Mondsymbol entspricht dem in OBJECT_SYMBOLS ('🌙'), nicht '☽'
+                const existingIsImportant = existingContent === '🌙' || existingContent === '♄' || existingContent === '♆' || existingContent === '♅' || existingContent === '♃' || existingContent === '♂' || existingContent === '♀' || existingContent === '☿' || existingContent === ASCII_ART.SELECTED_OBJECT;
+                const existingIsAsteroid = existingContent === '⚸';
+
+                if (isAsteroid) {
+                    // Asteroiden immer mit ihrem Glyphen rendern, auch bei Überlappung
+                    symbol = backendSymbol || '⚸';
+                    obj.isOverlapping = true;
+                } else if (existingIsImportant || existingIsAsteroid) {
+                    // Wichtiges Objekt oder bereits ein Asteroid an dieser Position: nicht überschreiben
+                    return;
+                } else {
+                    // Generischer Überlappungsfall für Nicht-Asteroiden
+                    symbol = '*';
+                    obj.isOverlapping = true;
+                }
             } else {
                 // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;

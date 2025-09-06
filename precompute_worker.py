@@ -45,6 +45,12 @@ from cache_utils import (
     atomic_write_pickle,
     CACHE_ROOT,
 )
+from db_utils import (
+    store_asteroid_positions,
+    get_asteroid_positions,
+    get_database_stats,
+    cleanup_old_positions
+)
 
 # Import compute function and Skyfield loading context from main
 # This avoids duplicating celestial computation logic.
@@ -276,34 +282,73 @@ def ensure_celestial(lat: float, lon: float, elevation: float, dt_utc: datetime)
 
 def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure an asteroid list cache exists for this hour. Returns True if created."""
+    from cache_utils import time_bucket_utc
+    
+    # Check both SQLite and pickle cache
+    if bright_asteroids.ASTEROID_USE_SQLITE:
+        # Check SQLite cache first
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+        
+        cached_positions = get_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
+        if cached_positions:
+            return False  # Already cached in SQLite
+    
+    # Check pickle cache as fallback
     path = build_cache_path("asteroids", lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
     if os.path.exists(path):
         return False
+    
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
-        # Module will write its per-hour cache via atomic_write_pickle()
-        _ = bright_asteroids.load_bright_asteroids(
+        # Module will write to both SQLite and pickle cache
+        asteroid_list = bright_asteroids.load_bright_asteroids(
             webapp.LOADER, webapp.ts, webapp.eph, location,
             max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
             use_cache=True, current_dt=dt_utc
         )
-        print(f"[asteroids] wrote {path}")
+        
+        if bright_asteroids.ASTEROID_USE_SQLITE and asteroid_list:
+            print(f"[asteroids] wrote SQLite cache for {loc_key}/{time_bucket} ({len(asteroid_list)} objects)")
+        else:
+            print(f"[asteroids] wrote pickle cache {path}")
         return True
-    except Exception:
-        print(f"[asteroids] error for {lat},{lon},{elevation} at {dt_utc.isoformat()}")
+    except Exception as e:
+        print(f"[asteroids] error for {lat},{lon},{elevation} at {dt_utc.isoformat()}: {e}")
         traceback.print_exc()
         return False
 
 
 def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure a comet list cache exists for this hour. Returns True if created."""
+    # Check SQLite cache first if enabled
+    if comets.COMET_USE_SQLITE:
+        try:
+            from db_utils import get_comet_positions
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
+            
+            cached_positions = get_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
+            if cached_positions:
+                return False  # Cache exists
+        except Exception as e:
+            print(f"[comets] SQLite cache check failed: {e}")
+    
+    # Check pickle cache as fallback
     path = build_cache_path("comets", lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
     if os.path.exists(path):
         return False
+    
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
-        _ = comets.load_comets(webapp.ts, webapp.eph, location, use_cache=True, current_dt=dt_utc)
-        print(f"[comets] wrote {path}")
+        comet_list = comets.load_comets(webapp.ts, webapp.eph, location, use_cache=True, current_dt=dt_utc)
+        
+        if comets.COMET_USE_SQLITE:
+            print(f"[comets] wrote SQLite cache for {loc_key}/{time_bucket} ({len(comet_list)} objects)")
+        else:
+            print(f"[comets] wrote {path}")
         return True
     except Exception:
         print(f"[comets] error for {lat},{lon},{elevation} at {dt_utc.isoformat()}")
@@ -457,10 +502,21 @@ def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
     """
     if retention_days is None or retention_days <= 0:
         return (0, 0)
-    now = _now_utc()
-    cutoff = now - timedelta(days=int(retention_days))
+    
     deleted = 0
     scanned = 0
+    
+    # Prune SQLite database positions
+    try:
+        db_deleted = cleanup_old_positions(retention_days)
+        print(f"[prune] SQLite: deleted {db_deleted} old position entries")
+        deleted += db_deleted
+    except Exception as e:
+        print(f"[prune] SQLite cleanup error: {e}")
+    
+    # Prune pickle cache files
+    now = _now_utc()
+    cutoff = now - timedelta(days=int(retention_days))
     try:
         for kind in ("celestial", "asteroids", "comets"):
             base_dir = os.path.join(CACHE_ROOT, kind)
@@ -541,6 +597,16 @@ def main() -> None:
     print(f"  horizon_hours={horizon_hours}")
     print(f"  max_workers={max_workers}")
     print(f"  adaptive_workers={adaptive_workers}")
+    
+    # Print database statistics if SQLite is enabled
+    if bright_asteroids.ASTEROID_USE_SQLITE:
+        try:
+            db_stats = get_database_stats()
+            print(f"  SQLite database: {db_stats['asteroids_count']} asteroids, {db_stats['positions_count']} cached positions")
+            if db_stats.get('db_size_mb'):
+                print(f"  Database size: {db_stats['db_size_mb']:.1f} MB")
+        except Exception as e:
+            print(f"  SQLite database status: error ({e})")
     if retention_days and retention_days > 0:
         print(f"  retention_days={retention_days}")
     else:
