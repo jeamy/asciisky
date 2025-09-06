@@ -42,6 +42,10 @@ CACHE_VALIDITY_HOURS = 12
 # so that snapshots created up to 48h earlier remain valid.
 ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 49 * 3600
+# Bump cache kind to avoid reusing stale files from previous schema/logic
+ASTEROID_CACHE_KIND = 'asteroids_v2'
+# Disable reading of legacy global cache by default to force recompute per location/time
+ASTEROID_ENABLE_LEGACY_FALLBACK = False
 
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
@@ -146,18 +150,19 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     tz = get_tzinfo(lat, lon)
 
     # Per-location/time-bucket cache file path (bucket based on simulated time if provided)
-    cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
+    cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
     # Check for final cached asteroid list (per-location/time-bucket)
     if use_cache:
         cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
         if isinstance(cached, list):
             print(f"Loading {cache_file} (valid per-location/time cache)")
             return cached
-        # Fallback: legacy global cache for migration
-        legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
-        if isinstance(legacy, list):
-            print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
-            return legacy
+        # Optional legacy global cache fallback (disabled by default)
+        if ASTEROID_ENABLE_LEGACY_FALLBACK:
+            legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
+            if isinstance(legacy, list):
+                print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
+                return legacy
 
     # --- DataFrame Loading --- 
     df = None
@@ -264,34 +269,49 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 for ti, event in zip(times, events):
                     if event == 1 and rise_time is None: rise_time = ti.utc_datetime()
                     elif event == 0 and set_time is None: set_time = ti.utc_datetime()
+                # Bestimme die nächste Nacht (Rise->Set) nach dt_utc als Fenster für die obere Kulmination
+                night_start_utc, night_end_utc = None, None
+                last_rise_utc = None
+                for ti_rs, ev_rs in zip(times, events):
+                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
+                    if ev_rs == 1:  # rise
+                        last_rise_utc = ev_dt_utc
+                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
+                        # wähle das erste Rise->Set Paar, dessen Set in der Zukunft liegt
+                        if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
+                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
+                            break
+                if night_start_utc is None or night_end_utc is None:
+                    # Fallback: benutze die zuerst gefundenen rise/set Zeiten, wenn vorhanden
+                    night_start_utc, night_end_utc = rise_time, set_time
                 
                 f = almanac.meridian_transits(eph, target, topos)
                 t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                # Wähle die obere Kulmination (höchste Altitude) für den lokalen Tag
-                chosen_local_dt = None
+                # Wähle die nächste obere Kulmination innerhalb des Nachtfensters (UTC-basiert)
+                chosen_time_utc = None
                 if len(t_times):
-                    # Select transits for the simulated local day
-                    now_local = dt_utc.astimezone(tz)
-                    today_local = now_local.date()
+                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
                     candidates = []
                     for ti, ev in zip(t_times, t_events):
-                        # UTC -> lokal in Beobachter-Zeitzone
                         utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        local_dt = utc_dt.astimezone(tz)
-                        # Altitude am Transit-Zeitpunkt bestimmen
+                        # Altitude am Transit-Zeitpunkt bestimmen (höher = obere Kulmination)
                         try:
                             alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
                         except Exception:
                             alt_deg = float('-inf')
-                        candidates.append((local_dt, alt_deg, int(ev)))
-                    # Kandidaten auf heutigen lokalen Tag beschränken
-                    today_candidates = [c for c in candidates if c[0].date() == today_local]
-                    pool = today_candidates if today_candidates else candidates
+                        candidates.append((utc_dt, alt_deg, int(ev)))
+                    # Filtere auf das Nachtfenster (falls vorhanden)
+                    if night_start_utc is not None and night_end_utc is not None:
+                        pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
+                    else:
+                        # Bevorzuge zukünftige Ereignisse
+                        pool = [c for c in candidates if c[0] >= now_utc]
+                        if not pool:
+                            pool = candidates
                     if pool:
-                        # Höchste Altitude zuerst, bei Gleichstand früheste Zeit
                         pool.sort(key=lambda x: (-x[1], x[0]))
-                        chosen_local_dt = pool[0][0]
-                transit_time = chosen_local_dt
+                        chosen_time_utc = pool[0][0]
+                transit_time = chosen_time_utc
 
                 asteroid_list.append({
                     "name": row['designation'], "number": str(row.name),

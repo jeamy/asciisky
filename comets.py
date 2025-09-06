@@ -566,7 +566,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             # Rise/Set over next 48h starting at UTC midnight (mirror bright_asteroids)
             try:
                 start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+                end_time = ts.utc(start_time.utc_datetime() + timedelta(hours=24))
                 rise_set_func = almanac.risings_and_settings(eph, target, topos)
                 times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
@@ -587,13 +587,17 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                     candidates = []
                     for ti, ev in zip(t_times, t_events):
                         utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        local_dt = utc_dt.astimezone(tz)
                         try:
                             alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
                         except Exception:
                             alt_deg = float('-inf')
-                        candidates.append((local_dt, alt_deg, int(ev)))
-                    today_candidates = [c for c in candidates if c[0].date() == today_local]
+                        candidates.append((utc_dt, alt_deg, int(ev)))
+                    # Kandidaten auf heutigen lokalen Tag beschränken
+                    today_candidates = []
+                    for utc_dt, alt_deg, ev in candidates:
+                        local_dt = utc_dt.astimezone(tz)
+                        if local_dt.date() == today_local:
+                            today_candidates.append((utc_dt, alt_deg, ev))
                     pool = today_candidates if today_candidates else candidates
                     if pool:
                         pool.sort(key=lambda x: (-x[1], x[0]))
