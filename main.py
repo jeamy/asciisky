@@ -1513,9 +1513,16 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
                 "latest": latest,
             })
 
+        # Add max precompute hours from environment
+        try:
+            max_precompute_hours = int(os.environ.get("ASCII_SKY_MAX_PRECOMPUTE_HOURS", "168"))
+        except Exception:
+            max_precompute_hours = 168
+
         return {
             "now_utc": now_utc.isoformat(),
             "precompute_horizon_hours": horizon_hours,
+            "max_precompute_hours": max_precompute_hours,
             "window": {
                 "start": window_start.isoformat(),
                 "end": window_end.isoformat(),

@@ -368,15 +368,29 @@ let currentCacheData = null;
 let liveUpdateInterval = null;
 
 // Bestimme das maximale Enddatum basierend auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
-function determineMaxEndDate() {
-  // Standardwert: 168 Stunden (7 Tage) in die Zukunft
-  const maxHours = 168;
+async function determineMaxEndDate() {
+  try {
+    // Hole die aktuelle Konfiguration vom Backend
+    const response = await fetch('/api/cache_status');
+    if (response.ok) {
+      const data = await response.json();
+      const maxHours = data.max_precompute_hours || 168;
+      
+      const today = new Date();
+      const maxDate = new Date();
+      maxDate.setTime(today.getTime() + (maxHours * 60 * 60 * 1000));
+      
+      // Formatiere als YYYY-MM-DD für das Eingabefeld
+      return maxDate.toISOString().split('T')[0];
+    }
+  } catch (error) {
+    console.error('Error fetching max precompute hours:', error);
+  }
   
+  // Fallback: 168 Stunden (7 Tage) in die Zukunft
   const today = new Date();
   const maxDate = new Date();
-  maxDate.setDate(today.getDate() + Math.ceil(maxHours / 24));
-  
-  // Formatiere als YYYY-MM-DD für das Eingabefeld
+  maxDate.setTime(today.getTime() + (168 * 60 * 60 * 1000));
   return maxDate.toISOString().split('T')[0];
 }
 
@@ -486,9 +500,12 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     
     renderStatus(data, key, locationName);
     
-    // Now that the panel is rendered, check for active precompute task
+    // Now that the panel is rendered, reset and initialize the precompute form
     // This ensures all DOM elements are available
-    setTimeout(() => restoreActivePrecomputeTask(), 100);
+    setTimeout(async () => {
+      await resetPrecomputeForm();
+      restoreActivePrecomputeTask();
+    }, 100);
     
     // Starte automatische Live-Updates wenn Daten verfügbar sind
     startAutomaticLiveUpdates(lat, lon, elevation, locationName);
@@ -499,8 +516,7 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
 }
 
 // Debounced variant to avoid spamming the API during rapid simulated time changes
-function setupPrecomputeHandlers(locationName) {
-  // Set default dates (today and a week from today)
+async function resetPrecomputeForm() {
   const today = new Date();
   const nextWeek = new Date();
   nextWeek.setDate(today.getDate() + 7);
@@ -530,7 +546,7 @@ function setupPrecomputeHandlers(locationName) {
   startDateInput.value = today.toISOString().split('T')[0];
   
   // Bestimme das maximale Enddatum basierend auf verfügbaren Cache-Daten
-  const maxEndDate = determineMaxEndDate();
+  const maxEndDate = await determineMaxEndDate();
   endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
   
   // Setze min-Attribute für die Eingabefelder
@@ -541,32 +557,39 @@ function setupPrecomputeHandlers(locationName) {
   // Kein Maximum setzen - Benutzer soll frei wählen können
   // Das Backend begrenzt auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
   
-  // Event-Listener für Datumsvalidierung
-  startDateInput.addEventListener('change', () => {
-    const startDate = startDateInput.value;
-    if (startDate) {
-      // Setze Mindestdatum für Enddatum auf Startdatum
-      endDateInput.setAttribute('min', startDate);
+  // Event-Listener für Datumsvalidierung - nur einmal hinzufügen
+  if (!startDateInput.hasAttribute('data-listeners-added')) {
+    startDateInput.addEventListener('change', () => {
+      const startDate = startDateInput.value;
+      if (startDate) {
+        // Setze Mindestdatum für Enddatum auf Startdatum
+        endDateInput.setAttribute('min', startDate);
+        
+        // Falls Enddatum vor Startdatum liegt, setze es auf Startdatum
+        if (endDateInput.value && endDateInput.value < startDate) {
+          endDateInput.value = startDate;
+        }
+      }
+    });
+    startDateInput.setAttribute('data-listeners-added', 'true');
+  }
+  
+  if (!endDateInput.hasAttribute('data-listeners-added')) {
+    endDateInput.addEventListener('change', () => {
+      const endDate = endDateInput.value;
+      const startDate = startDateInput.value;
       
-      // Falls Enddatum vor Startdatum liegt, setze es auf Startdatum
-      if (endDateInput.value && endDateInput.value < startDate) {
+      // Stelle sicher, dass Enddatum nicht vor Startdatum liegt
+      if (startDate && endDate && endDate < startDate) {
         endDateInput.value = startDate;
       }
-    }
-  });
+    });
+    endDateInput.setAttribute('data-listeners-added', 'true');
+  }
   
-  endDateInput.addEventListener('change', () => {
-    const endDate = endDateInput.value;
-    const startDate = startDateInput.value;
-    
-    // Stelle sicher, dass Enddatum nicht vor Startdatum liegt
-    if (startDate && endDate && endDate < startDate) {
-      endDateInput.value = startDate;
-    }
-  });
-  
-  // Handle precompute button click
-  precomputeButton.addEventListener('click', async () => {
+  // Handle precompute button click - nur einmal hinzufügen
+  if (!precomputeButton.hasAttribute('data-listeners-added')) {
+    precomputeButton.addEventListener('click', async () => {
     const startDate = startDateInput.value;
     const endDate = endDateInput.value;
     
@@ -641,7 +664,9 @@ function setupPrecomputeHandlers(locationName) {
       precomputeButton.disabled = false;
       precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
     }
-  });
+    });
+    precomputeButton.setAttribute('data-listeners-added', 'true');
+  }
 }
 
 async function checkPrecomputeTaskProgress() {
