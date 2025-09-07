@@ -434,15 +434,8 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
         # Calculate number of hours to process
         delta_hours = int((end_dt_utc - start_dt_utc).total_seconds() / 3600) + 1
         
-        # Cap at reasonable limit (default: 7 days = 168 hours)
-        try:
-            max_hours = int(os.environ.get("ASCII_SKY_MAX_PRECOMPUTE_HOURS", "168"))
-        except Exception:
-            max_hours = 168
-            
-        if delta_hours > max_hours:
-            delta_hours = max_hours
-            end_dt_utc = start_dt_utc + timedelta(hours=max_hours-1)
+        # ASCII_SKY_MAX_PRECOMPUTE_HOURS ist nur eine Empfehlung, keine harte Begrenzung
+        # Benutzer kann frei wählen, wie viele Stunden berechnet werden sollen
         
         # Create a unique ID for this precompute task
         task_id = f"precompute_{int(time.time())}_{delta_hours}h"

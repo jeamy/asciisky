@@ -367,35 +367,17 @@ async function restoreActivePrecomputeTask() {
 let currentCacheData = null;
 let liveUpdateInterval = null;
 
-// Bestimme das maximale Enddatum basierend auf verfügbaren Cache-Daten
+// Bestimme das maximale Enddatum basierend auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
 function determineMaxEndDate() {
-  if (!currentCacheData || !currentCacheData.locations || currentCacheData.locations.length === 0) {
-    return null;
-  }
+  // Standardwert: 168 Stunden (7 Tage) in die Zukunft
+  const maxHours = 168;
   
-  // Finde das späteste verfügbare Datum über alle Standorte und Datentypen
-  let maxDate = null;
+  const today = new Date();
+  const maxDate = new Date();
+  maxDate.setDate(today.getDate() + Math.ceil(maxHours / 24));
   
-  for (const location of currentCacheData.locations) {
-    if (location.latest) {
-      for (const kind of Object.keys(location.latest)) {
-        const latestIso = location.latest[kind];
-        if (latestIso) {
-          const date = new Date(latestIso);
-          if (!maxDate || date > maxDate) {
-            maxDate = date;
-          }
-        }
-      }
-    }
-  }
-  
-  if (maxDate) {
-    // Formatiere als YYYY-MM-DD für das Eingabefeld
-    return maxDate.toISOString().split('T')[0];
-  }
-  
-  return null;
+  // Formatiere als YYYY-MM-DD für das Eingabefeld
+  return maxDate.toISOString().split('T')[0];
 }
 
 // Starte automatische Live-Updates für Cache-Status
@@ -551,10 +533,37 @@ function setupPrecomputeHandlers(locationName) {
   const maxEndDate = determineMaxEndDate();
   endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
   
-  // Setze das max-Attribut für das Enddatum-Eingabefeld
-  if (maxEndDate) {
-    endDateInput.setAttribute('max', maxEndDate);
-  }
+  // Setze min-Attribute für die Eingabefelder
+  const todayStr = today.toISOString().split('T')[0];
+  startDateInput.setAttribute('min', todayStr);
+  endDateInput.setAttribute('min', todayStr);
+  
+  // Kein Maximum setzen - Benutzer soll frei wählen können
+  // Das Backend begrenzt auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
+  
+  // Event-Listener für Datumsvalidierung
+  startDateInput.addEventListener('change', () => {
+    const startDate = startDateInput.value;
+    if (startDate) {
+      // Setze Mindestdatum für Enddatum auf Startdatum
+      endDateInput.setAttribute('min', startDate);
+      
+      // Falls Enddatum vor Startdatum liegt, setze es auf Startdatum
+      if (endDateInput.value && endDateInput.value < startDate) {
+        endDateInput.value = startDate;
+      }
+    }
+  });
+  
+  endDateInput.addEventListener('change', () => {
+    const endDate = endDateInput.value;
+    const startDate = startDateInput.value;
+    
+    // Stelle sicher, dass Enddatum nicht vor Startdatum liegt
+    if (startDate && endDate && endDate < startDate) {
+      endDateInput.value = startDate;
+    }
+  });
   
   // Handle precompute button click
   precomputeButton.addEventListener('click', async () => {
