@@ -444,6 +444,7 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
         if not hasattr(app, 'precompute_tasks'):
             app.precompute_tasks = {}
         
+        # Store minimal task info - detailed status comes from worker process
         app.precompute_tasks[task_id] = {
             'id': task_id,
             'status': 'starting',
@@ -452,7 +453,8 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
             'date_range': {'start': start_dt_utc.isoformat(), 'end': end_dt_utc.isoformat()},
             'hours_total': delta_hours,
             'hours_completed': 0,
-            'percent_complete': 0
+            'percent_complete': 0,
+            'worker_process': True  # Mark as worker process task
         }
         
         # Define a synchronous function for the background task
@@ -572,9 +574,45 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
                 print(f"Error in background precompute range task {task_id}")
                 import traceback; traceback.print_exc()
 
-        # Start the background task
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _do_work_sync)
+        # Start the background task using subprocess to completely isolate from main process
+        import subprocess
+        import sys
+        import json
+        
+        # Create task file for the worker process
+        task_data = {
+            'task_id': task_id,
+            'lat': lat,
+            'lon': lon,
+            'elevation': elevation,
+            'start_dt_utc': start_dt_utc.isoformat(),
+            'end_dt_utc': end_dt_utc.isoformat(),
+            'kinds': kinds
+        }
+        
+        task_file = f"cache/task_{task_id}.json"
+        os.makedirs(os.path.dirname(task_file), exist_ok=True)
+        with open(task_file, 'w') as f:
+            json.dump(task_data, f)
+        
+        # Start worker process
+        try:
+            subprocess.Popen([
+                sys.executable, 
+                'precompute_task_worker.py', 
+                task_file
+            ], cwd=os.getcwd())
+            print(f"Started background worker process for task {task_id}")
+        except Exception as e:
+            print(f"Failed to start background worker: {e}")
+            # Fallback to threading if subprocess fails
+            import threading
+            def fallback_worker():
+                try:
+                    _do_work_sync()
+                except Exception as e:
+                    print(f"Fallback worker error: {e}")
+            threading.Thread(target=fallback_worker, daemon=True).start()
         
         return {
             'task_id': task_id,
@@ -1170,7 +1208,21 @@ async def get_precompute_status(task_id: str):
         if task_id not in app.precompute_tasks:
             return JSONResponse(status_code=404, content={'error': f'Task {task_id} not found'})
         
-        return app.precompute_tasks[task_id]
+        task_info = app.precompute_tasks[task_id].copy()
+        
+        # If this is a worker process task, try to get updated status from worker
+        if task_info.get('worker_process'):
+            status_file = f"cache/task_status_{task_id}.json"
+            try:
+                if os.path.exists(status_file):
+                    with open(status_file, 'r') as f:
+                        worker_status = json.load(f)
+                    # Merge worker status with task info
+                    task_info.update(worker_status)
+            except Exception as e:
+                print(f"Error reading worker status: {e}")
+        
+        return task_info
     except Exception as e:
         return JSONResponse(status_code=500, content={'error': str(e)})
 
