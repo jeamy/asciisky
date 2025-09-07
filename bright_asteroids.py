@@ -137,6 +137,18 @@ def download_mpcorb_file():
         return False
     return True
 
+def should_update_mpcorb_file():
+    """
+    Überprüft ob MPCORB-Datei aktualisiert werden sollte (täglich)
+    """
+    if not os.path.exists(MPCORB_FILE):
+        return True
+    
+    # Prüfe Alter der Datei
+    file_age = time.time() - os.path.getmtime(MPCORB_FILE)
+    # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
+    return file_age > 86400
+
 def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt: Optional[datetime] = None):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
@@ -215,9 +227,13 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
                 df = pickle.load(f)
         else:
-            if not os.path.exists(MPCORB_FILE):
+            # Überprüfe ob tägliches Update nötig ist
+            if should_update_mpcorb_file():
+                print("MPCORB file needs daily update, downloading...")
                 if not download_mpcorb_file():
-                    return []
+                    # Falls Download fehlschlägt, verwende alte Datei falls vorhanden
+                    if not os.path.exists(MPCORB_FILE):
+                        return []
             try:
                 print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
                 with gzip.open(MPCORB_FILE, 'rb') as f:

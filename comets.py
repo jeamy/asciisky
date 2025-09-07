@@ -11,21 +11,34 @@ from skyfield.data import mpc
 from skyfield import almanac
 
 import os
+import time
 import pickle
 import logging
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import pandas as pd
-import numpy as np
-import math
+from skyfield import almanac
+from skyfield.api import Loader, wgs84
+from skyfield.data import mpc
+from skyfield.magnitudelib import planetary_magnitude
 
-from bright_asteroids import format_time
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, normalize_location, location_key, time_bucket_utc
-from timezone_utils import get_tzinfo
+from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
+from db_utils import get_db_connection, execute_query, fetch_all
 
-# Cache files
+def should_update_comet_file():
+    """
+    Überprüft ob Kometen-Datei aktualisiert werden sollte (täglich)
+    """
+    if not os.path.exists(COMETS_FILE):
+        return True
+    
+    # Prüfe Alter der Datei
+    file_age = time.time() - os.path.getmtime(COMETS_FILE)
+    # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
+    return file_age > 86400
+
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
 CACHE_VALIDITY_SECONDS = 12 * 3600  # 12h
 COMETS_FILE = 'cache/CometEls.txt'
@@ -297,56 +310,33 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
 
     # Fetch fresh (prefer local MPC file cache if available)
     try:
-        local_mpc_file = COMETS_FILE
-        comets = None
-        if os.path.exists(local_mpc_file):
-            logger.debug(f"Loading MPC comet elements from local cache file: {local_mpc_file}")
-            with open(local_mpc_file, 'rb') as f:
-                comets = mpc.load_comets_dataframe(f)
-        else:
-            # If a CometEls.txt exists at project root, move it into cache first
-            legacy_path = 'CometEls.txt'
-            if os.path.exists(legacy_path):
-                try:
-                    os.makedirs('cache', exist_ok=True)
-                    os.replace(legacy_path, local_mpc_file)
-                    logger.debug(f"Moved {legacy_path} to {local_mpc_file}")
-                except Exception as me:
-                    logger.warning(f"Failed to move {legacy_path} to cache: {me}")
-
-            if os.path.exists(local_mpc_file):
-                logger.debug(f"Loading MPC comet elements from local cache file: {local_mpc_file}")
-                with open(local_mpc_file, 'rb') as f:
-                    comets = mpc.load_comets_dataframe(f)
-            else:
-                logger.debug("Downloading MPC comet elements from network and caching to cache/CometEls.txt")
-                # Download once with timeout and store a copy
-                try:
-                    with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
-                        content = rf.read()
-                except Exception as ne:
-                    logger.error(f"Error downloading MPC comet elements: {ne}")
-                    content = None
+        # Check if daily update is needed
+        if should_update_comet_file():
+            logger.debug("Comet file needs daily update, downloading...")
+            try:
+                with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
+                    content = rf.read()
                 if content:
                     os.makedirs('cache', exist_ok=True)
                     try:
-                        with open(local_mpc_file, 'wb') as wf:
+                        with open(COMETS_FILE, 'wb') as wf:
                             wf.write(content)
+                        logger.debug(f"Updated comet file: {COMETS_FILE}")
                     except Exception as we:
-                        logger.warning(f"Failed to write {local_mpc_file}: {we}")
-                    # Parse from the saved file (ensures consistent behavior)
-                    try:
-                        with open(local_mpc_file, 'rb') as f:
-                            comets = mpc.load_comets_dataframe(f)
-                    except Exception as pe:
-                        logger.error(f"Failed to parse MPC comet elements: {pe}")
-                        comets = pd.DataFrame(columns=['designation'])
-
-        # Ensure non-None DF before standardization
-        if comets is None:
-            comets = pd.DataFrame(columns=['designation'])
-        # Standardize DataFrame (types, aliases, filtering)
-        comets = _standardize_comet_df(comets)
+                        logger.warning(f"Failed to write {COMETS_FILE}: {we}")
+            except Exception as ne:
+                logger.error(f"Error downloading MPC comet elements: {ne}")
+        
+        # Load from local file
+        if os.path.exists(COMETS_FILE):
+            with open(COMETS_FILE, 'rb') as f:
+                df = mpc.load_comets_dataframe(f)
+        else:
+            logger.error("No comet data file available")
+            return pd.DataFrame()
+            
+        _comet_df_cache = df
+        comets = _standardize_comet_df(df)
 
         # Debug: print columns and counts for essential fields
         try:
