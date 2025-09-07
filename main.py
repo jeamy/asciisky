@@ -429,16 +429,30 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
         with open(task_file, 'w') as f:
             json.dump(task_data, f)
         
-        # Start worker process
+        # Start worker process with better error handling
         try:
-            subprocess.Popen([
+            # Use absolute path and proper working directory
+            worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
+            process = subprocess.Popen([
                 sys.executable, 
-                'precompute_task_worker.py', 
+                worker_script, 
                 task_file
-            ], cwd=os.getcwd())
-            print(f"Started background window worker process for task {task_id}")
+            ], 
+            cwd=os.getcwd(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+            )
+            print(f"Started background window worker process for task {task_id} (PID: {process.pid})")
+            
+            # Store process info for monitoring
+            task_info[task_id]['worker_process'] = True
+            task_info[task_id]['worker_pid'] = process.pid
+            
         except Exception as e:
             print(f"Failed to start background window worker: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to executor
             loop = asyncio.get_running_loop()
             loop.run_in_executor(None, _do_work_sync)
@@ -629,16 +643,30 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
         with open(task_file, 'w') as f:
             json.dump(task_data, f)
         
-        # Start worker process
+        # Start worker process with better error handling
         try:
-            subprocess.Popen([
+            # Use absolute path and proper working directory
+            worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
+            process = subprocess.Popen([
                 sys.executable, 
-                'precompute_task_worker.py', 
+                worker_script, 
                 task_file
-            ], cwd=os.getcwd())
-            print(f"Started background worker process for task {task_id}")
+            ], 
+            cwd=os.getcwd(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+            )
+            print(f"Started background worker process for task {task_id} (PID: {process.pid})")
+            
+            # Store process info for monitoring
+            task_info[task_id]['worker_process'] = True
+            task_info[task_id]['worker_pid'] = process.pid
+            
         except Exception as e:
             print(f"Failed to start background worker: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to threading if subprocess fails
             import threading
             def fallback_worker():
