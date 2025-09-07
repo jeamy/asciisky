@@ -28,7 +28,7 @@ ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
 BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
 MPCORB_FILE = 'cache/MPCORB.DAT.gz'
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
-MAX_ASTEROIDS = 1000
+MAX_ASTEROIDS = 5000
 # Magnitude thresholds (restored defaults)
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
 MAX_ABSOLUTE_MAGNITUDE = 12.0

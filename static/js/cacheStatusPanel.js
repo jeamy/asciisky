@@ -363,6 +363,113 @@ async function restoreActivePrecomputeTask() {
   }
 }
 
+// Globale Variable für Cache-Daten
+let currentCacheData = null;
+let liveUpdateInterval = null;
+
+// Bestimme das maximale Enddatum basierend auf verfügbaren Cache-Daten
+function determineMaxEndDate() {
+  if (!currentCacheData || !currentCacheData.locations || currentCacheData.locations.length === 0) {
+    return null;
+  }
+  
+  // Finde das späteste verfügbare Datum über alle Standorte und Datentypen
+  let maxDate = null;
+  
+  for (const location of currentCacheData.locations) {
+    if (location.latest) {
+      for (const kind of Object.keys(location.latest)) {
+        const latestIso = location.latest[kind];
+        if (latestIso) {
+          const date = new Date(latestIso);
+          if (!maxDate || date > maxDate) {
+            maxDate = date;
+          }
+        }
+      }
+    }
+  }
+  
+  if (maxDate) {
+    // Formatiere als YYYY-MM-DD für das Eingabefeld
+    return maxDate.toISOString().split('T')[0];
+  }
+  
+  return null;
+}
+
+// Starte automatische Live-Updates für Cache-Status
+function startAutomaticLiveUpdates(lat, lon, elevation, locationName) {
+  // Stoppe vorherige Updates
+  if (liveUpdateInterval) {
+    clearInterval(liveUpdateInterval);
+  }
+  
+  // Starte neue Live-Updates alle 5 Sekunden
+  liveUpdateInterval = setInterval(async () => {
+    try {
+      // Prüfe ob noch eine aktive Precompute-Task läuft
+      const activeTaskId = localStorage.getItem('activePrecomputeTask');
+      if (!activeTaskId) {
+        // Keine aktive Task mehr - stoppe Updates
+        clearInterval(liveUpdateInterval);
+        liveUpdateInterval = null;
+        console.log('Automatic live updates stopped - no active task');
+        return;
+      }
+      
+      // Aktualisiere Cache-Status ohne Loading-Anzeige zu zeigen
+      await updateCacheStatusSilently(lat, lon, elevation, locationName);
+      
+    } catch (error) {
+      console.error('Error during automatic live update:', error);
+    }
+  }, 5000); // Alle 5 Sekunden aktualisieren
+  
+  // Automatisch nach 10 Minuten stoppen als Fallback
+  setTimeout(() => {
+    if (liveUpdateInterval) {
+      clearInterval(liveUpdateInterval);
+      liveUpdateInterval = null;
+      console.log('Automatic live updates stopped - timeout reached');
+    }
+  }, 600000); // 10 Minuten
+}
+
+// Stille Cache-Status-Aktualisierung ohne Loading-Anzeige
+async function updateCacheStatusSilently(lat, lon, elevation, locationName = '') {
+  try {
+    // Store current location for potential task restoration
+    window.currentCacheLocation = { lat, lon, elevation, locationName };
+    let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
+    
+    // Wichtig: Sende die Rohdaten (lat, lon, elevation) an das Backend
+    // und lasse das Backend die Normalisierung durchführen
+    const sep = url.includes('?') ? '&' : '?';
+    url = `${url}${sep}lat=${lat}&lon=${lon}&elevation=${elevation}`;
+    
+    // Zusätzlich den loc_key senden für Kompatibilität
+    try {
+      const key = buildLocKey(lat, lon, elevation);
+      url = `${url}&loc_key=${encodeURIComponent(key)}`;
+    } catch (_) { /* noop */ }
+    
+    const resp = await fetch(url, { credentials: 'same-origin' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const key = buildLocKey(lat, lon, elevation);
+    
+    // Speichere Cache-Daten global für Datumsbereichsbestimmung
+    currentCacheData = data;
+    
+    // Render nur wenn sich die Daten geändert haben
+    renderStatus(data, key, locationName);
+    
+  } catch (err) {
+    console.error('Silent cache status update error:', err);
+  }
+}
+
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName = '') {
   try {
     renderLoading(locationName);
@@ -389,6 +496,9 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     const data = await resp.json();
     const key = buildLocKey(lat, lon, elevation);
     
+    // Speichere Cache-Daten global für Datumsbereichsbestimmung
+    currentCacheData = data;
+    
     console.log('Cache status data:', data); // Debug-Ausgabe
     console.log('Generated key:', key); // Debug-Ausgabe
     
@@ -397,6 +507,9 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     // Now that the panel is rendered, check for active precompute task
     // This ensures all DOM elements are available
     setTimeout(() => restoreActivePrecomputeTask(), 100);
+    
+    // Starte automatische Live-Updates wenn Daten verfügbar sind
+    startAutomaticLiveUpdates(lat, lon, elevation, locationName);
   } catch (err) {
     console.error('Cache status error:', err); // Debug-Ausgabe
     renderError(err, locationName);
@@ -433,7 +546,15 @@ function setupPrecomputeHandlers(locationName) {
   
   // Format dates as YYYY-MM-DD for input fields
   startDateInput.value = today.toISOString().split('T')[0];
-  endDateInput.value = nextWeek.toISOString().split('T')[0];
+  
+  // Bestimme das maximale Enddatum basierend auf verfügbaren Cache-Daten
+  const maxEndDate = determineMaxEndDate();
+  endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
+  
+  // Setze das max-Attribut für das Enddatum-Eingabefeld
+  if (maxEndDate) {
+    endDateInput.setAttribute('max', maxEndDate);
+  }
   
   // Handle precompute button click
   precomputeButton.addEventListener('click', async () => {

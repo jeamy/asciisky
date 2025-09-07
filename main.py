@@ -467,11 +467,58 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
             try:
                 app.precompute_tasks[task_id]['status'] = 'running'
                 
-                current_dt = start_dt_utc
+                # Strategische Prioritätsliste: aktuelles Datum zuerst, dann Zukunft, dann Vergangenheit
+                now_utc = datetime.now(timezone.utc)
+                now_hour = _hour_floor(now_utc)
+                
+                # Erstelle prioritätsbasierte Liste der zu berechnenden Stunden
+                hours_to_process = []
+                
+                # 1. Priorität: Aktuelle Stunde (falls im Bereich)
+                if start_dt_utc <= now_hour <= end_dt_utc:
+                    hours_to_process.append(now_hour)
+                    print(f"[precompute] Priority 1: Current hour {now_hour.isoformat()}")
+                
+                # 2. Priorität: Zukunft (nächste Stunden nach jetzt)
+                future_hours = []
+                current_dt = now_hour + timedelta(hours=1)
+                while current_dt <= end_dt_utc:
+                    if current_dt not in hours_to_process:
+                        future_hours.append(current_dt)
+                    current_dt += timedelta(hours=1)
+                
+                # Sortiere Zukunft chronologisch (nächste Stunden zuerst)
+                future_hours.sort()
+                hours_to_process.extend(future_hours)
+                print(f"[precompute] Priority 2: Future hours ({len(future_hours)} hours)")
+                
+                # 3. Priorität: Vergangenheit (Stunden vor jetzt)
+                past_hours = []
+                current_dt = now_hour - timedelta(hours=1)
+                while current_dt >= start_dt_utc:
+                    if current_dt not in hours_to_process:
+                        past_hours.append(current_dt)
+                    current_dt -= timedelta(hours=1)
+                
+                # Sortiere Vergangenheit umgekehrt chronologisch (neueste zuerst)
+                past_hours.sort(reverse=True)
+                hours_to_process.extend(past_hours)
+                print(f"[precompute] Priority 3: Past hours ({len(past_hours)} hours)")
+                
+                # Falls aktueller Zeitpunkt außerhalb des Bereichs liegt, normale chronologische Reihenfolge
+                if not (start_dt_utc <= now_hour <= end_dt_utc):
+                    hours_to_process = []
+                    current_dt = start_dt_utc
+                    while current_dt <= end_dt_utc:
+                        hours_to_process.append(current_dt)
+                        current_dt += timedelta(hours=1)
+                    print(f"[precompute] Current time outside range, using chronological order")
+                
                 hours_completed = 0
                 hours_skipped = 0
                 
-                while current_dt <= end_dt_utc:
+                # Verarbeite Stunden in prioritätsbasierter Reihenfolge
+                for process_dt in hours_to_process:
                     hour_had_cache = True  # Track if all kinds had cache for this hour
                     
                     for k in kinds:
@@ -484,36 +531,35 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
                                 from db_utils import get_celestial_snapshot
                                 lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
                                 loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                                time_bucket = time_bucket_utc(current_dt, CELESTIAL_CACHE_BUCKET_HOURS)
+                                time_bucket = time_bucket_utc(process_dt, CELESTIAL_CACHE_BUCKET_HOURS)
                                 cached_snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
                                 if cached_snapshot:
                                     kind_had_cache = True
                                     print(f"[precompute] celestial cache exists for {loc_key}/{time_bucket}")
                                 else:
-                                    ensure_celestial_cache(lat, lon, elevation, current_dt)
+                                    ensure_celestial_cache(lat, lon, elevation, process_dt)
                                     print(f"[precompute] generated celestial cache for {loc_key}/{time_bucket}")
                             else:
-                                ensure_celestial_cache(lat, lon, elevation, current_dt)
+                                ensure_celestial_cache(lat, lon, elevation, process_dt)
                                 print(f"[precompute] generated celestial cache (pickle mode)")
                         elif k == 'asteroids':
-                            cache_existed = _ensure_asteroids_cache(lat, lon, elevation, current_dt)
+                            cache_existed = _ensure_asteroids_cache(lat, lon, elevation, process_dt)
                             if cache_existed:
                                 kind_had_cache = True
-                                print(f"[precompute] asteroid cache exists for {current_dt.isoformat()}")
+                                print(f"[precompute] asteroid cache exists for {process_dt.isoformat()}")
                             else:
-                                print(f"[precompute] generated asteroid cache for {current_dt.isoformat()}")
+                                print(f"[precompute] generated asteroid cache for {process_dt.isoformat()}")
                         elif k == 'comets':
-                            cache_existed = _ensure_comets_cache(lat, lon, elevation, current_dt)
+                            cache_existed = _ensure_comets_cache(lat, lon, elevation, process_dt)
                             if cache_existed:
                                 kind_had_cache = True
-                                print(f"[precompute] comet cache exists for {current_dt.isoformat()}")
+                                print(f"[precompute] comet cache exists for {process_dt.isoformat()}")
                             else:
-                                print(f"[precompute] generated comet cache for {current_dt.isoformat()}")
+                                print(f"[precompute] generated comet cache for {process_dt.isoformat()}")
                         
                         if not kind_had_cache:
                             hour_had_cache = False
                     
-                    current_dt += timedelta(hours=1)
                     hours_completed += 1
                     if hour_had_cache:
                         hours_skipped += 1
@@ -522,6 +568,7 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
                     app.precompute_tasks[task_id]['hours_completed'] = hours_completed
                     app.precompute_tasks[task_id]['hours_skipped'] = hours_skipped
                     app.precompute_tasks[task_id]['percent_complete'] = round((hours_completed / delta_hours) * 100, 1)
+                    app.precompute_tasks[task_id]['current_processing'] = process_dt.isoformat()
                 
                 app.precompute_tasks[task_id]['status'] = 'completed'
                 app.precompute_tasks[task_id]['end_time'] = datetime.now(timezone.utc)

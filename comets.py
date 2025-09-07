@@ -33,11 +33,11 @@ COMETS_FILE = 'cache/CometEls.txt'
 BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
-MAX_COMETS_DEFAULT = 200
+MAX_COMETS_DEFAULT = 50
 # Pre-filter by comet absolute magnitude parameter (M1); smaller = brighter
 MAX_ABSOLUTE_MAGNITUDE = 16.0
 # Final filter by estimated apparent magnitude at current time/location
-MAX_APPARENT_MAGNITUDE = 12
+MAX_APPARENT_MAGNITUDE = 14
 
 # Module-specific cache granularity for per-location/time comet list
 # Use a 1-hour bucket; TTL should span the 48h precompute window so that

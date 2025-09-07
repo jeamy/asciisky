@@ -254,6 +254,9 @@ export class LocationDialog {
             this.onLocationChange(this.currentLocation);
         }
         
+        // Automatische Cache-Berechnung für den neuen Standort auslösen
+        this.triggerAutomaticPrecompute(this.currentLocation);
+        
         // Höhe automatisch ermitteln
         const fetchedElevation = await this.getElevationForCoordinates(location.lat, location.lon);
         if (fetchedElevation !== null) {
@@ -267,6 +270,9 @@ export class LocationDialog {
             if (this.onLocationChange) {
                 this.onLocationChange(this.currentLocation);
             }
+            
+            // Automatische Cache-Berechnung mit aktualisierter Höhe auslösen
+            this.triggerAutomaticPrecompute(this.currentLocation);
         }
     }
     
@@ -296,7 +302,99 @@ export class LocationDialog {
             this.onLocationChange(this.currentLocation);
         }
         
+        // Automatische Cache-Berechnung für manuell eingegebenen Standort auslösen
+        this.triggerAutomaticPrecompute(this.currentLocation);
+        
         // Dialog schließen nach Übernahme der Koordinaten
         this.removeDialog();
+    }
+    
+    // Automatische Cache-Berechnung für neuen Standort auslösen
+    async triggerAutomaticPrecompute(location) {
+        try {
+            // Importiere API_ENDPOINTS dynamisch
+            const { API_ENDPOINTS } = await import('./constants.js');
+            
+            // Berechne automatisch Cache für die nächsten 48 Stunden
+            const today = new Date();
+            const twoDaysLater = new Date();
+            twoDaysLater.setDate(today.getDate() + 2);
+            
+            const startDate = today.toISOString().split('T')[0];
+            const endDate = twoDaysLater.toISOString().split('T')[0];
+            
+            console.log(`Triggering automatic precompute for location ${location.name} (${location.lat}, ${location.lon}) from ${startDate} to ${endDate}`);
+            
+            // Starte Precompute im Hintergrund - nicht warten
+            fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    lat: location.lat,
+                    lon: location.lon,
+                    elevation: location.elevation,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            }).then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    console.warn('Failed to start automatic precompute:', response.status);
+                    return null;
+                }
+            }).then(result => {
+                if (result) {
+                    console.log('Automatic precompute started:', result);
+                    
+                    // Starte Live-Updates für Cache-Status
+                    this.startLiveCacheUpdates(location);
+                }
+            }).catch(error => {
+                console.error('Error triggering automatic precompute:', error);
+            });
+            
+        } catch (error) {
+            console.error('Error triggering automatic precompute:', error);
+        }
+    }
+    
+    // Starte Live-Updates für Cache-Status während Berechnung
+    startLiveCacheUpdates(location) {
+        // Aktualisiere Cache-Status alle 3 Sekunden während Berechnung läuft
+        const updateInterval = setInterval(async () => {
+            try {
+                // Importiere updateCacheStatusForLocation dynamisch
+                const { updateCacheStatusForLocation } = await import('./cacheStatusPanel.js');
+                
+                // Aktualisiere Cache-Status
+                await updateCacheStatusForLocation(
+                    location.lat, 
+                    location.lon, 
+                    location.elevation, 
+                    location.name
+                );
+                
+                // Prüfe ob noch eine aktive Precompute-Task läuft
+                const activeTaskId = localStorage.getItem('activePrecomputeTask');
+                if (!activeTaskId) {
+                    // Keine aktive Task mehr - stoppe Updates
+                    clearInterval(updateInterval);
+                    console.log('Live cache updates stopped - no active task');
+                }
+            } catch (error) {
+                console.error('Error during live cache update:', error);
+                // Bei Fehlern nach 30 Sekunden stoppen
+                setTimeout(() => clearInterval(updateInterval), 30000);
+            }
+        }, 3000); // Alle 3 Sekunden aktualisieren
+        
+        // Automatisch nach 5 Minuten stoppen als Fallback
+        setTimeout(() => {
+            clearInterval(updateInterval);
+            console.log('Live cache updates stopped - timeout reached');
+        }, 300000); // 5 Minuten
     }
 }
