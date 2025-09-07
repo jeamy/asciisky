@@ -104,6 +104,21 @@ def update_task_status(task_id, status_update):
     except Exception as e:
         print(f"[worker] Error updating task status: {e}")
 
+def cleanup_task_files(task_id, task_file):
+    """Clean up both task and status files for a completed/failed task"""
+    files_to_remove = [
+        task_file,  # cache/task_{task_id}.json
+        f"cache/task_status_{task_id}.json"  # Status file
+    ]
+    
+    for file_path in files_to_remove:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"[worker] Removed: {file_path}")
+            except Exception as e:
+                print(f"[worker] Failed to remove {file_path}: {e}")
+
 def process_precompute_task(task_file):
     """Process a precompute task from task file"""
     try:
@@ -234,11 +249,9 @@ def process_precompute_task(task_file):
         
         print(f"[worker] Task {task_id} completed successfully")
         
-        # Clean up task file
-        try:
-            os.remove(task_file)
-        except:
-            pass
+        # Clean up both task and status files
+        cleanup_task_files(task_id, task_file)
+        print(f"[worker] Cleaned up files for task {task_id}")
             
     except Exception as e:
         print(f"[worker] Error in task {task_id}: {e}")
@@ -251,6 +264,10 @@ def process_precompute_task(task_file):
             'error': str(e),
             'end_time': datetime.now(timezone.utc).isoformat()
         })
+        
+        # Clean up task files even on error (after status update)
+        cleanup_task_files(task_id, task_file)
+        print(f"[worker] Cleaned up files for failed task {task_id}")
 
 def main():
     if len(sys.argv) != 2:

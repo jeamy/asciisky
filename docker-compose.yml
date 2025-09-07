@@ -49,3 +49,16 @@ services:
       - ASCII_SKY_WORKER_RUN_ONCE=1
     restart: "no"
     profiles: ["once"]
+
+  task_cleanup:
+    image: asciisky-worker
+    build: .
+    command: ["python", "task_cleanup_service.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_TASK_CLEANUP_HOURS=6
+      - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
+    restart: unless-stopped
