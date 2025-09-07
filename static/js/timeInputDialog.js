@@ -98,7 +98,8 @@ export class TimeInputDialog {
                 return;
             }
             
-            // Erstelle ein Datum-Objekt aus den Eingaben
+            // Erstelle ein lokales Datum-Objekt aus den Eingaben
+            // Das Datum soll als lokale Zeit interpretiert werden, nicht als UTC
             const selectedDate = new Date(`${dateValue}T${timeValue}`);
             
             // Berechne den Offset in Minuten zur aktuellen Zeit

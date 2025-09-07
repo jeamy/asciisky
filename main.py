@@ -666,13 +666,19 @@ def parse_time_param(time_str: Optional[str]) -> datetime:
         return datetime.now(timezone.utc)
     try:
         s = time_str.strip()
+        print(f"DEBUG parse_time_param: Input string: '{s}'")
+        
         if s.endswith('Z'):
             s = s[:-1] + '+00:00'
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
+        
+        result = dt.astimezone(timezone.utc)
+        print(f"DEBUG parse_time_param: Parsed datetime: {result}")
+        return result
+    except Exception as e:
+        print(f"DEBUG parse_time_param: Parse error: {e}")
         # Fallback to current UTC on parse errors
         return datetime.now(timezone.utc)
 

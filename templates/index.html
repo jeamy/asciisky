@@ -322,7 +322,7 @@
 
                 const applyDelta = (delta) => {
                     const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
-                    const next = Math.max(-2880, Math.min(2880, (offsetMinutes || 0) + delta));
+                    const next = Math.max(-525600, Math.min(525600, (offsetMinutes || 0) + delta));
                     settingsManager.setSimulatedTime(next);
                     updateSimPreview();
                     if (renderer) updateSky();

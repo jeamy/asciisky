@@ -212,7 +212,6 @@ function renderStatus(data, currentLocKey, locationName) {
       <div class="cs-section cs-subtle">${t('no_data_for_location') || 'No cache data for this location in the current window.'}</div>
       ${precomputeSection}
     `;
-    setupPrecomputeHandlers(locationName);
     return;
   }
 
@@ -252,7 +251,6 @@ function renderStatus(data, currentLocKey, locationName) {
     ${precomputeSection}
   `;
   
-  setupPrecomputeHandlers(locationName);
 }
 
 export function initCacheStatusPanel(elementId = 'cache-status-panel') {
@@ -500,10 +498,10 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
     
     renderStatus(data, key, locationName);
     
-    // Now that the panel is rendered, reset and initialize the precompute form
+    // Now that the panel is rendered, initialize form and check for active precompute task
     // This ensures all DOM elements are available
     setTimeout(async () => {
-      await resetPrecomputeForm();
+      await initializePrecomputeForm();
       restoreActivePrecomputeTask();
     }, 100);
     
@@ -515,41 +513,29 @@ export async function updateCacheStatusForLocation(lat, lon, elevation, location
   }
 }
 
-// Debounced variant to avoid spamming the API during rapid simulated time changes
-async function resetPrecomputeForm() {
-  const today = new Date();
-  const nextWeek = new Date();
-  nextWeek.setDate(today.getDate() + 7);
-  
+// Initialize precompute form only once when panel is first rendered
+async function initializePrecomputeForm() {
   const startDateInput = document.getElementById('cache-start-date');
   const endDateInput = document.getElementById('cache-end-date');
   const precomputeButton = document.getElementById('cache-precompute-button');
-  const progressContainer = document.getElementById('cache-progress');
-  const progressFill = document.getElementById('cache-progress-fill');
-  const progressPercent = document.getElementById('cache-progress-percent');
-  const progressHours = document.getElementById('cache-progress-hours');
-  const progressDetails = document.getElementById('cache-progress-details');
   
   if (!startDateInput || !endDateInput || !precomputeButton) return;
   
-  // Reset UI to default state
-  startDateInput.disabled = false;
-  endDateInput.disabled = false;
-  precomputeButton.disabled = false;
-  precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-  
-  if (progressContainer) {
-    progressContainer.style.display = 'none';
+  // Only initialize if not already set
+  if (!startDateInput.value) {
+    const today = new Date();
+    startDateInput.value = today.toISOString().split('T')[0];
   }
   
-  // Format dates as YYYY-MM-DD for input fields
-  startDateInput.value = today.toISOString().split('T')[0];
-  
-  // Bestimme das maximale Enddatum basierend auf verfügbaren Cache-Daten
-  const maxEndDate = await determineMaxEndDate();
-  endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
+  if (!endDateInput.value) {
+    const maxEndDate = await determineMaxEndDate();
+    const nextWeek = new Date();
+    nextWeek.setDate(new Date().getDate() + 7);
+    endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
+  }
   
   // Setze min-Attribute für die Eingabefelder
+  const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
   startDateInput.setAttribute('min', todayStr);
   endDateInput.setAttribute('min', todayStr);
