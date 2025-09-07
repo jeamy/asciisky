@@ -322,6 +322,8 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
 
 def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure a comet list cache exists for this hour. Returns True if created."""
+    from cache_utils import time_bucket_utc
+    
     # Check SQLite cache first if enabled
     if comets.COMET_USE_SQLITE:
         try:
