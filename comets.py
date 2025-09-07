@@ -25,7 +25,7 @@ from skyfield.data import mpc
 from skyfield.magnitudelib import planetary_magnitude
 
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
-from db_utils import get_db_connection, execute_query, fetch_all
+from db_utils import get_db_connection
 
 def should_update_comet_file():
     """
