@@ -406,8 +406,42 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
                     elif k == 'comets':
                         _ensure_comets_cache(lat, lon, elevation, t)
 
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _do_work_sync)
+        # Use subprocess for true background processing like in trigger_background_precompute_range
+        import subprocess
+        import sys
+        import json
+        import uuid
+        
+        # Create task file for the worker process
+        task_id = f"window_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        task_data = {
+            'task_id': task_id,
+            'lat': lat,
+            'lon': lon,
+            'elevation': elevation,
+            'start_dt_utc': (base if forward else base - timedelta(hours=horizon_hours-1)).isoformat(),
+            'end_dt_utc': (base + timedelta(hours=horizon_hours-1) if forward else base).isoformat(),
+            'kinds': kinds
+        }
+        
+        task_file = f"cache/task_{task_id}.json"
+        os.makedirs(os.path.dirname(task_file), exist_ok=True)
+        with open(task_file, 'w') as f:
+            json.dump(task_data, f)
+        
+        # Start worker process
+        try:
+            subprocess.Popen([
+                sys.executable, 
+                'precompute_task_worker.py', 
+                task_file
+            ], cwd=os.getcwd())
+            print(f"Started background window worker process for task {task_id}")
+        except Exception as e:
+            print(f"Failed to start background window worker: {e}")
+            # Fallback to executor
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _do_work_sync)
     except Exception:
         print("[bg] trigger failed")
         import traceback; traceback.print_exc()

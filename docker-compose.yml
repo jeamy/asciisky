@@ -9,7 +9,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
+      - ASCII_SKY_PRECOMPUTE_HOURS=144
       - ASCII_SKY_MAX_PRECOMPUTE_HOURS=168
+      - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
     restart: unless-stopped
  
   worker:

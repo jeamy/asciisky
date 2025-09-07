@@ -45,7 +45,8 @@ def _ensure_asteroids_cache(lat, lon, elevation, dt_utc):
         from skyfield.data import mpc
         
         # Create skyfield objects as expected by load_bright_asteroids
-        loader = Loader('cache')
+        # Use current directory where de421.bsp is located
+        loader = Loader('.')
         ts = loader.timescale()
         eph = loader('de421.bsp')
         
@@ -65,7 +66,8 @@ def _ensure_comets_cache(lat, lon, elevation, dt_utc):
         from skyfield.api import Loader, wgs84
         
         # Create skyfield objects as expected by load_comets
-        loader = Loader('cache')
+        # Use current directory where de421.bsp is located
+        loader = Loader('.')
         ts = loader.timescale()
         eph = loader('de421.bsp')
         
