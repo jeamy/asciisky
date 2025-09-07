@@ -60,10 +60,32 @@ function buildLocKey(lat, lon, elevation) {
 function toLocalHM(iso) {
   if (!iso) return '—';
   try {
-    const d = new Date(iso);
-    return d.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-  } catch (_) {
-    return String(iso);
+    let d;
+    
+    // Check if this is a time bucket format (YYYYMMDDTHH)
+    if (typeof iso === 'string' && /^\d{8}T\d{2}$/.test(iso)) {
+      // Parse bucket format: YYYYMMDDTHH
+      d = new Date();
+      const year = parseInt(iso.slice(0, 4));
+      const month = parseInt(iso.slice(4, 6)) - 1; // Month is 0-based
+      const day = parseInt(iso.slice(6, 8));
+      const hour = parseInt(iso.slice(9, 11));
+      d = new Date(year, month, day, hour, 0, 0);
+    } else {
+      // Parse ISO format
+      d = new Date(iso);
+    }
+    
+    if (isNaN(d.getTime())) return '—';
+    
+    // Format as DD.MM., HH:MM in local time
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}.${month}., ${hours}:${minutes}`;
+  } catch (e) {
+    return '—';
   }
 }
 
@@ -73,7 +95,17 @@ function minIsoTimestamp(isos) {
   let minT = Infinity;
   let minS = null;
   for (const s of list) {
-    const t = Date.parse(s);
+    let t;
+    // Handle time bucket format (YYYYMMDDTHH)
+    if (typeof s === 'string' && /^\d{8}T\d{2}$/.test(s)) {
+      const year = parseInt(s.slice(0, 4));
+      const month = parseInt(s.slice(4, 6)) - 1;
+      const day = parseInt(s.slice(6, 8));
+      const hour = parseInt(s.slice(9, 11));
+      t = new Date(year, month, day, hour, 0, 0).getTime();
+    } else {
+      t = Date.parse(s);
+    }
     if (!Number.isNaN(t) && t < minT) { minT = t; minS = s; }
   }
   return minS;
@@ -85,7 +117,17 @@ function maxIsoTimestamp(isos) {
   let maxT = -Infinity;
   let maxS = null;
   for (const s of list) {
-    const t = Date.parse(s);
+    let t;
+    // Handle time bucket format (YYYYMMDDTHH)
+    if (typeof s === 'string' && /^\d{8}T\d{2}$/.test(s)) {
+      const year = parseInt(s.slice(0, 4));
+      const month = parseInt(s.slice(4, 6)) - 1;
+      const day = parseInt(s.slice(6, 8));
+      const hour = parseInt(s.slice(9, 11));
+      t = new Date(year, month, day, hour, 0, 0).getTime();
+    } else {
+      t = Date.parse(s);
+    }
     if (!Number.isNaN(t) && t > maxT) { maxT = t; maxS = s; }
   }
   return maxS;
@@ -576,6 +618,15 @@ async function initializePrecomputeForm() {
   // Handle precompute button click - nur einmal hinzufügen
   if (!precomputeButton.hasAttribute('data-listeners-added')) {
     precomputeButton.addEventListener('click', async () => {
+    const startDateInput = document.getElementById('cache-start-date');
+    const endDateInput = document.getElementById('cache-end-date');
+    const precomputeButton = document.getElementById('cache-precompute-button');
+    const progressContainer = document.getElementById('cache-progress');
+    const progressFill = document.getElementById('cache-progress-fill');
+    const progressPercent = document.getElementById('cache-progress-percent');
+    const progressHours = document.getElementById('cache-progress-hours');
+    const progressDetails = document.getElementById('cache-progress-details');
+    
     const startDate = startDateInput.value;
     const endDate = endDateInput.value;
     
@@ -622,14 +673,13 @@ async function initializePrecomputeForm() {
       localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
       
       // Show progress container
-      const progressContainer = document.getElementById('cache-progress');
       if (progressContainer) {
         progressContainer.style.display = 'block';
       }
-      progressFill.style.width = '0%';
-      progressPercent.textContent = '0%';
-      progressHours.textContent = `0/${result.hours_total} hours`;
-      progressDetails.textContent = t('task_started') || 'Task started...';
+      if (progressFill) progressFill.style.width = '0%';
+      if (progressPercent) progressPercent.textContent = '0%';
+      if (progressHours) progressHours.textContent = `0/${result.hours_total} hours`;
+      if (progressDetails) progressDetails.textContent = t('task_started') || 'Task started...';
       
       // Start checking progress
       if (precomputeTaskCheckInterval) {

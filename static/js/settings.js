@@ -82,7 +82,6 @@ export class SettingsManager {
         const off = (typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
         // Aktiv nur, wenn Offset != 0 (kein separater Toggle mehr)
         const autoEnabled = off !== 0;
-        console.log('DEBUG getSimulatedTimeOffset:', { sim, off, autoEnabled });
         return {
             enabled: autoEnabled,
             offsetMinutes: off
@@ -99,15 +98,12 @@ export class SettingsManager {
     // Setzt den Versatz in Minuten; der Aktivierungsstatus ist optional.
     // Wenn 'enabled' nicht angegeben ist, wird automatisch aktiviert, wenn offsetMinutes != 0.
     setSimulatedTime(offsetMinutes = 0, enabled) {
-        console.log('DEBUG setSimulatedTime called with:', { offsetMinutes, enabled });
         if (!this.settings.simTime) this.settings.simTime = { enabled: false, offsetMinutes: 0 };
         const off = Number.isFinite(offsetMinutes) ? Math.max(-525600, Math.min(525600, Math.trunc(offsetMinutes))) : 0; // clamp +/- 1 year
         const en = (typeof enabled === 'undefined') ? (off !== 0) : !!enabled;
-        console.log('DEBUG setSimulatedTime computed:', { off, en });
         this.settings.simTime.enabled = en;
         this.settings.simTime.offsetMinutes = off;
         this.saveSettings();
-        console.log('DEBUG setSimulatedTime saved settings:', this.settings.simTime);
         return this.getSimulatedTimeOffset();
     }
 
@@ -117,14 +113,7 @@ export class SettingsManager {
             const { enabled, offsetMinutes } = this.getSimulatedTimeOffset();
             if (!enabled) return null;
             const dt = new Date(Date.now() + (offsetMinutes || 0) * 60000);
-            const result = dt.toISOString(); // UTC mit Z-Suffix
-            console.log('DEBUG getSimulatedTimeISO:', {
-                enabled,
-                offsetMinutes,
-                currentTime: new Date().toISOString(),
-                simulatedTime: result
-            });
-            return result;
+            return dt.toISOString(); // UTC mit Z-Suffix
         } catch (e) {
             console.error('Error computing simulated time ISO:', e);
             return null;

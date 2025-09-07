@@ -666,19 +666,13 @@ def parse_time_param(time_str: Optional[str]) -> datetime:
         return datetime.now(timezone.utc)
     try:
         s = time_str.strip()
-        print(f"DEBUG parse_time_param: Input string: '{s}'")
-        
         if s.endswith('Z'):
             s = s[:-1] + '+00:00'
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        
-        result = dt.astimezone(timezone.utc)
-        print(f"DEBUG parse_time_param: Parsed datetime: {result}")
-        return result
-    except Exception as e:
-        print(f"DEBUG parse_time_param: Parse error: {e}")
+        return dt.astimezone(timezone.utc)
+    except Exception:
         # Fallback to current UTC on parse errors
         return datetime.now(timezone.utc)
 
@@ -1414,8 +1408,8 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
                             conn = get_db_connection()
                             cursor = conn.execute("""
                                 SELECT COUNT(*) as count, 
-                                       MIN(computed_at) as earliest,
-                                       MAX(computed_at) as latest
+                                       MIN(time_bucket) as earliest,
+                                       MAX(time_bucket) as latest
                                 FROM asteroid_positions 
                                 WHERE location_key = ?
                             """, (loc_key,))
@@ -1433,8 +1427,8 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
                             conn = get_db_connection()
                             cursor = conn.execute("""
                                 SELECT COUNT(*) as count,
-                                       MIN(computed_at) as earliest,
-                                       MAX(computed_at) as latest
+                                       MIN(time_bucket) as earliest,
+                                       MAX(time_bucket) as latest
                                 FROM comet_positions 
                                 WHERE location_key = ?
                             """, (loc_key,))
@@ -1452,8 +1446,8 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
                             conn = get_db_connection()
                             cursor = conn.execute("""
                                 SELECT COUNT(*) as count,
-                                       MIN(computed_at) as earliest,
-                                       MAX(computed_at) as latest
+                                       MIN(time_bucket) as earliest,
+                                       MAX(time_bucket) as latest
                                 FROM celestial_snapshots 
                                 WHERE location_key = ?
                             """, (loc_key,))
