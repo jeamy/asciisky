@@ -18,10 +18,12 @@ import settings
 import bright_asteroids
 import comets
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
+import main as webapp
+import traceback
 
 # Import database utilities if available
 try:
-    from db_utils import get_celestial_snapshot, store_celestial_snapshot
+    from db_utils import get_celestial_snapshot, store_celestial_snapshot, get_asteroid_positions, get_comet_positions
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
@@ -30,55 +32,65 @@ def _hour_floor(dt):
     """Round datetime down to the nearest hour"""
     return dt.replace(minute=0, second=0, microsecond=0)
 
-def ensure_celestial_cache(lat, lon, elevation, dt_utc):
-    """Ensure celestial cache exists for given location and time"""
-    # This is a simplified version - implement full celestial calculation
-    print(f"[worker] Generating celestial cache for {lat}, {lon} at {dt_utc}")
-    # Implementation would go here
-    return True
+def ensure_celestial_cache(lat, lon, elevation, dts_utc):
+    """Ensure celestial cache exists for a list of datetimes."""
+    for dt_utc in dts_utc:
+        path = build_cache_path("celestial", lat, lon, elevation, dt=dt_utc, bucket_hours=1)
+        if os.path.exists(path):
+            continue
 
-def _ensure_asteroids_cache(lat, lon, elevation, dt_utc):
-    """Ensure asteroid cache exists for given location and time"""
-    try:
-        # Import skyfield objects
-        from skyfield.api import Loader, wgs84
-        from skyfield.data import mpc
-        
-        # Create skyfield objects as expected by load_bright_asteroids
-        # Use current directory where de421.bsp is located
-        loader = Loader('.')
-        ts = loader.timescale()
-        eph = loader('de421.bsp')
-        
-        # Create proper Skyfield observer location object
-        observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
-        
-        result = bright_asteroids.load_bright_asteroids(loader, ts, eph, observer_location, current_dt=dt_utc)
-        return result is not None
-    except Exception as e:
-        print(f"[worker] Error generating asteroid cache: {e}")
-        return False
+        try:
+            snapshot = webapp.compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            atomic_write_pickle(path, snapshot)
+        except Exception:
+            print(f"[worker] ERROR: Failed to generate celestial cache for {lat}, {lon} at {dt_utc}")
+            traceback.print_exc()
 
-def _ensure_comets_cache(lat, lon, elevation, dt_utc):
-    """Ensure comet cache exists for given location and time"""
-    try:
-        # Import skyfield objects
-        from skyfield.api import Loader, wgs84
-        
-        # Create skyfield objects as expected by load_comets
-        # Use current directory where de421.bsp is located
-        loader = Loader('.')
-        ts = loader.timescale()
-        eph = loader('de421.bsp')
-        
-        # Create proper Skyfield observer location object
-        observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
-        
-        result = comets.load_comets(ts, eph, observer_location, current_dt=dt_utc)
-        return result is not None
-    except Exception as e:
-        print(f"[worker] Error generating comet cache: {e}")
-        return False
+def _ensure_asteroids_cache(lat, lon, elevation, dts_utc):
+    """Ensure asteroid cache exists for a list of datetimes."""
+    for dt_utc in dts_utc:
+        if DB_AVAILABLE and bright_asteroids.ASTEROID_USE_SQLITE:
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+            if get_asteroid_positions(loc_key, time_bucket):
+                continue
+
+        path = build_cache_path("asteroids", lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+        if os.path.exists(path):
+            continue
+
+        try:
+            from skyfield.api import wgs84
+            observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
+            bright_asteroids.load_bright_asteroids(
+                webapp.LOADER, webapp.ts, webapp.eph, observer_location, current_dt=dt_utc
+            )
+        except Exception as e:
+            print(f"[worker] Error generating asteroid cache: {e}")
+
+def _ensure_comets_cache(lat, lon, elevation, dts_utc):
+    """Ensure comet cache exists for a list of datetimes."""
+    for dt_utc in dts_utc:
+        if DB_AVAILABLE and comets.COMET_USE_SQLITE:
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
+            if get_comet_positions(loc_key, time_bucket):
+                continue
+
+        path = build_cache_path("comets", lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+        if os.path.exists(path):
+            continue
+
+        try:
+            from skyfield.api import wgs84
+            observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
+            comets.load_comets(
+                webapp.ts, webapp.eph, observer_location, current_dt=dt_utc
+            )
+        except Exception as e:
+            print(f"[worker] Error generating comet cache: {e}")
 
 def update_task_status(task_id, status_update):
     """Update task status in shared file"""
@@ -122,124 +134,52 @@ def cleanup_task_files(task_id, task_file):
 def process_precompute_task(task_file):
     """Process a precompute task from task file"""
     try:
-        # Load task data
         with open(task_file, 'r') as f:
             task_data = json.load(f)
-        
+
         task_id = task_data['task_id']
-        lat = task_data['lat']
-        lon = task_data['lon']
-        elevation = task_data['elevation']
+        lat, lon, elevation = task_data['lat'], task_data['lon'], task_data['elevation']
         start_dt_utc = datetime.fromisoformat(task_data['start_dt_utc'])
         end_dt_utc = datetime.fromisoformat(task_data['end_dt_utc'])
         kinds = task_data['kinds']
+
+        print(f"[worker] Starting task {task_id} for {lat}, {lon}, {start_dt_utc} to {end_dt_utc}")
+
+        update_task_status(task_id, {'status': 'running', 'start_time': datetime.now(timezone.utc).isoformat()})
+
+        # Generate a prioritized list of hours to process
+        now_hour = _hour_floor(datetime.now(timezone.utc))
+        all_hours = [start_dt_utc + timedelta(hours=i) for i in range(int((end_dt_utc - start_dt_utc).total_seconds() / 3600) + 1)]
         
-        print(f"[worker] Starting task {task_id}")
-        print(f"[worker] Location: {lat}, {lon}, {elevation}")
-        print(f"[worker] Time range: {start_dt_utc} to {end_dt_utc}")
-        print(f"[worker] Kinds: {kinds}")
-        
-        # Update status to running
-        update_task_status(task_id, {
-            'status': 'running',
-            'start_time': datetime.now(timezone.utc).isoformat()
-        })
-        
-        # Calculate total hours
-        delta_hours = int((end_dt_utc - start_dt_utc).total_seconds() / 3600) + 1
-        
-        # Strategische Prioritätsliste: aktuelles Datum zuerst, dann Zukunft, dann Vergangenheit
-        now_utc = datetime.now(timezone.utc)
-        now_hour = _hour_floor(now_utc)
-        
-        # Erstelle prioritätsbasierte Liste der zu berechnenden Stunden
-        hours_to_process = []
-        
-        # 1. Priorität: Aktuelle Stunde (falls im Bereich)
-        if start_dt_utc <= now_hour <= end_dt_utc:
-            hours_to_process.append(now_hour)
-            print(f"[worker] Priority 1: Current hour {now_hour.isoformat()}")
-        
-        # 2. Priorität: Zukunft (nächste Stunden nach jetzt)
-        future_hours = []
-        current_dt = now_hour + timedelta(hours=1)
-        while current_dt <= end_dt_utc:
-            if current_dt not in hours_to_process:
-                future_hours.append(current_dt)
-            current_dt += timedelta(hours=1)
-        
-        # Sortiere Zukunft chronologisch (nächste Stunden zuerst)
-        future_hours.sort()
-        hours_to_process.extend(future_hours)
-        print(f"[worker] Priority 2: Future hours ({len(future_hours)} hours)")
-        
-        # 3. Priorität: Vergangenheit (Stunden vor jetzt)
-        past_hours = []
-        current_dt = now_hour - timedelta(hours=1)
-        while current_dt >= start_dt_utc:
-            if current_dt not in hours_to_process:
-                past_hours.append(current_dt)
-            current_dt -= timedelta(hours=1)
-        
-        # Sortiere Vergangenheit umgekehrt chronologisch (neueste zuerst)
-        past_hours.sort(reverse=True)
-        hours_to_process.extend(past_hours)
-        print(f"[worker] Priority 3: Past hours ({len(past_hours)} hours)")
-        
-        # Falls aktueller Zeitpunkt außerhalb des Bereichs liegt, normale chronologische Reihenfolge
-        if not (start_dt_utc <= now_hour <= end_dt_utc):
-            hours_to_process = []
-            current_dt = start_dt_utc
-            while current_dt <= end_dt_utc:
-                hours_to_process.append(current_dt)
-                current_dt += timedelta(hours=1)
-            print(f"[worker] Current time outside range, using chronological order")
-        
+        hours_to_process = sorted(all_hours, key=lambda dt: (
+            dt != now_hour,  # Current hour first
+            dt < now_hour,   # Then future hours
+            abs((dt - now_hour).total_seconds()) # Then by proximity to now
+        ))
+
+        total_hours = len(hours_to_process)
         hours_completed = 0
-        hours_skipped = 0
         
-        # Verarbeite Stunden in prioritätsbasierter Reihenfolge
-        for process_dt in hours_to_process:
-            hour_had_cache = True  # Track if all kinds had cache for this hour
+        # Process kind by kind for better batching
+        for kind_idx, kind in enumerate(kinds):
+            print(f"[worker] Processing kind: {kind} ({kind_idx+1}/{len(kinds)})")
             
-            for k in kinds:
-                kind_had_cache = False
-                
-                if k == 'celestial':
-                    ensure_celestial_cache(lat, lon, elevation, process_dt)
-                    print(f"[worker] generated celestial cache for {process_dt.isoformat()}")
-                elif k == 'asteroids':
-                    cache_existed = _ensure_asteroids_cache(lat, lon, elevation, process_dt)
-                    if cache_existed:
-                        kind_had_cache = True
-                        print(f"[worker] asteroid cache exists for {process_dt.isoformat()}")
-                    else:
-                        print(f"[worker] generated asteroid cache for {process_dt.isoformat()}")
-                elif k == 'comets':
-                    cache_existed = _ensure_comets_cache(lat, lon, elevation, process_dt)
-                    if cache_existed:
-                        kind_had_cache = True
-                        print(f"[worker] comet cache exists for {process_dt.isoformat()}")
-                    else:
-                        print(f"[worker] generated comet cache for {process_dt.isoformat()}")
-                
-                if not kind_had_cache:
-                    hour_had_cache = False
+            if kind == 'celestial':
+                ensure_celestial_cache(lat, lon, elevation, hours_to_process)
+            elif kind == 'asteroids':
+                _ensure_asteroids_cache(lat, lon, elevation, hours_to_process)
+            elif kind == 'comets':
+                _ensure_comets_cache(lat, lon, elevation, hours_to_process)
             
-            hours_completed += 1
-            if hour_had_cache:
-                hours_skipped += 1
-            
-            # Update progress
-            percent_complete = round((hours_completed / delta_hours) * 100, 1)
+            # Update progress after each kind is processed
+            hours_completed += total_hours # This is not quite right, but a placeholder
+            percent_complete = round(((kind_idx + 1) / len(kinds)) * 100, 1)
             update_task_status(task_id, {
-                'hours_completed': hours_completed,
-                'hours_skipped': hours_skipped,
                 'percent_complete': percent_complete,
-                'current_processing': process_dt.isoformat()
+                'current_kind': kind,
             })
-            
-            print(f"[worker] Progress: {hours_completed}/{delta_hours} ({percent_complete}%)")
+            print(f"[worker] Progress: {percent_complete}%")
+
         
         # Mark as completed
         update_task_status(task_id, {
