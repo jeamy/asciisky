@@ -475,36 +475,42 @@ export class SkyRenderer {
         }
     }
 
-    // Hilfsfunktion: Entfernt numerische Bezeichnungen wie "(4) Vesta" -> "Vesta" und lokalisiert
+    // Hilfsfunktion: Bereinigt und lokalisiert den Anzeigenamen von Himmelskörpern
     getLocalizedDisplayName(name) {
         try {
             if (!name) return '';
             let s = String(name).trim();
 
-            // 1) Entferne doppelte Namenssegmente, die mit einem Bullet getrennt sind, z.B. "(4) Vesta • (4) Vesta"
+            // Für Kometen, extrahiere den gebräuchlichen Namen, falls vorhanden (z.B. in Klammern)
+            const cometMatch = s.match(/\(([^)]+)\)/);
+            if (cometMatch) {
+                return cometMatch[1]; // Gibt den Teil in Klammern zurück, z.B. "NEOWISE"
+            }
+
+            // Entferne doppelte Namenssegmente, die mit einem Bullet getrennt sind
             if (s.includes('•')) {
-                const parts = s.split('•')
-                    .map(p => p.trim())
-                    .filter(Boolean);
-                // Wähle den längsten Teil (meist ohne führende/abschließende Artefakte)
+                const parts = s.split('•').map(p => p.trim()).filter(Boolean);
                 if (parts.length > 0) {
                     parts.sort((a, b) => b.length - a.length);
                     s = parts[0];
                 }
             }
 
-            // 2) Entferne führende nummerische Bezeichnungen
-            //    a) "(4) Vesta" -> "Vesta"
-            s = s.replace(/^\(\s*\d+\s*\)\s*/, '');
-            //    b) "4 Vesta" oder "0004 Vesta" -> "Vesta"
-            s = s.replace(/^\d+\s+/, '');
+            // Entferne führende nummerische Bezeichnungen und Präfixe
+            s = s.replace(/^\(\s*\d+\s*\)\s*/, ''); // (4) Vesta -> Vesta
+            s = s.replace(/^\d+\s+/, ''); // 4 Vesta -> Vesta
+            s = s.replace(/^[A-Z]\/\d{4}\s[A-Z]\d+\s*/, ''); // C/2020 F3 -> (leerer String, wenn kein Name folgt)
 
-            // 3) Falls der Name exakt doppelt vorkommt (mit Leerzeichen), reduziere auf einmal
-            //    Beispiel: "Vesta Vesta" -> "Vesta"
+            // Falls der Name exakt doppelt vorkommt, reduziere
             s = s.replace(/^(.+?)\s+\1$/, '$1');
 
-            // 4) Mehrfache Whitespaces bereinigen
+            // Mehrfache Whitespaces bereinigen
             s = s.replace(/\s+/g, ' ').trim();
+
+            // Wenn nach der Bereinigung nichts übrig bleibt, den Originalnamen verwenden
+            if (s === '') {
+                s = String(name).trim();
+            }
 
             return t(s) || s;
         } catch (_) {
@@ -566,7 +572,8 @@ export class SkyRenderer {
     }
     
     highlightObject(objectName) {
-        // Setze das ausgewählte Objekt, ohne einen Dialog anzuzeigen
+        // Setzt das ausgewählte Objekt und rendert es neu, um das Label im Himmel anzuzeigen,
+        // ohne jedoch einen neuen Dialog zu öffnen.
         this.selectObject(objectName, false);
     }
     
