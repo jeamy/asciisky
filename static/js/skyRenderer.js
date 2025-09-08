@@ -599,62 +599,38 @@ export class SkyRenderer {
     setupEventListeners() {
         // Handle click on the sky to select objects
         this.container.addEventListener('click', (e) => {
-            console.log('Click event detected on sky container');
             const rect = this.container.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
-            // Convert click coordinates to grid position
+
             const colWidth = rect.width / CONFIG.SKY_WIDTH;
             const rowHeight = rect.height / CONFIG.SKY_HEIGHT;
-            
-            const col = Math.floor(x / colWidth);
-            const row = Math.floor(y / rowHeight);
-            
-            console.log(`Click at position: row=${row}, col=${col}`);
-            console.log(`Sky content at position: ${this.sky[row]?.[col]}`);
-            
-            // Prüfe, ob der Klick auf ein überlappendes Symbol (*) erfolgte
-            const isOverlappingSymbol = this.sky[row]?.[col] === '*';
-            
-            // Direkter Zugriff auf die Himmelskörper und Prüfung der Nähe zum Klick
+
+            // Check if the click was on the menu or arrows, if so, ignore.
+            if (e.target.closest('#object-list, #navigation-arrows, #object-dialog')) {
+                console.log('Click detected in UI element, ignoring for object selection.');
+                return;
+            }
+
             if (this.celestialData) {
-                // Sammle alle Objekte in der Nähe des Klicks
                 const nearbyObjects = [];
-                const maxDistance = isOverlappingSymbol ? 0.5 : 5; // Kleinere Distanz für überlappende Objekte
-                
-                // Prüfe, ob der Klick im Menübereich war
-                const isMenuClick = document.getElementById('object-list')?.contains(e.target);
-                if (isMenuClick) {
-                    console.log('Click detected in menu area, not showing dialog');
-                    return; // Beende die Funktion, wenn im Menü geklickt wurde
-                }
-                
+                // Set maxDistance to 1.5 times the diagonal of a character cell for a more precise click area
+                const maxDistance = Math.sqrt(colWidth * colWidth + rowHeight * rowHeight) * 1.5;
+
                 for (const [name, obj] of Object.entries(this.celestialData.bodies)) {
-                    // Berücksichtige Sichtbarkeit basierend auf Höhe und Konfiguration
                     if (CONFIG.SHOW_BELOW_HORIZON || obj.altitude >= 0) {
-                        // Verwende die gespeicherte Position, wenn vorhanden
-                        const objRow = obj.displayRow !== undefined ? obj.displayRow : 
-                            (obj.altitude >= 0) ? 
-                                Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
-                                Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
-                        
-                        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
-                        
-                        // Normalisiere den Azimut auf den Bereich 0-360
-                        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
-                        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
-                        
-                        const objCol = obj.displayCol !== undefined ? obj.displayCol :
-                            Math.round((effectiveAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
-                        
-                        // Berechne Distanz zum Klick
-                        const distance = Math.sqrt(Math.pow(row - objRow, 2) + Math.pow(col - objCol, 2));
-                        console.log(`Distance to ${name}: ${distance} (at row=${objRow}, col=${objCol})`);
-                        
-                        // Bei überlappenden Objekten oder wenn die Distanz klein genug ist
-                        if (distance <= maxDistance || 
-                            (isOverlappingSymbol && objRow === row && objCol === col)) {
+                        if (obj.displayRow === undefined || obj.displayCol === undefined) {
+                            continue; // Skip objects that are not rendered
+                        }
+
+                        // Calculate the object's center in pixel coordinates
+                        const objPixelX = (obj.displayCol + 0.5) * colWidth;
+                        const objPixelY = (obj.displayRow + 0.5) * rowHeight;
+
+                        // Calculate distance in pixels from the click to the object's center
+                        const distance = Math.sqrt(Math.pow(x - objPixelX, 2) + Math.pow(y - objPixelY, 2));
+
+                        if (distance <= maxDistance) {
                             nearbyObjects.push({
                                 name,
                                 obj,
@@ -663,38 +639,32 @@ export class SkyRenderer {
                         }
                     }
                 }
-                
-                // Sortiere nach Distanz
-                nearbyObjects.sort((a, b) => a.distance - b.distance);
 
-                // Entferne Duplikate (gleicher Objektname, nach Normalisierung), behalte den nächsten Eintrag
-                const seenNames = new Set();
-                const uniqueNearby = [];
-                for (const item of nearbyObjects) {
-                    const rawName = item.obj && item.obj.name ? item.obj.name : item.name;
-                    const key = this.normalizeNameKey(rawName);
-                    if (!seenNames.has(key)) {
-                        seenNames.add(key);
-                        uniqueNearby.push(item);
+                if (nearbyObjects.length > 0) {
+                    // Sort by distance to find the closest object
+                    nearbyObjects.sort((a, b) => a.distance - b.distance);
+
+                    // Remove duplicates, keeping the closest one
+                    const seenNames = new Set();
+                    const uniqueNearby = [];
+                    for (const item of nearbyObjects) {
+                        const key = this.normalizeNameKey(item.obj.name);
+                        if (!seenNames.has(key)) {
+                            seenNames.add(key);
+                            uniqueNearby.push(item);
+                        }
                     }
-                }
-                
-                if (uniqueNearby.length > 0) {
-                    console.log(`Found ${uniqueNearby.length} nearby objects:`, 
-                        uniqueNearby.map(item => item.name).join(', '));
-                    
+
                     if (uniqueNearby.length === 1) {
-                        // Nur ein Objekt gefunden
                         this.selectObject(uniqueNearby[0].name, true);
                     } else {
-                        // Mehrere Objekte gefunden - zeige Dialog mit allen Objekten
                         this.showMultiObjectDialog(uniqueNearby.map(item => item.obj));
                     }
                     return;
                 }
             }
-            
-            // Wenn kein Objekt in der Nähe gefunden wurde
+
+            // If no object was found nearby, clear the selection
             console.log('No object near click position, clearing selection');
             this.clearSelection();
         });
