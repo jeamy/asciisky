@@ -37,6 +37,9 @@ app = FastAPI(title="AsciiSky API", description="API für die ASCII-Darstellung 
 SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET", "dev-secret-please-change")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
+# Global dict to store info about running and completed precompute tasks
+app.precompute_tasks = {}
+
 # Helper function to get location from request, query params, or settings
 async def get_location_from_request(request: Request, lat: float = None, lon: float = None, elevation: float = None) -> Dict[str, Any]:
     """
@@ -446,8 +449,13 @@ async def trigger_background_precompute_window(lat: float, lon: float, elevation
             print(f"Started background window worker process for task {task_id} (PID: {process.pid})")
             
             # Store process info for monitoring
-            task_info[task_id]['worker_process'] = True
-            task_info[task_id]['worker_pid'] = process.pid
+            app.precompute_tasks[task_id] = {
+                'id': task_id,
+                'status': 'starting',
+                'start_time': datetime.now(timezone.utc).isoformat(),
+                'worker_process': True,
+            }
+            app.precompute_tasks[task_id]['worker_pid'] = process.pid
             
         except Exception as e:
             print(f"Failed to start background window worker: {e}")
@@ -496,7 +504,7 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
         app.precompute_tasks[task_id] = {
             'id': task_id,
             'status': 'starting',
-            'start_time': datetime.now(timezone.utc),
+            'start_time': datetime.now(timezone.utc).isoformat(),
             'location': {'lat': lat, 'lon': lon, 'elevation': elevation},
             'date_range': {'start': start_dt_utc.isoformat(), 'end': end_dt_utc.isoformat()},
             'hours_total': delta_hours,
@@ -660,8 +668,7 @@ async def trigger_background_precompute_range(lat: float, lon: float, elevation:
             print(f"Started background worker process for task {task_id} (PID: {process.pid})")
             
             # Store process info for monitoring
-            task_info[task_id]['worker_process'] = True
-            task_info[task_id]['worker_pid'] = process.pid
+            app.precompute_tasks[task_id]['worker_pid'] = process.pid
             
         except Exception as e:
             print(f"Failed to start background worker: {e}")
