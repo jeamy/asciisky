@@ -475,42 +475,36 @@ export class SkyRenderer {
         }
     }
 
-    // Hilfsfunktion: Bereinigt und lokalisiert den Anzeigenamen von Himmelskörpern
+    // Hilfsfunktion: Entfernt numerische Bezeichnungen wie "(4) Vesta" -> "Vesta" und lokalisiert
     getLocalizedDisplayName(name) {
         try {
             if (!name) return '';
             let s = String(name).trim();
 
-            // Für Kometen, extrahiere den gebräuchlichen Namen, falls vorhanden (z.B. in Klammern)
-            const cometMatch = s.match(/\(([^)]+)\)/);
-            if (cometMatch) {
-                return cometMatch[1]; // Gibt den Teil in Klammern zurück, z.B. "NEOWISE"
-            }
-
-            // Entferne doppelte Namenssegmente, die mit einem Bullet getrennt sind
+            // 1) Entferne doppelte Namenssegmente, die mit einem Bullet getrennt sind, z.B. "(4) Vesta • (4) Vesta"
             if (s.includes('•')) {
-                const parts = s.split('•').map(p => p.trim()).filter(Boolean);
+                const parts = s.split('•')
+                    .map(p => p.trim())
+                    .filter(Boolean);
+                // Wähle den längsten Teil (meist ohne führende/abschließende Artefakte)
                 if (parts.length > 0) {
                     parts.sort((a, b) => b.length - a.length);
                     s = parts[0];
                 }
             }
 
-            // Entferne führende nummerische Bezeichnungen und Präfixe
-            s = s.replace(/^\(\s*\d+\s*\)\s*/, ''); // (4) Vesta -> Vesta
-            s = s.replace(/^\d+\s+/, ''); // 4 Vesta -> Vesta
-            s = s.replace(/^[A-Z]\/\d{4}\s[A-Z]\d+\s*/, ''); // C/2020 F3 -> (leerer String, wenn kein Name folgt)
+            // 2) Entferne führende nummerische Bezeichnungen
+            //    a) "(4) Vesta" -> "Vesta"
+            s = s.replace(/^\(\s*\d+\s*\)\s*/, '');
+            //    b) "4 Vesta" oder "0004 Vesta" -> "Vesta"
+            s = s.replace(/^\d+\s+/, '');
 
-            // Falls der Name exakt doppelt vorkommt, reduziere
+            // 3) Falls der Name exakt doppelt vorkommt (mit Leerzeichen), reduziere auf einmal
+            //    Beispiel: "Vesta Vesta" -> "Vesta"
             s = s.replace(/^(.+?)\s+\1$/, '$1');
 
-            // Mehrfache Whitespaces bereinigen
+            // 4) Mehrfache Whitespaces bereinigen
             s = s.replace(/\s+/g, ' ').trim();
-
-            // Wenn nach der Bereinigung nichts übrig bleibt, den Originalnamen verwenden
-            if (s === '') {
-                s = String(name).trim();
-            }
 
             return t(s) || s;
         } catch (_) {
@@ -572,8 +566,7 @@ export class SkyRenderer {
     }
     
     highlightObject(objectName) {
-        // Setzt das ausgewählte Objekt und rendert es neu, um das Label im Himmel anzuzeigen,
-        // ohne jedoch einen neuen Dialog zu öffnen.
+        // Setze das ausgewählte Objekt, ohne einen Dialog anzuzeigen
         this.selectObject(objectName, false);
     }
     
@@ -606,38 +599,62 @@ export class SkyRenderer {
     setupEventListeners() {
         // Handle click on the sky to select objects
         this.container.addEventListener('click', (e) => {
+            console.log('Click event detected on sky container');
             const rect = this.container.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Convert click coordinates to grid position
             const colWidth = rect.width / CONFIG.SKY_WIDTH;
             const rowHeight = rect.height / CONFIG.SKY_HEIGHT;
 
-            // Check if the click was on the menu or arrows, if so, ignore.
-            if (e.target.closest('#object-list, #navigation-arrows, #object-dialog')) {
-                console.log('Click detected in UI element, ignoring for object selection.');
-                return;
-            }
+            const col = Math.floor(x / colWidth);
+            const row = Math.floor(y / rowHeight);
 
+            console.log(`Click at position: row=${row}, col=${col}`);
+            console.log(`Sky content at position: ${this.sky[row]?.[col]}`);
+
+            // Prüfe, ob der Klick auf ein überlappendes Symbol (*) erfolgte
+            const isOverlappingSymbol = this.sky[row]?.[col] === '*';
+
+            // Direkter Zugriff auf die Himmelskörper und Prüfung der Nähe zum Klick
             if (this.celestialData) {
+                // Sammle alle Objekte in der Nähe des Klicks
                 const nearbyObjects = [];
-                // Set maxDistance to 1.5 times the diagonal of a character cell for a more precise click area
-                const maxDistance = Math.sqrt(colWidth * colWidth + rowHeight * rowHeight) * 1.5;
+                const maxDistance = isOverlappingSymbol ? 0.5 : 5; // Kleinere Distanz für überlappende Objekte
+
+                // Prüfe, ob der Klick im Menübereich war
+                const isMenuClick = document.getElementById('object-list')?.contains(e.target);
+                if (isMenuClick) {
+                    console.log('Click detected in menu area, not showing dialog');
+                    return; // Beende die Funktion, wenn im Menü geklickt wurde
+                }
 
                 for (const [name, obj] of Object.entries(this.celestialData.bodies)) {
+                    // Berücksichtige Sichtbarkeit basierend auf Höhe und Konfiguration
                     if (CONFIG.SHOW_BELOW_HORIZON || obj.altitude >= 0) {
-                        if (obj.displayRow === undefined || obj.displayCol === undefined) {
-                            continue; // Skip objects that are not rendered
-                        }
+                        // Verwende die gespeicherte Position, wenn vorhanden
+                        const objRow = obj.displayRow !== undefined ? obj.displayRow :
+                            (obj.altitude >= 0) ?
+                                Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
+                                Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
 
-                        // Calculate the object's center in pixel coordinates
-                        const objPixelX = (obj.displayCol + 0.5) * colWidth;
-                        const objPixelY = (obj.displayRow + 0.5) * rowHeight;
+                        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
 
-                        // Calculate distance in pixels from the click to the object's center
-                        const distance = Math.sqrt(Math.pow(x - objPixelX, 2) + Math.pow(y - objPixelY, 2));
+                        // Normalisiere den Azimut auf den Bereich 0-360
+                        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+                        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
 
-                        if (distance <= maxDistance) {
+                        const objCol = obj.displayCol !== undefined ? obj.displayCol :
+                            Math.round((effectiveAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
+
+                        // Berechne Distanz zum Klick
+                        const distance = Math.sqrt(Math.pow(row - objRow, 2) + Math.pow(col - objCol, 2));
+                        console.log(`Distance to ${name}: ${distance} (at row=${objRow}, col=${objCol})`);
+
+                        // Bei überlappenden Objekten oder wenn die Distanz klein genug ist
+                        if (distance <= maxDistance ||
+                            (isOverlappingSymbol && objRow === row && objCol === col)) {
                             nearbyObjects.push({
                                 name,
                                 obj,
@@ -647,31 +664,37 @@ export class SkyRenderer {
                     }
                 }
 
-                if (nearbyObjects.length > 0) {
-                    // Sort by distance to find the closest object
-                    nearbyObjects.sort((a, b) => a.distance - b.distance);
+                // Sortiere nach Distanz
+                nearbyObjects.sort((a, b) => a.distance - b.distance);
 
-                    // Remove duplicates, keeping the closest one
-                    const seenNames = new Set();
-                    const uniqueNearby = [];
-                    for (const item of nearbyObjects) {
-                        const key = this.normalizeNameKey(item.obj.name);
-                        if (!seenNames.has(key)) {
-                            seenNames.add(key);
-                            uniqueNearby.push(item);
-                        }
+                // Entferne Duplikate (gleicher Objektname, nach Normalisierung), behalte den nächsten Eintrag
+                const seenNames = new Set();
+                const uniqueNearby = [];
+                for (const item of nearbyObjects) {
+                    const rawName = item.obj && item.obj.name ? item.obj.name : item.name;
+                    const key = this.normalizeNameKey(rawName);
+                    if (!seenNames.has(key)) {
+                        seenNames.add(key);
+                        uniqueNearby.push(item);
                     }
+                }
+
+                if (uniqueNearby.length > 0) {
+                    console.log(`Found ${uniqueNearby.length} nearby objects:`,
+                        uniqueNearby.map(item => item.name).join(', '));
 
                     if (uniqueNearby.length === 1) {
+                        // Nur ein Objekt gefunden
                         this.selectObject(uniqueNearby[0].name, true);
                     } else {
+                        // Mehrere Objekte gefunden - zeige Dialog mit allen Objekten
                         this.showMultiObjectDialog(uniqueNearby.map(item => item.obj));
                     }
                     return;
                 }
             }
 
-            // If no object was found nearby, clear the selection
+            // Wenn kein Objekt in der Nähe gefunden wurde
             console.log('No object near click position, clearing selection');
             this.clearSelection();
         });
