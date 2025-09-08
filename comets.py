@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import pandas as pd
-import numpy as np
 from skyfield import almanac
 from skyfield.api import Loader, wgs84
 from skyfield.data import mpc
