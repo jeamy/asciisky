@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import settings
 import bright_asteroids
 import comets
+from api.computation import ts, eph
 from cache_utils import (
     build_cache_path,
     normalize_location,
@@ -52,9 +53,7 @@ from db_utils import (
     cleanup_old_positions
 )
 
-# Import compute function and Skyfield loading context from main
-# This avoids duplicating celestial computation logic.
-import main as webapp
+# Skyfield objects are imported from api.computation
 
 
 def _now_utc() -> datetime:
@@ -270,7 +269,8 @@ def ensure_celestial(lat: float, lon: float, elevation: float, dt_utc: datetime)
     if os.path.exists(path):
         return False
     try:
-        snapshot = webapp.compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+        from api.computation import compute_celestial_snapshot
+        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
         atomic_write_pickle(path, snapshot)
         print(f"[celestial] wrote {path}")
         return True
@@ -303,8 +303,9 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
         # Module will write to both SQLite and pickle cache
+        from api.computation import LOADER
         asteroid_list = bright_asteroids.load_bright_asteroids(
-            webapp.LOADER, webapp.ts, webapp.eph, location,
+            LOADER, ts, eph, location,
             max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
             use_cache=True, current_dt=dt_utc
         )
@@ -345,7 +346,7 @@ def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) ->
     
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
-        comet_list = comets.load_comets(webapp.ts, webapp.eph, location, use_cache=True, current_dt=dt_utc)
+        comet_list = comets.load_comets(ts, eph, location, use_cache=True, current_dt=dt_utc)
         
         if comets.COMET_USE_SQLITE:
             print(f"[comets] wrote SQLite cache for {loc_key}/{time_bucket} ({len(comet_list)} objects)")
