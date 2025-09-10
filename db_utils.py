@@ -17,18 +17,26 @@ DB_VERSION = 2
 
 # Thread-local storage for database connections
 _thread_local = threading.local()
+_connection_counter = 0
+_connection_lock = threading.Lock()
 
 def get_db_connection() -> sqlite3.Connection:
     """Get thread-local database connection with proper configuration."""
-    if not hasattr(_thread_local, 'connection'):
+    global _connection_counter
+    
+    if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row  # Enable dict-like access
         # Skip WAL mode in Docker to avoid I/O issues
         conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/performance
-        conn.execute("PRAGMA cache_size=10000")  # 10MB cache
+        conn.execute("PRAGMA cache_size=2000")  # Reduce cache size to 2MB
         conn.execute("PRAGMA temp_store=MEMORY")  # Use RAM for temp tables
         _thread_local.connection = conn
+        
+        # Track connection count for debugging
+        with _connection_lock:
+            _connection_counter += 1
         
         # Initialize schema if needed
         init_database(conn)
@@ -237,13 +245,16 @@ def get_asteroids_by_magnitude(max_h_magnitude: float, limit: int = 1000) -> Lis
         LIMIT ?
     """, (max_h_magnitude, limit))
     
-    return cursor.fetchall()
+    result = cursor.fetchall()
+    cursor.close()
+    return result
 
 def get_asteroid_orbit_data(asteroid_id: int) -> Optional[Any]:
     """Get deserialized orbit data for Skyfield calculations."""
     conn = get_db_connection()
     cursor = conn.execute("SELECT orbit_data FROM asteroids WHERE id = ?", (asteroid_id,))
     row = cursor.fetchone()
+    cursor.close()
     
     if row and row['orbit_data']:
         return pickle.loads(row['orbit_data'])
@@ -290,6 +301,7 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
             if isinstance(positions, list):
                 all_positions.extend(positions)
     
+    cursor.close()
     return all_positions if all_positions else None
 
 def cleanup_old_positions(retention_days: int = 30) -> int:
@@ -359,7 +371,9 @@ def get_comets_by_magnitude(max_h_magnitude: float, limit: int = 1000) -> List[s
         LIMIT ?
     """, (max_h_magnitude, limit))
     
-    return cursor.fetchall()
+    result = cursor.fetchall()
+    cursor.close()
+    return result
 
 def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                          observer_lat: float, observer_lon: float, observer_elevation: float,
@@ -396,6 +410,8 @@ def get_comet_positions(location_key: str, time_bucket: str,
     """, (str(location_key), str(time_bucket), str(cutoff_time)))
     
     row = cursor.fetchone()
+    cursor.close()
+    
     if row and row['position_data']:
         return pickle.loads(row['position_data'])
     
@@ -436,6 +452,8 @@ def get_celestial_snapshot(location_key: str, time_bucket: str,
     """, (str(location_key), str(time_bucket), str(cutoff_time)))
     
     row = cursor.fetchone()
+    cursor.close()
+    
     if row and row['snapshot_data']:
         return pickle.loads(row['snapshot_data'])
     
@@ -481,21 +499,26 @@ def get_database_stats() -> Dict[str, Any]:
     # Count asteroids
     cursor = conn.execute("SELECT COUNT(*) as count FROM asteroids")
     stats['asteroids_count'] = cursor.fetchone()['count']
+    cursor.close()
     
     # Count comets
     cursor = conn.execute("SELECT COUNT(*) as count FROM comets")
     stats['comets_count'] = cursor.fetchone()['count']
+    cursor.close()
     
     # Count position cache entries
     cursor = conn.execute("SELECT COUNT(*) as count FROM asteroid_positions")
     stats['positions_count'] = cursor.fetchone()['count']
+    cursor.close()
     
     cursor = conn.execute("SELECT COUNT(*) as count FROM comet_positions")
     stats['comet_positions_count'] = cursor.fetchone()['count']
+    cursor.close()
     
     # Count celestial snapshots
     cursor = conn.execute("SELECT COUNT(*) as count FROM celestial_snapshots")
     stats['celestial_snapshots_count'] = cursor.fetchone()['count']
+    cursor.close()
     
     # Database file size
     if os.path.exists(DB_PATH):
@@ -511,6 +534,11 @@ def get_database_stats() -> Dict[str, Any]:
     row = cursor.fetchone()
     stats['cache_oldest'] = row['oldest']
     stats['cache_newest'] = row['newest']
+    cursor.close()
+    
+    # Add connection counter for debugging
+    with _connection_lock:
+        stats['db_connections'] = _connection_counter
     
     return stats
 
@@ -542,3 +570,13 @@ def migrate_from_pickle_cache() -> Dict[str, int]:
     # This would scan the directory structure and convert pickle files to DB entries
     
     return migration_stats
+
+
+def close_db_connection():
+    """Close the thread-local database connection if it exists."""
+    if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
+        try:
+            _thread_local.connection.close()
+            _thread_local.connection = None
+        except Exception as e:
+            print(f"Error closing database connection: {e}")

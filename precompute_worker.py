@@ -30,6 +30,7 @@ import json
 import time
 import traceback
 import psutil
+import gc
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -374,43 +375,54 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
     # Group hours into batches for more efficient processing
     hour_batches = [hours[i:i + batch_size] for i in range(0, len(hours), batch_size)]
     
-    for batch_idx, hour_batch in enumerate(hour_batches):
-        for kind in kinds:
-            # Check which hours in this batch need processing
-            hours_to_process = []
-            for dt in hour_batch:
-                if kind == "celestial":
-                    path = build_cache_path("celestial", lat, lon, elevation, dt=dt, bucket_hours=1)
-                elif kind == "asteroids":
-                    path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-                elif kind == "comets":
-                    path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-                else:
-                    continue
-                    
-                checked += 1
-                if not os.path.exists(path):
-                    hours_to_process.append(dt)
-            
-            # Process all missing hours for this kind in batch
-            if hours_to_process:
-                try:
+    try:
+        for batch_idx, hour_batch in enumerate(hour_batches):
+            for kind in kinds:
+                # Check which hours in this batch need processing
+                hours_to_process = []
+                for dt in hour_batch:
                     if kind == "celestial":
-                        for dt in hours_to_process:
-                            if ensure_celestial(lat, lon, elevation, dt):
-                                created += 1
+                        path = build_cache_path("celestial", lat, lon, elevation, dt=dt, bucket_hours=1)
                     elif kind == "asteroids":
-                        # For asteroids/comets, we still process individually due to their caching logic
-                        for dt in hours_to_process:
-                            if ensure_asteroids(lat, lon, elevation, dt):
-                                created += 1
+                        path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
                     elif kind == "comets":
-                        for dt in hours_to_process:
-                            if ensure_comets(lat, lon, elevation, dt):
-                                created += 1
-                except Exception:
-                    print(f"[{kind}] batch error for {label} (batch {batch_idx + 1})")
-                    traceback.print_exc()
+                        path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                    else:
+                        continue
+                        
+                    checked += 1
+                    if not os.path.exists(path):
+                        hours_to_process.append(dt)
+                
+                # Process all missing hours for this kind in batch
+                if hours_to_process:
+                    try:
+                        if kind == "celestial":
+                            for dt in hours_to_process:
+                                if ensure_celestial(lat, lon, elevation, dt):
+                                    created += 1
+                        elif kind == "asteroids":
+                            # For asteroids/comets, we still process individually due to their caching logic
+                            for dt in hours_to_process:
+                                if ensure_asteroids(lat, lon, elevation, dt):
+                                    created += 1
+                        elif kind == "comets":
+                            for dt in hours_to_process:
+                                if ensure_comets(lat, lon, elevation, dt):
+                                    created += 1
+                    except Exception:
+                        print(f"[{kind}] batch error for {label} (batch {batch_idx + 1})")
+                        traceback.print_exc()
+                        
+                # Explicitly clean up memory after each kind
+                gc.collect()
+    except Exception as e:
+        print(f"Error processing location {label}: {e}")
+        traceback.print_exc()
+    finally:
+        # Clean up database connections
+        from db_utils import close_db_connection
+        close_db_connection()
     
     print(f"  - done {label} (created={created}, checked={checked})")
     return created, checked
@@ -440,46 +452,60 @@ def precompute_sweep_prioritized(kinds: List[str], horizon_hours: int, base_work
 
     print(f"Precompute sweep start: {len(locations)} locations, {len(high_priority_hours)}+{len(low_priority_hours)} hours, kinds={kinds}")
 
-    # Process high priority hours first (current + next 6h)
-    if high_priority_hours:
-        print(f"Processing HIGH PRIORITY hours ({len(high_priority_hours)}h) with {workers} workers...")
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            future_to_location = {
-                executor.submit(_process_location_batch, loc, high_priority_hours, kinds, 3): loc
-                for loc in locations
-            }
+    try:
+        # Process high priority hours first (current + next 6h)
+        if high_priority_hours:
+            print(f"Processing HIGH PRIORITY hours ({len(high_priority_hours)}h) with {workers} workers...")
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                future_to_location = {
+                    executor.submit(_process_location_batch, loc, high_priority_hours, kinds, 3): loc
+                    for loc in locations
+                }
+                
+                for future in as_completed(future_to_location):
+                    loc = future_to_location[future]
+                    try:
+                        created, checked = future.result()
+                        total_created += created
+                        total_checked += checked
+                    except Exception:
+                        label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
+                        print(f"[ERROR] Failed to process high priority for location {label}")
+                        traceback.print_exc()
             
-            for future in as_completed(future_to_location):
-                loc = future_to_location[future]
-                try:
-                    created, checked = future.result()
-                    total_created += created
-                    total_checked += checked
-                except Exception:
-                    label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
-                    print(f"[ERROR] Failed to process high priority for location {label}")
-                    traceback.print_exc()
+            # Force garbage collection after high priority batch
+            gc.collect()
 
-    # Process low priority hours with potentially fewer workers
-    if low_priority_hours:
-        low_workers = max(1, workers // 2)  # Use fewer workers for low priority
-        print(f"Processing LOW PRIORITY hours ({len(low_priority_hours)}h) with {low_workers} workers...")
-        with ThreadPoolExecutor(max_workers=low_workers) as executor:
-            future_to_location = {
-                executor.submit(_process_location_batch, loc, low_priority_hours, kinds, 12): loc
-                for loc in locations
-            }
+        # Process low priority hours with potentially fewer workers
+        if low_priority_hours:
+            low_workers = max(1, workers // 2)  # Use fewer workers for low priority
+            print(f"Processing LOW PRIORITY hours ({len(low_priority_hours)}h) with {low_workers} workers...")
+            with ThreadPoolExecutor(max_workers=low_workers) as executor:
+                future_to_location = {
+                    executor.submit(_process_location_batch, loc, low_priority_hours, kinds, 12): loc
+                    for loc in locations
+                }
+                
+                for future in as_completed(future_to_location):
+                    loc = future_to_location[future]
+                    try:
+                        created, checked = future.result()
+                        total_created += created
+                        total_checked += checked
+                    except Exception:
+                        label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
+                        print(f"[ERROR] Failed to process low priority for location {label}")
+                        traceback.print_exc()
             
-            for future in as_completed(future_to_location):
-                loc = future_to_location[future]
-                try:
-                    created, checked = future.result()
-                    total_created += created
-                    total_checked += checked
-                except Exception:
-                    label = loc.get("name") or f"{loc['latitude']:.4f},{loc['longitude']:.4f}"
-                    print(f"[ERROR] Failed to process low priority for location {label}")
-                    traceback.print_exc()
+            # Force garbage collection after low priority batch
+            gc.collect()
+    except Exception as e:
+        print(f"Error in precompute sweep: {e}")
+        traceback.print_exc()
+    finally:
+        # Clean up any remaining database connections
+        from db_utils import close_db_connection
+        close_db_connection()
 
     print(f"Precompute sweep complete: created={total_created}, checked={total_checked}")
     return total_created, total_checked
@@ -608,6 +634,8 @@ def main() -> None:
             print(f"  SQLite database: {db_stats['asteroids_count']} asteroids, {db_stats['positions_count']} cached positions")
             if db_stats.get('db_size_mb'):
                 print(f"  Database size: {db_stats['db_size_mb']:.1f} MB")
+            if db_stats.get('db_connections'):
+                print(f"  Database connections: {db_stats['db_connections']}")
         except Exception as e:
             print(f"  SQLite database status: error ({e})")
     if retention_days and retention_days > 0:
@@ -618,6 +646,8 @@ def main() -> None:
     # Initial sweep immediately
     try:
         precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
+        # Force garbage collection after sweep
+        gc.collect()
     except Exception:
         traceback.print_exc()
 
@@ -625,24 +655,43 @@ def main() -> None:
     try:
         if retention_days and retention_days > 0:
             prune_old_snapshots(retention_days)
+            # Force garbage collection after prune
+            gc.collect()
     except Exception:
         traceback.print_exc()
 
     if run_once:
         print("Run once mode set; exiting.")
+        # Final cleanup
+        from db_utils import close_db_connection
+        close_db_connection()
         return
 
     # Then loop hourly
     while True:
         try:
+            # Close database connections before sleeping
+            from db_utils import close_db_connection
+            close_db_connection()
+            
             sleep_s = seconds_until_next_hour()
             print(f"Sleeping {sleep_s}s until next hour...")
             time.sleep(sleep_s)
+            
+            # Run sweep
             precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
+            gc.collect()
+            
+            # Run prune if enabled
             if retention_days and retention_days > 0:
                 prune_old_snapshots(retention_days)
+                gc.collect()
+                
         except KeyboardInterrupt:
             print("Worker interrupted; exiting.")
+            # Final cleanup
+            from db_utils import close_db_connection
+            close_db_connection()
             break
         except Exception:
             traceback.print_exc()
