@@ -15,9 +15,10 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
 - Simulated time controls (optional): view the sky at a chosen UTC time
-  - Quick controls: hour back, reset to current time, hour forward
+  - Extended navigation controls: day back, hour back, reset to current time, hour forward, day forward
   - Clickable time display for entering any custom date and time
   - Frontend appends `?time=<ISO8601>` to API calls automatically when enabled
+  - Automatic background precomputation for smooth time navigation
 - Minimalist UI design with optimized space usage
 - Cache status panel showing precomputed data availability
 - Custom date range cache precomputation with progress tracking

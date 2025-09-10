@@ -180,6 +180,28 @@ The worker finds target locations from three sources:
 - **Update:** Hourly
 - **Strategy:** Forward if `dt >= now`, otherwise backward
 
+## Time Navigation and Background Precomputation
+
+### Automatic Precomputation Trigger
+
+When using the time navigation controls, the system automatically triggers background precomputation for the selected time window:
+
+1. **API Trigger**: All API endpoints (`/api/celestial`, `/api/bright_asteroids`, `/api/comets`) automatically trigger background precomputation when called
+2. **Time Parameter**: Even without explicit `time` parameter, the system precomputes data for future hours
+3. **Navigation Buttons**: The day/hour navigation buttons (`« ‹ + › »`) trigger precomputation for their respective time windows
+
+### Implementation
+
+```python
+# In API routes (celestial.py, asteroids.py, comets.py):
+await trigger_background_precompute_window(
+    request.app, lat, lon, elevation, dt_utc, 
+    kinds=['celestial','asteroids','comets']
+)
+```
+
+This ensures smooth time navigation by proactively generating cache data for the next 144 hours (configurable via `ASCII_SKY_PRECOMPUTE_HOURS`).
+
 ## API Integration
 
 ### Cache Status Endpoint

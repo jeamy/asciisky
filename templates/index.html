@@ -240,7 +240,7 @@
                 <h4>${t('help_controls') || 'Steuerung'}</h4>
                 <ul>
                     <li><strong>📍 ${t('location_button') || 'Standort-Button'}:</strong> ${t('help_location') || 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)'}</li>
-                    <li><strong>« + »:</strong> ${t('help_time_controls') || 'Zeitsteuerung - Stunde zurück, Jetzt (Echtzeit), Stunde vor'}</li>
+                    <li><strong>« ‹ + › »:</strong> ${t('help_time_controls') || 'Zeitsteuerung - Tag zurück, Stunde zurück, Jetzt (Echtzeit), Stunde vor, Tag vor'}</li>
                     <li><strong>${t('help_time_display') || 'Zeitanzeige'}:</strong> ${t('help_time_display_desc') || 'Klickbar, um ein beliebiges Datum und eine beliebige Uhrzeit für die Simulation einzugeben'}</li>
                     <li><strong>DE/EN:</strong> ${t('help_language') || 'Sprachwechsel zwischen Deutsch und Englisch'}</li>
                 </ul>
@@ -249,7 +249,22 @@
                 <ul>
                     <li><strong>${t('help_object_click') || 'Objekt anklicken'}:</strong> ${t('help_object_click_desc') || 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten'}</li>
                     <li><strong>${t('help_navigation') || 'Navigation'}:</strong> ${t('help_navigation_desc') || 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)'}</li>
-                    <li><strong>${t('help_symbols') || 'Symbole'}:</strong> ${t('help_symbols_desc') || '☉ Sonne, ☽ Mond, ☿♀♂♃♄ Planeten, • Asteroiden, ☄ Kometen'}</li>
+                    <li><strong>${t('help_symbols') || 'Symbole'}:</strong> ${t('help_symbols_desc') || 'Himmelsobjekte werden durch folgende Symbole dargestellt:'}</li>
+                </ul>
+                <div style="margin-left: 20px;">
+                    <table style="border-collapse: separate; border-spacing: 10px 5px;">
+                        <tr><td>☉</td><td>${t('symbol_sun') || 'Sonne'}</td></tr>
+                        <tr><td>☽</td><td>${t('symbol_moon') || 'Mond'}</td></tr>
+                        <tr><td>☿</td><td>${t('symbol_mercury') || 'Merkur'}</td></tr>
+                        <tr><td>♀</td><td>${t('symbol_venus') || 'Venus'}</td></tr>
+                        <tr><td>♂</td><td>${t('symbol_mars') || 'Mars'}</td></tr>
+                        <tr><td>♃</td><td>${t('symbol_jupiter') || 'Jupiter'}</td></tr>
+                        <tr><td>♄</td><td>${t('symbol_saturn') || 'Saturn'}</td></tr>
+                        <tr><td>•</td><td>${t('symbol_asteroid') || 'Asteroiden'}</td></tr>
+                        <tr><td>☄</td><td>${t('symbol_comet') || 'Kometen'}</td></tr>
+                    </table>
+                </div>
+                <ul>
                 </ul>
 
                 <h4>${t('help_object_list') || 'Objektliste'}</h4>
@@ -262,7 +277,15 @@
                 <p>${t('help_cache_precompute_desc') || 'Mit der Cache-Vorberechnung können Sie Himmelsdaten für einen bestimmten Zeitraum im Voraus berechnen lassen. Wählen Sie Start- und Enddatum und klicken Sie auf "Berechnung starten". Der Fortschritt wird angezeigt und die Daten stehen nach Abschluss für schnelle Anzeige zur Verfügung.'}</p>
 
                 <h4>${t('help_simulation') || 'Zeitsimulation'}</h4>
-                <p>${t('help_simulation_desc') || 'Simuliert verschiedene Zeitpunkte um Himmelsbewegungen zu verfolgen. Objekte bewegen sich entsprechend ihrer realen Bahnen.'}</p>
+                <p>${t('help_simulation_desc') || 'Simuliert verschiedene Zeitpunkte um Himmelsbewegungen zu verfolgen. Die Steuerelemente erlauben präzise Zeitnavigation:'}</p>
+                <ul>
+                    <li><strong>«</strong> ${t('help_day_minus') || 'Tag zurück (-24 Stunden)'}</li>
+                    <li><strong>‹</strong> ${t('help_hour_minus') || 'Stunde zurück (-1 Stunde)'}</li>
+                    <li><strong>+</strong> ${t('help_now') || 'Aktuelle Zeit (Echtzeit)'}</li>
+                    <li><strong>›</strong> ${t('help_hour_plus') || 'Stunde vor (+1 Stunde)'}</li>
+                    <li><strong>»</strong> ${t('help_day_plus') || 'Tag vor (+24 Stunden)'}</li>
+                </ul>
+                <p>${t('help_simulation_desc2') || 'Diese Zeitnavigation ermöglicht es, Himmelsbewegungen über längere Zeiträume zu verfolgen und astronomische Ereignisse wie Auf- und Untergänge zu beobachten.'}</p>
 
                 <h4>${t('help_location_change') || 'Ortswechsel'}</h4>
                 <p>${t('help_location_change_desc') || 'Beim ersten Wechsel zu einem neuen Ort kann die Berechnung länger dauern, da Himmelsdaten für diese Position erstmalig berechnet und zwischengespeichert werden müssen.'}</p>
