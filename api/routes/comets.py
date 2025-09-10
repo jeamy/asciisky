@@ -57,6 +57,10 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         for i, comet in enumerate(comet_list):
             if isinstance(comet, dict) and "name" in comet:
                 result["bodies"][f"comet_{i}_{comet['name']}"] = comet
+        
+        # Trigger background precompute for future hours even without time parameter
+        asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+        
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

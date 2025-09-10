@@ -73,6 +73,10 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
         cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
         store_cache_data(data=snapshot, cache_file=cache_file)
+        
+        # Trigger background precompute for future hours even without time parameter
+        await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])
+        
         return snapshot
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
