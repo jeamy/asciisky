@@ -1,13 +1,10 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
-from api.helpers import parse_time_param
+from api.helpers import parse_time_param, get_location_params
 from api.computation import LOADER, ts, eph
 from api.background import trigger_background_precompute_window
 import bright_asteroids
 import settings
-import os
-import pickle
-from cache_utils import build_cache_path, read_pickle_if_fresh
 import asyncio
 
 router = APIRouter()
@@ -16,11 +13,7 @@ router = APIRouter()
 async def get_bright_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
-        location_settings = settings.get_location()
-        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
-        if lat is None: lat = session_loc.get("latitude", location_settings["latitude"])
-        if lon is None: lon = session_loc.get("longitude", location_settings["longitude"])
-        if elevation is None: elevation = session_loc.get("elevation", location_settings["elevation"])
+        lat, lon, elevation = get_location_params(request, lat, lon, elevation)
 
         if save_location and lat is not None and lon is not None and elevation is not None:
             settings.set_location(lat, lon, elevation, location_name)
@@ -61,8 +54,4 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/asteroids")
-async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None):
-    """Get visible asteroids."""
-    # This endpoint is very similar to /bright_asteroids, could be merged in the future
-    return await get_bright_asteroids(request, lat, lon, elevation, location_name, save_location, time)
+# Removed redundant /asteroids endpoint - use /bright_asteroids instead
