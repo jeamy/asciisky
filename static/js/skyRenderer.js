@@ -987,8 +987,11 @@ export class SkyRenderer {
                 // Aktualisiere den Datenbereich
                 dataContainer.innerHTML = info.join('\n');
                 
-                // Hebe das entsprechende Objekt im Himmel hervor
-                this.highlightObject(objectName);
+                // Setze das ausgewählte Objekt für die Labelanzeige
+                this.selectedObject = selectedObject;
+                
+                // Hebe das entsprechende Objekt im Himmel hervor und zeige das Label an
+                this.render(); // Neu rendern, um das Label anzuzeigen
                 
                 // Markiere das ausgewählte Element in der Liste
                 listItems.forEach(item => {
