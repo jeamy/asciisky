@@ -35,11 +35,15 @@
     <!-- Magnitude-Filter wurden entfernt -->
 </div>
     
-<!-- Simulated Time Controls (compact): << + >> -->
-<div id="sim-time-controls" class="sim-time-controls sim-time-compact">
-    <button id="sim-hour-minus" class="sim-time-btn">&laquo;</button>
-    <button id="sim-now" class="sim-time-btn sim-time-now">+</button>
-    <button id="sim-hour-plus" class="sim-time-btn">&raquo;</button>
+<!-- Simulated Time Controls (extended): << < + > >> -->
+<div id="sim-time-controls" class="sim-time-controls sim-time-extended">
+    <div class="sim-time-buttons-wrapper">
+        <button id="sim-day-minus" class="sim-time-btn" title="-1 Tag">&laquo;</button>
+        <button id="sim-hour-minus" class="sim-time-btn" title="-1 Stunde">&lsaquo;</button>
+        <button id="sim-now" class="sim-time-btn sim-time-now" title="Jetzt">+</button>
+        <button id="sim-hour-plus" class="sim-time-btn" title="+1 Stunde">&rsaquo;</button>
+        <button id="sim-day-plus" class="sim-time-btn" title="+1 Tag">&raquo;</button>
+    </div>
     <div id="sim-time-local" class="sim-time-local">—</div>
 </div>
     
@@ -299,15 +303,17 @@
             });
         }
 
-        // Simulierte Zeit: kompakte UI (<< + >>)
+        // Simulierte Zeit: erweiterte UI (<< < + > >>)
         function setupSimTimeControls() {
             try {
+                const btnDayMinus = document.getElementById('sim-day-minus');
                 const btnHourMinus = document.getElementById('sim-hour-minus');
                 const btnNow = document.getElementById('sim-now');
                 const btnHourPlus = document.getElementById('sim-hour-plus');
+                const btnDayPlus = document.getElementById('sim-day-plus');
                 const timeDisplay = document.getElementById('sim-time-local');
 
-                if (!btnHourMinus || !btnNow || !btnHourPlus || !timeDisplay) return;
+                if (!btnDayMinus || !btnHourMinus || !btnNow || !btnHourPlus || !btnDayPlus || !timeDisplay) return;
                 
                 // Erstelle den TimeInputDialog
                 const timeInputDialog = new TimeInputDialog((offsetMinutes) => {
@@ -333,6 +339,11 @@
                     __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 };
 
+                // Siderischer Tag: 23h 56m 4s = 1436.067 Minuten
+                const SIDEREAL_DAY_MINUTES = 23 * 60 + 56 + 4/60; // 1436.067 Minuten
+                const SOLAR_DAY_MINUTES = 24 * 60; // 1440 Minuten
+
+                btnDayMinus.addEventListener('click', () => applyDelta(-SOLAR_DAY_MINUTES));
                 btnHourMinus.addEventListener('click', () => applyDelta(-60));
                 btnNow.addEventListener('click', () => {
                     settingsManager.setSimulatedTime(0);
@@ -344,6 +355,7 @@
                     __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
                 btnHourPlus.addEventListener('click', () => applyDelta(60));
+                btnDayPlus.addEventListener('click', () => applyDelta(SOLAR_DAY_MINUTES));
                 
                 // Mache die Zeitanzeige klickbar
                 timeDisplay.addEventListener('click', () => {
