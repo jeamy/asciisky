@@ -127,8 +127,34 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
         for loc_key_str, loc_data in dedup.items():
             counts, earliest, latest = {}, {}, {}
             for kind in kinds:
-                # ... (rest of the logic for scanning cache)
-                counts[kind] = 0 # Placeholder
+                counts[kind] = 0
+                earliest[kind] = None
+                latest[kind] = None
+                
+                # Scan cache directory for this kind and location
+                cache_dir = os.path.join(CACHE_ROOT, kind, loc_key_str)
+                if os.path.exists(cache_dir):
+                    try:
+                        bucket_files = [f for f in os.listdir(cache_dir) if f.endswith('.pkl')]
+                        counts[kind] = len(bucket_files)
+                        totals[kind] += counts[kind]
+                        
+                        if bucket_files:
+                            # Parse bucket timestamps to find earliest/latest
+                            bucket_times = []
+                            for bucket_file in bucket_files:
+                                bucket_name = bucket_file.replace('.pkl', '')
+                                bucket_dt = _parse_bucket(bucket_name)
+                                if bucket_dt:
+                                    bucket_times.append(bucket_dt)
+                            
+                            if bucket_times:
+                                bucket_times.sort()
+                                earliest[kind] = bucket_times[0].isoformat()
+                                latest[kind] = bucket_times[-1].isoformat()
+                    except Exception as e:
+                        print(f"Error scanning cache for {kind}/{loc_key_str}: {e}")
+                        
             locations_out.append({**loc_data, "loc_key": loc_key_str, "counts": counts, "earliest": earliest, "latest": latest})
 
         max_precompute_hours = int(os.environ.get("ASCII_SKY_MAX_PRECOMPUTE_HOURS", "168"))

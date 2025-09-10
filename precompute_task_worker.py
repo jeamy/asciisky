@@ -32,52 +32,79 @@ def _hour_floor(dt):
 
 def ensure_celestial_cache(lat, lon, elevation, dt_utc):
     """Ensure celestial cache exists for given location and time"""
-    # This is a simplified version - implement full celestial calculation
-    print(f"[worker] Generating celestial cache for {lat}, {lon} at {dt_utc}")
-    # Implementation would go here
-    return True
+    try:
+        # Import the computation module
+        from api.computation import compute_celestial_snapshot, ts, eph
+        
+        # Check if cache already exists
+        cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=1)
+        if os.path.exists(cache_file):
+            print(f"[worker] Celestial cache exists for {lat}, {lon} at {dt_utc}")
+            return True
+            
+        # Generate celestial snapshot
+        print(f"[worker] Generating celestial cache for {lat}, {lon} at {dt_utc}")
+        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+        
+        # Store in cache
+        atomic_write_pickle(cache_file, snapshot)
+        print(f"[worker] Stored celestial cache: {cache_file}")
+        
+        # Also store in database if available
+        if DB_AVAILABLE:
+            try:
+                from cache_utils import normalize_location, location_key, time_bucket_utc
+                lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                time_bucket = time_bucket_utc(dt_utc, 1)  # 1 hour buckets
+                store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
+                print(f"[worker] Stored celestial snapshot in database")
+            except Exception as e:
+                print(f"[worker] Failed to store celestial snapshot in database: {e}")
+        
+        return True
+    except Exception as e:
+        print(f"[worker] Error generating celestial cache: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def _ensure_asteroids_cache(lat, lon, elevation, dt_utc):
     """Ensure asteroid cache exists for given location and time"""
     try:
-        # Import skyfield objects
-        from skyfield.api import Loader, wgs84
-        from skyfield.data import mpc
+        # Import skyfield objects from the computation module
+        from api.computation import LOADER, ts, eph
+        
+        # Create location dict as expected by load_bright_asteroids
+        location = {"latitude": lat, "longitude": lon, "elevation": elevation}
 
-        # Create skyfield objects as expected by load_bright_asteroids
-        # Use current directory where de421.bsp is located
-        loader = Loader('.')
-        ts = loader.timescale()
-        eph = loader('de421.bsp')
-
-        # Create proper Skyfield observer location object
-        observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
-
-        result = bright_asteroids.load_bright_asteroids(loader, ts, eph, observer_location, current_dt=dt_utc)
+        result = bright_asteroids.load_bright_asteroids(
+            LOADER, ts, eph, location,
+            max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
+            use_cache=True, current_dt=dt_utc
+        )
         return result is not None
     except Exception as e:
         print(f"[worker] Error generating asteroid cache: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def _ensure_comets_cache(lat, lon, elevation, dt_utc):
     """Ensure comet cache exists for given location and time"""
     try:
-        # Import skyfield objects
-        from skyfield.api import Loader, wgs84
+        # Import skyfield objects from the computation module
+        from api.computation import ts, eph
+        
+        # Create location dict as expected by load_comets
+        location = {"latitude": lat, "longitude": lon, "elevation": elevation}
 
-        # Create skyfield objects as expected by load_comets
-        # Use current directory where de421.bsp is located
-        loader = Loader('.')
-        ts = loader.timescale()
-        eph = loader('de421.bsp')
-
-        # Create proper Skyfield observer location object
-        observer_location = wgs84.latlon(lat, lon, elevation_m=elevation)
-
-        result = comets.load_comets(ts, eph, observer_location, current_dt=dt_utc)
+        result = comets.load_comets(ts, eph, location, use_cache=True, current_dt=dt_utc)
         return result is not None
     except Exception as e:
         print(f"[worker] Error generating comet cache: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def update_task_status(task_id, status_update):
