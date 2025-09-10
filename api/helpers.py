@@ -154,7 +154,7 @@ def store_cache_data(data: Any, cache_file: str, use_sqlite: bool = False, loc_k
     # Store in SQLite if enabled
     if use_sqlite and sqlite_storer and loc_key and time_bucket:
         try:
-            sqlite_storer(loc_key, time_bucket, **sqlite_kwargs, data)
+            sqlite_storer(loc_key, time_bucket, data, **sqlite_kwargs)
         except Exception as e:
             print(f"Failed to store in SQLite cache: {e}")
     
