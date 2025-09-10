@@ -242,8 +242,17 @@ def iter_hours_prioritized(start_utc: datetime, horizon_hours: int) -> Tuple[Lis
 
 def get_adaptive_worker_count(base_workers: int) -> int:
     """Calculate adaptive worker count based on system load.
-    Returns worker count between 1 and base_workers*2.
+    Returns worker count between 1 and max_workers.
+    
+    The worker count is always capped by ASCII_SKY_PRECOMPUTE_WORKERS,
+    which serves as an absolute maximum.
     """
+    # Ensure we never exceed the configured maximum
+    try:
+        max_workers = int(os.environ.get("ASCII_SKY_PRECOMPUTE_WORKERS", "3"))
+    except Exception:
+        max_workers = base_workers
+        
     try:
         # Get CPU usage (average over 1 second)
         cpu_percent = psutil.cpu_percent(interval=1.0)
@@ -253,15 +262,15 @@ def get_adaptive_worker_count(base_workers: int) -> int:
         
         # Reduce workers if system is under high load
         if cpu_percent > 80 or memory_percent > 85:
-            return max(1, base_workers // 2)
+            return max(1, min(base_workers // 2, max_workers))
         elif cpu_percent > 60 or memory_percent > 70:
-            return base_workers
+            return min(base_workers, max_workers)
         else:
-            # System has capacity, can use more workers
-            return min(base_workers * 2, 8)
+            # System has capacity, can use more workers but never exceed max_workers
+            return min(int(base_workers * 1.5), max_workers)
     except Exception:
-        # Fallback to base workers if psutil fails
-        return base_workers
+        # Fallback to base workers if psutil fails, but still respect max_workers
+        return min(base_workers, max_workers)
 
 
 def ensure_celestial(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:

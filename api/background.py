@@ -104,6 +104,33 @@ def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datet
 async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
     """Kick off background precompute for a 48h window relative to dt_utc."""
     try:
+        # Prüfe, ob bereits ein ähnlicher Task in den letzten 5 Minuten gestartet wurde
+        if hasattr(app, 'precompute_tasks') and hasattr(app, 'last_precompute_check'):
+            # Koordinaten normalisieren für Vergleich
+            from cache_utils import normalize_location
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
+            
+            now = datetime.now(timezone.utc)
+            last_check_time = getattr(app, 'last_precompute_check', {}).get(loc_key)
+            
+            # Wenn für diesen Standort innerhalb der letzten 5 Minuten bereits ein Task gestartet wurde, überspringen
+            if last_check_time and (now - last_check_time).total_seconds() < 300:  # 5 Minuten
+                print(f"[bg] Skipping duplicate task for {loc_key}, last started {(now - last_check_time).total_seconds():.1f}s ago")
+                return
+        
+        # Initialisiere die Tracking-Attribute, falls sie noch nicht existieren
+        if not hasattr(app, 'precompute_tasks'):
+            app.precompute_tasks = {}
+        if not hasattr(app, 'last_precompute_check'):
+            app.last_precompute_check = {}
+        
+        # Aktualisiere den Zeitstempel für diesen Standort
+        from cache_utils import normalize_location
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
+        app.last_precompute_check[loc_key] = datetime.now(timezone.utc)
+        
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
         now_utc = datetime.now(timezone.utc)
         base = _hour_floor(dt_utc)
