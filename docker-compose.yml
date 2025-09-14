@@ -9,9 +9,17 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - ASCII_SKY_PRECOMPUTE_HOURS=144
+      # Horizon für vom Webprozess getriggerte Fenster-Tasks (kürzer halten)
+      - ASCII_SKY_PRECOMPUTE_HOURS=72
       - ASCII_SKY_MAX_PRECOMPUTE_HOURS=168
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
+      # SQLite-Cache aktivieren (beschleunigt Webantworten)
+      - CELESTIAL_USE_SQLITE=true
+      # Duplikate und Last begrenzen (siehe api/background.py)
+      - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=15
+      - ASCII_SKY_MAX_WINDOW_WORKERS=1
+      # Session Secret (für Prod sinnvoll ändern)
+      - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757
     restart: unless-stopped
  
   worker:

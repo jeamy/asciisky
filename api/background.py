@@ -7,21 +7,92 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from fastapi import FastAPI
 
 from cache_utils import build_cache_path, atomic_write_pickle, normalize_location, location_key, time_bucket_utc
 from api.computation import compute_celestial_snapshot, LOADER, ts, eph
 import bright_asteroids
+import psutil
 import comets
 
 CELESTIAL_USE_SQLITE = os.getenv('CELESTIAL_USE_SQLITE', 'true').lower() == 'true'
 CELESTIAL_CACHE_BUCKET_HOURS = 1
 CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
+BG_TASK_COOLDOWN_SECONDS = int(os.environ.get('ASCII_SKY_BG_TASK_COOLDOWN_MINUTES', '5')) * 60
+MAX_WINDOW_WORKERS = int(os.environ.get('ASCII_SKY_MAX_WINDOW_WORKERS', '1'))
 
 def _hour_floor(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.replace(minute=0, second=0, microsecond=0)
+
+
+def _has_recent_window_task_for_loc(loc_key_str: str, max_age_seconds: int = BG_TASK_COOLDOWN_SECONDS) -> bool:
+    """Check cache/ for any window task (status) that is running/starting and matches loc_key within TTL.
+    This reads the paired task_*.json to compare normalized location. Returns True if such a task exists.
+    """
+    try:
+        import glob
+        now = datetime.now(timezone.utc)
+        for status_path in glob.glob(os.path.join('cache', 'task_status_window_*.json')):
+            try:
+                with open(status_path, 'r') as sf:
+                    sdata = json.load(sf)
+                status = sdata.get('status', 'unknown')
+                # Consider running/starting tasks that have been updated recently
+                if status not in ('starting', 'running'):
+                    continue
+                last_ts_str = sdata.get('last_updated') or sdata.get('start_time')
+                if not last_ts_str:
+                    continue
+                try:
+                    last_ts = datetime.fromisoformat(last_ts_str)
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                if (now - last_ts).total_seconds() > max_age_seconds:
+                    continue
+
+                # Load matching task file to compare location
+                task_id = Path(status_path).stem.replace('task_status_', '')
+                task_file = os.path.join('cache', f'task_{task_id}.json')
+                if not os.path.exists(task_file):
+                    continue
+                with open(task_file, 'r') as tf:
+                    tdata = json.load(tf)
+                t_lat = float(tdata.get('lat', 0.0))
+                t_lon = float(tdata.get('lon', 0.0))
+                t_elev = float(tdata.get('elevation', 0.0))
+                lat_n, lon_n, elev_n = normalize_location(t_lat, t_lon, t_elev)
+                loc_key_cmp = f"{lat_n:.4f},{lon_n:.4f},{elev_n:.1f}"
+                if loc_key_cmp == loc_key_str:
+                    return True
+            except Exception:
+                # Ignore malformed files
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _count_running_window_workers() -> int:
+    """Return number of running precompute_task_worker.py processes.
+    Uses psutil to scan current process list inside the container.
+    """
+    try:
+        count = 0
+        for proc in psutil.process_iter(attrs=['pid', 'name', 'cmdline']):
+            try:
+                cmd = proc.info.get('cmdline') or []
+                if any('precompute_task_worker.py' in part for part in cmd):
+                    count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return count
+    except Exception:
+        return 0
 
 def ensure_celestial_cache(lat: float, lon: float, elevation: float, dt_utc: datetime):
     """Ensure celestial cache exists for given location/time."""
@@ -104,33 +175,39 @@ def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datet
 async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
     """Kick off background precompute for a 48h window relative to dt_utc."""
     try:
-        # Prüfe, ob bereits ein ähnlicher Task in den letzten 5 Minuten gestartet wurde
-        if hasattr(app, 'precompute_tasks') and hasattr(app, 'last_precompute_check'):
-            # Koordinaten normalisieren für Vergleich
-            from cache_utils import normalize_location
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
-            
-            now = datetime.now(timezone.utc)
-            last_check_time = getattr(app, 'last_precompute_check', {}).get(loc_key)
-            
-            # Wenn für diesen Standort innerhalb der letzten 5 Minuten bereits ein Task gestartet wurde, überspringen
-            if last_check_time and (now - last_check_time).total_seconds() < 300:  # 5 Minuten
-                print(f"[bg] Skipping duplicate task for {loc_key}, last started {(now - last_check_time).total_seconds():.1f}s ago")
-                return
-        
-        # Initialisiere die Tracking-Attribute, falls sie noch nicht existieren
+        # Init shared attributes
         if not hasattr(app, 'precompute_tasks'):
             app.precompute_tasks = {}
         if not hasattr(app, 'last_precompute_check'):
             app.last_precompute_check = {}
-        
-        # Aktualisiere den Zeitstempel für diesen Standort
+        if not hasattr(app, 'bg_task_lock'):
+            import asyncio as _asyncio
+            app.bg_task_lock = _asyncio.Lock()
+
+        # Koordinaten normalisieren und Schlüssel bilden
         from cache_utils import normalize_location
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
-        app.last_precompute_check[loc_key] = datetime.now(timezone.utc)
-        
+
+        # Guard: vermeide Duplikate innerhalb von 5 Minuten (race-safe)
+        async with app.bg_task_lock:
+            now = datetime.now(timezone.utc)
+            last_check_time = app.last_precompute_check.get(loc_key)
+            if last_check_time and (now - last_check_time).total_seconds() < BG_TASK_COOLDOWN_SECONDS:
+                print(f"[bg] Skipping duplicate task for {loc_key}, last started {(now - last_check_time).total_seconds():.1f}s ago")
+                return
+            # Zusätzlich: wenn bereits ein laufender/neuerer Window-Task existiert, überspringen
+            if _has_recent_window_task_for_loc(loc_key, BG_TASK_COOLDOWN_SECONDS):
+                print(f"[bg] Active/recent window task exists for {loc_key}; skipping new start")
+                return
+            # Kapazitätsgrenze für gleichzeitige Fenster-Worker beachten
+            running = _count_running_window_workers()
+            if running >= MAX_WINDOW_WORKERS:
+                print(f"[bg] At capacity: {running}/{MAX_WINDOW_WORKERS} window workers running; skipping new start for {loc_key}")
+                return
+            # Reserviere Slot sofort, um Rennen zu vermeiden
+            app.last_precompute_check[loc_key] = now
+
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
         now_utc = datetime.now(timezone.utc)
         base = _hour_floor(dt_utc)
@@ -151,7 +228,8 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
 
         try:
             worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
-            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Wichtig: stdout/stderr nicht als PIPE capturen, um Deadlocks zu vermeiden
+            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd())
             print(f"Started background window worker process for task {task_id} (PID: {process.pid})")
 
             if not hasattr(app, 'precompute_tasks'):
@@ -204,7 +282,8 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
 
         try:
             worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
-            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Wichtig: stdout/stderr nicht als PIPE capturen, um Deadlocks zu vermeiden
+            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd())
             print(f"Started background worker process for task {task_id} (PID: {process.pid})")
             app.precompute_tasks[task_id]['worker_pid'] = process.pid
         except Exception as e:
