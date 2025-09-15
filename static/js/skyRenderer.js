@@ -9,6 +9,8 @@ export class SkyRenderer {
         this.celestialData = null;
         this.selectedObject = null;
         this.skyManager = null; // Wird später gesetzt
+        // Dedup for background precompute triggers (per loc/time/kinds)
+        this._precomputeRequests = new Set();
         
         // Horizontale Verschiebung aus den Einstellungen laden
         this.horizontalShift = settingsManager.getHorizontalShift(); 
@@ -352,6 +354,41 @@ export class SkyRenderer {
         } catch (_) {
             return url;
         }
+    }
+
+    // Prüfe schnell, ob Cache für aktuelle Stunde vorhanden ist (per Backend-Shortcut)
+    async checkCacheAvailability(location) {
+        try {
+            let url = `${API_ENDPOINTS.CACHE_AVAILABILITY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+            url = this.appendTimeParam(url);
+            const resp = await fetch(url, { cache: 'no-store' });
+            if (!resp.ok) return null;
+            return await resp.json();
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Löst Hintergrund-Precompute aus, aber nur einmal pro (loc_key|time|kinds)
+    async triggerPrecomputeWindowIfNeeded(location, timeISO, kinds, locKey) {
+        try {
+            if (!Array.isArray(kinds) || kinds.length === 0) return;
+            const key = `${locKey || ''}|${timeISO || ''}|${[...kinds].sort().join('+')}`;
+            if (this._precomputeRequests.has(key)) return;
+            this._precomputeRequests.add(key);
+
+            await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE.replace('/precompute_range', '/precompute_window'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lat: location.latitude,
+                    lon: location.longitude,
+                    elevation: location.elevation,
+                    kinds,
+                    time: timeISO || undefined
+                })
+            }).catch(() => {});
+        } catch (_) { /* noop */ }
     }
 
     // Prüft, ob ein Update-Token noch aktiv ist (verhindert Out-of-Order-Merges)
@@ -1130,34 +1167,63 @@ export class SkyRenderer {
                 // Abbrechen, wenn veraltetes Update
                 if (!this.isActiveUpdate(token)) return;
                 this.celestialData = data;
+                // Rendere sofort die Himmelskörper (Planeten etc.), um First Paint zu beschleunigen
+                this.render();
             }
             
-            // Lade zusätzlich Asteroiden und Kometen mit den aktuellen Einstellungen
-            await this.loadAsteroids(token);
-            await this.loadComets(token);
-            
-            // Lade die hellsten Asteroiden
-            this.showLoading('loading_asteroids');
-            try {
-                let url = `${API_ENDPOINTS.BRIGHT_ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
-                url = this.appendTimeParam(url);
-                const brightAsteroidResponse = await fetch(url);
-                if (brightAsteroidResponse.ok) {
-                    const brightAsteroidData = await brightAsteroidResponse.json();
-                    // Füge die hellsten Asteroiden zu den Himmelskörpern hinzu
-                    if (this.isActiveUpdate(token)) {
-                        this.celestialData.bodies = { ...this.celestialData.bodies, ...brightAsteroidData.bodies };
-                        console.log('Bright asteroids loaded successfully:', Object.keys(brightAsteroidData.bodies).length);
+            // Prüfe Cache-Verfügbarkeit und lade nur, was bereits vorliegt; fehlendes im Hintergrund anstoßen
+            const avail = await this.checkCacheAvailability(location);
+            const availableAsteroids = !!(avail && avail.available && avail.available.asteroids);
+            const availableComets = !!(avail && avail.available && avail.available.comets);
+            const timeISO = (avail && avail.time) ? avail.time : (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO());
+            const locKey = (avail && avail.location && avail.location.loc_key) ? avail.location.loc_key : undefined;
+
+            const tasks = [];
+            if (availableAsteroids) {
+                tasks.push(this.loadAsteroids(token));
+            }
+            if (availableComets) {
+                tasks.push(this.loadComets(token));
+            }
+            // Nur wenn Asteroiden bereits vorhanden sind, helle Kleinplaneten laden
+            if (availableAsteroids) {
+                this.showLoading('loading_asteroids');
+                tasks.push((async () => {
+                    try {
+                        let url = `${API_ENDPOINTS.BRIGHT_ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+                        url = this.appendTimeParam(url);
+                        const brightAsteroidResponse = await fetch(url);
+                        if (brightAsteroidResponse.ok) {
+                            const brightAsteroidData = await brightAsteroidResponse.json();
+                            if (this.isActiveUpdate(token)) {
+                                this.celestialData.bodies = { ...this.celestialData.bodies, ...brightAsteroidData.bodies };
+                                console.log('Bright asteroids loaded successfully:', Object.keys(brightAsteroidData.bodies).length);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error loading bright asteroids:', e);
                     }
+                })());
+            }
+
+            // Fehlt etwas? Dann Hintergrundberechnung anstoßen (dedupliziert)
+            const missing = [];
+            if (!availableAsteroids) missing.push('asteroids');
+            if (!availableComets) missing.push('comets');
+            if (missing.length > 0) {
+                this.triggerPrecomputeWindowIfNeeded(location, timeISO, missing, locKey);
+            }
+
+            // Warte optional auf geladene Zusatzdaten und rendere erneut
+            if (tasks.length > 0) {
+                await Promise.all(tasks);
+                if (this.isActiveUpdate(token)) {
+                    this.render();
                 }
-            } finally {
-                // Nicht verstecken; wir verbergen erst nach Abschluss aller Fetches
             }
             
             // Aktualisiere die Anzeige
-            if (this.isActiveUpdate(token)) {
-                this.render();
-            }
+            // Hinweis: Erste Render erfolgte bereits nach den Celestial-Daten
             
         } catch (error) {
             console.error('Error updating sky data:', error);

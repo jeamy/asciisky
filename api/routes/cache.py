@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from api.models import PrecomputeRangeRequest
 from api.helpers import get_location_from_request, parse_time_param
 from api.background import trigger_background_precompute_range, _hour_floor
-from cache_utils import normalize_location, location_key, CACHE_ROOT
+from cache_utils import normalize_location, location_key, CACHE_ROOT, build_cache_path, read_pickle_if_fresh, time_bucket_utc
 import settings
 import bright_asteroids
 import comets
@@ -164,5 +164,127 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
             "max_precompute_hours": max_precompute_hours, "window": {"start": window_start.isoformat(), "end": window_end.isoformat()},
             "kinds": kinds, "locations": locations_out, "totals": totals, "database": db_stats,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cache_availability")
+async def get_cache_availability(request: Request, lat: Optional[float] = None, lon: Optional[float] = None, elevation: Optional[float] = None):
+    """Return availability booleans for the current bucket for celestial/asteroids/comets.
+    The decision respects SQLite (if enabled) and pickle cache TTLs.
+    """
+    try:
+        # Resolve location from session or params
+        from api.helpers import get_location_from_request
+        location = await get_location_from_request(request, lat, lon, elevation)
+        if not location:
+            return JSONResponse(status_code=400, content={"error": "Invalid location"})
+
+        lat_v, lon_v, elev_v = location["latitude"], location["longitude"], location["elevation"]
+        lat_n, lon_n, elev_n = normalize_location(lat_v, lon_v, elev_v)
+        key = location_key(lat_n, lon_n, elev_n)
+
+        # Determine current bucket
+        time_param = request.query_params.get('time')
+        from api.helpers import parse_time_param
+        dt_utc = parse_time_param(time_param)
+
+        # Celestial constants (aligned with routes)
+        CELESTIAL_CACHE_BUCKET_HOURS = 1
+        CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
+
+        available = {"celestial": False, "asteroids": False, "comets": False}
+
+        # Celestial availability
+        try:
+            use_sqlite = os.getenv('CELESTIAL_USE_SQLITE', 'true').lower() == 'true'
+            bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
+            if use_sqlite:
+                try:
+                    from db_utils import get_celestial_snapshot
+                    if get_celestial_snapshot(key, bucket, CELESTIAL_CACHE_TTL_SECONDS):
+                        available["celestial"] = True
+                except Exception:
+                    pass
+            if not available["celestial"]:
+                path = build_cache_path('celestial', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
+                if read_pickle_if_fresh(path, CELESTIAL_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                    available["celestial"] = True
+        except Exception:
+            pass
+
+        # Asteroids availability
+        try:
+            import bright_asteroids
+            bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+            if getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False):
+                try:
+                    from db_utils import get_asteroid_positions
+                    if get_asteroid_positions(key, bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS):
+                        available["asteroids"] = True
+                except Exception:
+                    pass
+            if not available["asteroids"]:
+                path = build_cache_path('asteroids', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                if read_pickle_if_fresh(path, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                    available["asteroids"] = True
+        except Exception:
+            pass
+
+        # Comets availability
+        try:
+            import comets
+            bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
+            if getattr(comets, 'COMET_USE_SQLITE', False):
+                try:
+                    from db_utils import get_comet_positions
+                    if get_comet_positions(key, bucket, comets.COMET_CACHE_TTL_SECONDS):
+                        available["comets"] = True
+                except Exception:
+                    pass
+            if not available["comets"]:
+                path = build_cache_path('comets', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                if read_pickle_if_fresh(path, comets.COMET_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                    available["comets"] = True
+        except Exception:
+            pass
+
+        return {"location": {"lat": lat_n, "lon": lon_n, "elevation": elev_n, "loc_key": key}, "time": dt_utc.isoformat(), "available": available}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/precompute_window")
+async def precompute_window(request: Request):
+    """Trigger background precompute for a forward/backward window around the given time.
+    Request body JSON: { lat, lon, elevation, kinds?: list[str] | comma string, time?: ISO8601 }
+    Falls back to environment kinds and current time if not provided.
+    """
+    try:
+        payload = await request.json()
+        lat = float(payload.get('lat'))
+        lon = float(payload.get('lon'))
+        elevation = float(payload.get('elevation', 0.0))
+        kinds_raw = payload.get('kinds')
+        time_str = payload.get('time')
+
+        if lat is None or lon is None:
+            return JSONResponse(status_code=400, content={'error': 'lat/lon are required'})
+
+        if isinstance(kinds_raw, list):
+            kinds = [str(k).strip() for k in kinds_raw if str(k).strip()]
+        elif isinstance(kinds_raw, str):
+            kinds = [k.strip() for k in kinds_raw.split(',') if k.strip()]
+        else:
+            kinds = [k.strip() for k in os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").split(',') if k.strip()]
+
+        # Parse time param (defaults to now if None)
+        dt_utc = parse_time_param(time_str)
+
+        # Trigger background window precompute (guarded inside)
+        from api.background import trigger_background_precompute_window
+        await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=kinds)
+
+        return { 'status': 'started', 'message': 'Background precompute window triggered', 'kinds': kinds, 'time': dt_utc.isoformat() }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

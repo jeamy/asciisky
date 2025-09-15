@@ -7,7 +7,8 @@ import comets
 import settings
 import os
 import pickle
-from cache_utils import build_cache_path, read_pickle_if_fresh
+from cache_utils import build_cache_path, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
+from db_utils import get_comet_positions
 import asyncio
 
 router = APIRouter()
@@ -28,11 +29,31 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         dt_utc = parse_time_param(time)
 
         if time is not None:
+            # SQL-first: try SQLite cached positions for this location/time
+            try:
+                if getattr(comets, 'COMET_USE_SQLITE', False):
+                    lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                    time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
+                    sqlite_positions = get_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
+                    if isinstance(sqlite_positions, list) and sqlite_positions:
+                        result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
+                        for i, comet in enumerate(sqlite_positions[:max_comets]):
+                            if isinstance(comet, dict) and "name" in comet:
+                                result["bodies"][f"comet_{i}_{comet['name']}"] = comet
+                        return result
+            except Exception:
+                pass
+
+            # Fallback: Pickle cache (fresh or, as last resort, file on disk)
             cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
             comet_list = read_pickle_if_fresh(cache_file, comets.COMET_CACHE_TTL_SECONDS)
             if comet_list is None and os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    comet_list = pickle.load(f)
+                try:
+                    with open(cache_file, 'rb') as f:
+                        comet_list = pickle.load(f)
+                except Exception:
+                    comet_list = None
 
             if isinstance(comet_list, list):
                 result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}

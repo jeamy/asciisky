@@ -8,6 +8,7 @@ export const API_ENDPOINTS = {
     BRIGHT_ASTEROIDS: '/api/bright_asteroids',
     SESSION_LOCATION: '/api/session/location',
     CACHE_STATUS: '/api/cache_status',
+    CACHE_AVAILABILITY: '/api/cache_availability',
     PRECOMPUTE_RANGE: '/api/precompute_range'
     // ZODIAC endpoint removed as it's not implemented in the backend
 };
