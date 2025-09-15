@@ -3,13 +3,14 @@ export const API_ENDPOINTS = {
     CELESTIAL: '/api/celestial',
     CELESTIAL_OBJECT: '/api/celestial',  // + '/{body_id}'
     SKY: '/api/celestial',
-    ASTEROIDS: '/api/asteroids',
+    ASTEROIDS: '/api/bright_asteroids',
     COMETS: '/api/comets',
     BRIGHT_ASTEROIDS: '/api/bright_asteroids',
     SESSION_LOCATION: '/api/session/location',
     CACHE_STATUS: '/api/cache_status',
     CACHE_AVAILABILITY: '/api/cache_availability',
-    PRECOMPUTE_RANGE: '/api/precompute_range'
+    PRECOMPUTE_RANGE: '/api/precompute_range',
+    PRECOMPUTE_WINDOW: '/api/precompute_window'
     // ZODIAC endpoint removed as it's not implemented in the backend
 };
 

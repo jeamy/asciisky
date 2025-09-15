@@ -377,7 +377,7 @@ export class SkyRenderer {
             if (this._precomputeRequests.has(key)) return;
             this._precomputeRequests.add(key);
 
-            await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE.replace('/precompute_range', '/precompute_window'), {
+            await fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW || API_ENDPOINTS.PRECOMPUTE_RANGE.replace('/precompute_range', '/precompute_window'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1180,30 +1180,11 @@ export class SkyRenderer {
 
             const tasks = [];
             if (availableAsteroids) {
+                // Load bright asteroids via ASTEROIDS endpoint (points to /bright_asteroids)
                 tasks.push(this.loadAsteroids(token));
             }
             if (availableComets) {
                 tasks.push(this.loadComets(token));
-            }
-            // Nur wenn Asteroiden bereits vorhanden sind, helle Kleinplaneten laden
-            if (availableAsteroids) {
-                this.showLoading('loading_asteroids');
-                tasks.push((async () => {
-                    try {
-                        let url = `${API_ENDPOINTS.BRIGHT_ASTEROIDS}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
-                        url = this.appendTimeParam(url);
-                        const brightAsteroidResponse = await fetch(url);
-                        if (brightAsteroidResponse.ok) {
-                            const brightAsteroidData = await brightAsteroidResponse.json();
-                            if (this.isActiveUpdate(token)) {
-                                this.celestialData.bodies = { ...this.celestialData.bodies, ...brightAsteroidData.bodies };
-                                console.log('Bright asteroids loaded successfully:', Object.keys(brightAsteroidData.bodies).length);
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Error loading bright asteroids:', e);
-                    }
-                })());
             }
 
             // Fehlt etwas? Dann Hintergrundberechnung anstoßen (dedupliziert)
