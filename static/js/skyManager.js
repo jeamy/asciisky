@@ -4,7 +4,7 @@ import { CONFIG, ASTRO_CONSTANTS } from './constants.js';
 // Deklariere skyRenderer als exportierte Variable
 export let skyRenderer;
 
-// Aktuelle Standortdaten
+// Aktuelle Standortdaten dfsdfsdf
 let currentLocation = {
     latitude: ASTRO_CONSTANTS.VIENNA_LAT,
     longitude: ASTRO_CONSTANTS.VIENNA_LON,
