@@ -191,16 +191,20 @@ export class SettingsManager {
             // 1) Session sofort aktualisieren (Cookie-basierte Session)
             await this.saveSessionLocation(this.settings.location);
 
-            // 2) Persistente Nutzereinstellungen auf dem Server aktualisieren
-            // Standortdaten explizit zum Server senden mit save_location=true
-            const asteroidResponse = await fetch(`${API_ENDPOINTS.ASTEROIDS}?lat=${latitude}&lon=${longitude}&elevation=${elevation}&location_name=${encodeURIComponent(this.settings.location.name)}&save_location=true`);
-            
-            if (asteroidResponse.ok) {
-                console.log('Location successfully synced with server');
-                this.serverSynced = true;
-            } else {
-                console.error('Error syncing location with server');
-            }
+            // 2) Optional: Hintergrund-Precompute für neues Ziel anstoßen (nicht blockierend)
+            try {
+                fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        lat: parseFloat(latitude),
+                        lon: parseFloat(longitude),
+                        elevation: parseFloat(elevation),
+                        kinds: ['celestial','asteroids','comets']
+                    })
+                }).catch(() => {});
+            } catch (_) { /* noop */ }
+            this.serverSynced = true;
         } catch (error) {
             console.error('Error syncing location with server:', error);
         }

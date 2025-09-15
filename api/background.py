@@ -183,6 +183,10 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
         if not hasattr(app, 'bg_task_lock'):
             import asyncio as _asyncio
             app.bg_task_lock = _asyncio.Lock()
+        if not hasattr(app, 'window_worker_reservations'):
+            app.window_worker_reservations = 0
+        if not hasattr(app, 'active_window_tasks_by_loc'):
+            app.active_window_tasks_by_loc = {}
 
         # Koordinaten normalisieren und Schlüssel bilden
         from cache_utils import normalize_location
@@ -200,12 +204,20 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
             if _has_recent_window_task_for_loc(loc_key, BG_TASK_COOLDOWN_SECONDS):
                 print(f"[bg] Active/recent window task exists for {loc_key}; skipping new start")
                 return
-            # Kapazitätsgrenze für gleichzeitige Fenster-Worker beachten
+            # Prüfe zusätzlich auf in-flight Task für diesen Standort
+            inflight = app.active_window_tasks_by_loc.get(loc_key)
+            if inflight and inflight.get('status') == 'reserved':
+                print(f"[bg] In-flight window task already reserved for {loc_key}; skipping new start")
+                return
+            # Kapazitätsgrenze für gleichzeitige Fenster-Worker beachten (inkl. Reservierungen)
             running = _count_running_window_workers()
-            if running >= MAX_WINDOW_WORKERS:
-                print(f"[bg] At capacity: {running}/{MAX_WINDOW_WORKERS} window workers running; skipping new start for {loc_key}")
+            reserved = int(app.window_worker_reservations or 0)
+            if (running + reserved) >= MAX_WINDOW_WORKERS:
+                print(f"[bg] At capacity: {running + reserved}/{MAX_WINDOW_WORKERS} (incl. reservations); skipping new start for {loc_key}")
                 return
             # Reserviere Slot sofort, um Rennen zu vermeiden
+            app.window_worker_reservations += 1
+            app.active_window_tasks_by_loc[loc_key] = {"status": "reserved", "reserved_at": now.isoformat()}
             app.last_precompute_check[loc_key] = now
 
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
@@ -241,9 +253,24 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
                 'worker_process': True,
                 'worker_pid': process.pid
             }
+            # Markiere Standort-Task als laufend
+            async with app.bg_task_lock:
+                app.active_window_tasks_by_loc[loc_key] = {
+                    "status": "running",
+                    "worker_pid": process.pid,
+                    "task_id": task_id,
+                    "started_at": datetime.now(timezone.utc).isoformat()
+                }
         except Exception as e:
             print(f"Failed to start background window worker: {e}")
             traceback.print_exc()
+        finally:
+            # Reservierung freigeben
+            try:
+                async with app.bg_task_lock:
+                    app.window_worker_reservations = max(0, int(app.window_worker_reservations or 0) - 1)
+            except Exception:
+                pass
     except Exception:
         print("[bg] trigger failed")
         traceback.print_exc()
@@ -251,6 +278,17 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
 async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: float, elevation: float, start_dt_utc: datetime, end_dt_utc: datetime, kinds: list[str]) -> dict:
     """Kick off background precompute for a custom date range."""
     try:
+        # Ensure shared guards exist
+        if not hasattr(app, 'precompute_tasks'):
+            app.precompute_tasks = {}
+        if not hasattr(app, 'bg_task_lock'):
+            import asyncio as _asyncio
+            app.bg_task_lock = _asyncio.Lock()
+        if not hasattr(app, 'window_worker_reservations'):
+            app.window_worker_reservations = 0
+        if not hasattr(app, 'active_range_tasks_by_loc'):
+            app.active_range_tasks_by_loc = {}
+
         if start_dt_utc.tzinfo is None: start_dt_utc = start_dt_utc.replace(tzinfo=timezone.utc)
         if end_dt_utc.tzinfo is None: end_dt_utc = end_dt_utc.replace(tzinfo=timezone.utc)
 
@@ -260,8 +298,28 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
         delta_hours = int((end_dt_utc - start_dt_utc).total_seconds() / 3600) + 1
         task_id = f"precompute_{int(time.time())}_{delta_hours}h"
 
-        if not hasattr(app, 'precompute_tasks'):
-            app.precompute_tasks = {}
+        # Normalize location key (same format as window tasks)
+        from cache_utils import normalize_location
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
+
+        # Capacity and duplicate guards
+        async with app.bg_task_lock:
+            # If a range task is already running for this location, skip
+            inflight = app.active_range_tasks_by_loc.get(loc_key)
+            if inflight:
+                return {'status': 'skipped', 'reason': 'inflight_for_location'}
+            # Check capacity including reservations
+            running = _count_running_window_workers()
+            reserved = int(app.window_worker_reservations or 0)
+            if (running + reserved) >= MAX_WINDOW_WORKERS:
+                return {'status': 'skipped', 'reason': 'at_capacity', 'running': running, 'reserved': reserved}
+            # Reserve slot and mark inflight
+            app.window_worker_reservations += 1
+            app.active_range_tasks_by_loc[loc_key] = {
+                'status': 'reserved', 'reserved_at': datetime.now(timezone.utc).isoformat(),
+                'hours_total': delta_hours
+            }
 
         app.precompute_tasks[task_id] = {
             'id': task_id, 'status': 'starting', 'start_time': datetime.now(timezone.utc).isoformat(),
@@ -286,9 +344,22 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
             process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd())
             print(f"Started background worker process for task {task_id} (PID: {process.pid})")
             app.precompute_tasks[task_id]['worker_pid'] = process.pid
+            # Mark running for this location
+            async with app.bg_task_lock:
+                app.active_range_tasks_by_loc[loc_key] = {
+                    'status': 'running', 'task_id': task_id, 'worker_pid': process.pid,
+                    'started_at': datetime.now(timezone.utc).isoformat(), 'hours_total': delta_hours
+                }
         except Exception as e:
             print(f"Failed to start background worker: {e}")
             traceback.print_exc()
+        finally:
+            # Release reservation
+            try:
+                async with app.bg_task_lock:
+                    app.window_worker_reservations = max(0, int(app.window_worker_reservations or 0) - 1)
+            except Exception:
+                pass
 
         return {'task_id': task_id, 'status': 'started', 'message': f'Background precompute started for {delta_hours} hours', 'hours_total': delta_hours}
     except Exception as e:

@@ -208,7 +208,7 @@ async def get_cache_availability(request: Request, lat: Optional[float] = None, 
                     pass
             if not available["celestial"]:
                 path = build_cache_path('celestial', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
-                if read_pickle_if_fresh(path, CELESTIAL_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                if read_pickle_if_fresh(path, CELESTIAL_CACHE_TTL_SECONDS) is not None:
                     available["celestial"] = True
         except Exception:
             pass
@@ -226,7 +226,7 @@ async def get_cache_availability(request: Request, lat: Optional[float] = None, 
                     pass
             if not available["asteroids"]:
                 path = build_cache_path('asteroids', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-                if read_pickle_if_fresh(path, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                if read_pickle_if_fresh(path, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS) is not None:
                     available["asteroids"] = True
         except Exception:
             pass
@@ -244,7 +244,7 @@ async def get_cache_availability(request: Request, lat: Optional[float] = None, 
                     pass
             if not available["comets"]:
                 path = build_cache_path('comets', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-                if read_pickle_if_fresh(path, comets.COMET_CACHE_TTL_SECONDS) is not None or os.path.exists(path):
+                if read_pickle_if_fresh(path, comets.COMET_CACHE_TTL_SECONDS) is not None:
                     available["comets"] = True
         except Exception:
             pass

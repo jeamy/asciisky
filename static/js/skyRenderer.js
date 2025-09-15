@@ -1169,6 +1169,9 @@ export class SkyRenderer {
                 this.celestialData = data;
                 // Rendere sofort die Himmelskörper (Planeten etc.), um First Paint zu beschleunigen
                 this.render();
+                // Verberge den allgemeinen Ladeindikator bereits nach dem ersten Paint
+                // (Asteroiden/Kometen werden ggf. separat nachgeladen oder im Hintergrund vorbereitet)
+                this.hideLoading();
             }
             
             // Prüfe Cache-Verfügbarkeit und lade nur, was bereits vorliegt; fehlendes im Hintergrund anstoßen
