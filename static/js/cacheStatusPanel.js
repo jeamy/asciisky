@@ -445,8 +445,8 @@ function startAutomaticLiveUpdates(lat, lon, elevation, locationName) {
   liveUpdateInterval = setInterval(async () => {
     try {
       // Prüfe ob noch eine aktive Precompute-Task läuft
-      const activeTaskId = localStorage.getItem('activePrecomputeTask');
-      if (!activeTaskId) {
+      const activeTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
+      if (!activeTaskId || activeTaskId === 'null') {
         // Keine aktive Task mehr - stoppe Updates
         clearInterval(liveUpdateInterval);
         liveUpdateInterval = null;

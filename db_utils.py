@@ -14,6 +14,8 @@ import threading
 # Database configuration
 DB_PATH = "cache/asciisky.db"
 DB_VERSION = 2
+SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get('SQLITE_BUSY_TIMEOUT_MS', '5000'))  # 5 seconds default
+SQLITE_ENABLE_WAL = os.environ.get('SQLITE_ENABLE_WAL', 'false').lower() == 'true'
 
 # Thread-local storage for database connections
 _thread_local = threading.local()
@@ -26,12 +28,23 @@ def get_db_connection() -> sqlite3.Connection:
     
     if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        # Increase default timeout to allow waiting for writer locks
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=max(1.0, SQLITE_BUSY_TIMEOUT_MS / 1000.0))
         conn.row_factory = sqlite3.Row  # Enable dict-like access
         # Skip WAL mode in Docker to avoid I/O issues
+        try:
+            conn.execute("PRAGMA busy_timeout={}".format(int(SQLITE_BUSY_TIMEOUT_MS)))
+        except Exception:
+            pass
         conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/performance
         conn.execute("PRAGMA cache_size=2000")  # Reduce cache size to 2MB
         conn.execute("PRAGMA temp_store=MEMORY")  # Use RAM for temp tables
+        # Optionally enable WAL if explicitly requested (better read concurrency)
+        if SQLITE_ENABLE_WAL:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                pass
         _thread_local.connection = conn
         
         # Track connection count for debugging

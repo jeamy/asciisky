@@ -154,7 +154,18 @@ def store_cache_data(data: Any, cache_file: str, use_sqlite: bool = False, loc_k
     # Store in SQLite if enabled
     if use_sqlite and sqlite_storer and loc_key and time_bucket:
         try:
+            # Try default calling convention: (loc_key, time_bucket, data, **kwargs)
             sqlite_storer(loc_key, time_bucket, data, **sqlite_kwargs)
+        except TypeError:
+            # Fallback for celestial snapshots:
+            # Expected signature: (location_key, time_bucket, observer_lat, observer_lon, observer_elevation, snapshot_data)
+            try:
+                observer_lat = sqlite_kwargs.get('observer_lat')
+                observer_lon = sqlite_kwargs.get('observer_lon')
+                observer_elevation = sqlite_kwargs.get('observer_elevation')
+                sqlite_storer(loc_key, time_bucket, observer_lat, observer_lon, observer_elevation, data)
+            except Exception as e2:
+                print(f"Failed to store in SQLite cache: {e2}")
         except Exception as e:
             print(f"Failed to store in SQLite cache: {e}")
     

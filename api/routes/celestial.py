@@ -63,16 +63,52 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
                 loc_key=loc_key,
                 time_bucket=time_bucket,
                 sqlite_storer=sqlite_storer,
-                lat=lat, lon=lon, elevation=elevation
+                observer_lat=lat, observer_lon=lon, observer_elevation=elevation
             )
             
             await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])
             return snapshot
 
-        # No time parameter - generate fresh snapshot
-        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+        # No time parameter - try cache first (SQL-first), then compute fresh snapshot
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
         cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
-        store_cache_data(data=snapshot, cache_file=cache_file)
+
+        # Try to get from cache
+        if CELESTIAL_USE_SQLITE:
+            from db_utils import get_celestial_snapshot
+            sqlite_getter = get_celestial_snapshot
+        else:
+            sqlite_getter = None
+
+        snapshot = get_cache_data(
+            cache_file=cache_file,
+            cache_ttl=CELESTIAL_CACHE_TTL_SECONDS,
+            use_sqlite=CELESTIAL_USE_SQLITE,
+            loc_key=loc_key,
+            time_bucket=time_bucket,
+            sqlite_getter=sqlite_getter
+        )
+
+        if not (isinstance(snapshot, dict) and "bodies" in snapshot):
+            # Generate fresh snapshot
+            snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+            # Store in cache (both SQLite and pickle if enabled)
+            if CELESTIAL_USE_SQLITE:
+                from db_utils import store_celestial_snapshot
+                sqlite_storer = store_celestial_snapshot
+            else:
+                sqlite_storer = None
+            store_cache_data(
+                data=snapshot,
+                cache_file=cache_file,
+                use_sqlite=CELESTIAL_USE_SQLITE,
+                loc_key=loc_key,
+                time_bucket=time_bucket,
+                sqlite_storer=sqlite_storer,
+                observer_lat=lat, observer_lon=lon, observer_elevation=elevation
+            )
         
         # Trigger background precompute for future hours even without time parameter
         await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])
@@ -134,7 +170,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
                 loc_key=loc_key,
                 time_bucket=time_bucket,
                 sqlite_storer=sqlite_storer,
-                lat=lat, lon=lon, elevation=elevation
+                observer_lat=lat, observer_lon=lon, observer_elevation=elevation
             )
             
             await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets'])

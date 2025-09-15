@@ -21,6 +21,20 @@ app = FastAPI(
 SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET", "dev-secret-please-change")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
+# Prevent stale JS/CSS in browsers during rapid iteration: disable caching for static modules
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        path = request.url.path or ""
+        if path.startswith("/static/") and (path.endswith(".js") or path.endswith(".css")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+    except Exception:
+        pass
+    return response
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
