@@ -366,11 +366,11 @@ export class LocationDialog {
         // Aktualisiere Cache-Status alle 3 Sekunden während Berechnung läuft
         const updateInterval = setInterval(async () => {
             try {
-                // Importiere updateCacheStatusForLocation dynamisch
-                const { updateCacheStatusForLocation } = await import('./cacheStatusPanel.js');
-                
-                // Aktualisiere Cache-Status
-                await updateCacheStatusForLocation(
+                // Importiere die SILENT Variante, um UI-Flicker zu vermeiden
+                const { updateCacheStatusSilently } = await import('./cacheStatusPanel.js');
+
+                // Aktualisiere Cache-Status, ohne den Panel-Inhalt auf "Loading" zu setzen
+                await updateCacheStatusSilently(
                     location.lat, 
                     location.lon, 
                     location.elevation, 
@@ -378,7 +378,7 @@ export class LocationDialog {
                 );
                 
                 // Prüfe ob noch eine aktive Precompute-Task läuft
-                const activeTaskId = localStorage.getItem('activePrecomputeTask');
+                const activeTaskId = localStorage.getItem('asciisky_active_precompute_task');
                 if (!activeTaskId) {
                     // Keine aktive Task mehr - stoppe Updates
                     clearInterval(updateInterval);

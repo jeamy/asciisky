@@ -212,9 +212,13 @@ function renderStatus(data, currentLocKey, locationName) {
 
   const kinds = Array.isArray(data?.kinds) ? data.kinds : [];
 
-  // We'll set this to true only if we confirm the task exists on the server
-  // This ensures the UI starts in a clean state
-  const hasActiveTask = false;
+  // Determine if there is an active task persisted locally
+  // This keeps the progress UI visible across re-renders and silent updates
+  let hasActiveTask = false;
+  try {
+    const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
+    hasActiveTask = !!(activePrecomputeTask || (savedTaskId && savedTaskId !== 'null'));
+  } catch (_) { /* noop */ }
   
   // Prepare the precompute section
   const precomputeSection = `
@@ -473,7 +477,7 @@ function startAutomaticLiveUpdates(lat, lon, elevation, locationName) {
 }
 
 // Stille Cache-Status-Aktualisierung ohne Loading-Anzeige
-async function updateCacheStatusSilently(lat, lon, elevation, locationName = '') {
+export async function updateCacheStatusSilently(lat, lon, elevation, locationName = '') {
   try {
     // Store current location for potential task restoration
     window.currentCacheLocation = { lat, lon, elevation, locationName };
@@ -500,7 +504,19 @@ async function updateCacheStatusSilently(lat, lon, elevation, locationName = '')
     
     // Render nur wenn sich die Daten geändert haben
     renderStatus(data, key, locationName);
-    
+
+    // After silent re-render, ensure UI is in a consistent state
+    // If there is an active task, restore progress UI; otherwise initialize form fields
+    setTimeout(() => {
+      try {
+        const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
+        if (savedTaskId && savedTaskId !== 'null') {
+          restoreActivePrecomputeTask();
+        } else {
+          initializePrecomputeForm();
+        }
+      } catch (_) { /* noop */ }
+    }, 50);
   } catch (err) {
     console.error('Silent cache status update error:', err);
   }
@@ -667,6 +683,40 @@ async function initializePrecomputeForm() {
       }
       
       const result = await response.json();
+
+      // Handle cases where backend did not start a new task
+      if (!result || !result.task_id) {
+        // If backend reports an already running task and provides its ID, attach to it
+        if (result && result.status && result.task_id) {
+          activePrecomputeTask = result.task_id;
+          localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
+          if (progressContainer) progressContainer.style.display = 'block';
+          if (progressFill) progressFill.style.width = '0%';
+          if (progressPercent) progressPercent.textContent = '0%';
+          if (progressHours) progressHours.textContent = `0/${result.hours_total || 0} hours`;
+          if (progressDetails) progressDetails.textContent = t('attaching_to_running_task') || 'Attaching to running task...';
+          if (precomputeTaskCheckInterval) clearInterval(precomputeTaskCheckInterval);
+          precomputeTaskCheckInterval = setInterval(async () => {
+            await checkPrecomputeTaskProgress();
+          }, 2000);
+          return;
+        }
+        // Otherwise, show a non-blocking message and re-enable form
+        const reason = (result && result.reason) ? String(result.reason) : 'unknown';
+        const msg = (
+          (reason === 'at_capacity') ? (t('precompute_at_capacity') || 'At capacity. Please try again later.') :
+          (reason === 'inflight_for_location') ? (t('precompute_already_running') || 'A task is already running for this location.') :
+          (t('precompute_not_started') || 'Precompute was not started.')
+        );
+        if (progressDetails) progressDetails.textContent = msg;
+        // Re-enable inputs
+        startDateInput.disabled = false;
+        endDateInput.disabled = false;
+        precomputeButton.disabled = false;
+        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
+        return;
+      }
+
       activePrecomputeTask = result.task_id;
       
       // Save task ID to localStorage

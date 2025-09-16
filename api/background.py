@@ -308,12 +308,67 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
             # If a range task is already running for this location, skip
             inflight = app.active_range_tasks_by_loc.get(loc_key)
             if inflight:
-                return {'status': 'skipped', 'reason': 'inflight_for_location'}
+                # Try to return the existing task_id so clients can attach
+                task_id_attach = inflight.get('task_id') if isinstance(inflight, dict) else None
+                if not task_id_attach:
+                    # Also check window tasks for the same location
+                    try:
+                        win = getattr(app, 'active_window_tasks_by_loc', {}).get(loc_key)
+                        if isinstance(win, dict) and win.get('task_id'):
+                            task_id_attach = win.get('task_id')
+                    except Exception:
+                        pass
+                if not task_id_attach:
+                    # Fallback: search known tasks for matching location
+                    try:
+                        for tid, info in getattr(app, 'precompute_tasks', {}).items():
+                            loc = info.get('location') or {}
+                            if float(loc.get('lat', 0)) == lat and float(loc.get('lon', 0)) == lon and float(loc.get('elevation', 0)) == elevation:
+                                # Consider only tasks that are not finalized
+                                status = info.get('status', 'starting')
+                                if status not in ('completed', 'error'):
+                                    task_id_attach = tid
+                                    break
+                    except Exception:
+                        pass
+                return {
+                    'status': 'skipped', 'reason': 'inflight_for_location',
+                    'task_id': task_id_attach, 'hours_total': inflight.get('hours_total') if isinstance(inflight, dict) else None
+                }
             # Check capacity including reservations
             running = _count_running_window_workers()
             reserved = int(app.window_worker_reservations or 0)
             if (running + reserved) >= MAX_WINDOW_WORKERS:
-                return {'status': 'skipped', 'reason': 'at_capacity', 'running': running, 'reserved': reserved}
+                # If at capacity, attempt to locate an existing task for this location to attach
+                task_id_attach = None
+                try:
+                    rng = getattr(app, 'active_range_tasks_by_loc', {}).get(loc_key)
+                    if isinstance(rng, dict) and rng.get('task_id'):
+                        task_id_attach = rng.get('task_id')
+                except Exception:
+                    pass
+                if not task_id_attach:
+                    try:
+                        win = getattr(app, 'active_window_tasks_by_loc', {}).get(loc_key)
+                        if isinstance(win, dict) and win.get('task_id'):
+                            task_id_attach = win.get('task_id')
+                    except Exception:
+                        pass
+                if not task_id_attach:
+                    try:
+                        for tid, info in getattr(app, 'precompute_tasks', {}).items():
+                            loc = info.get('location') or {}
+                            if float(loc.get('lat', 0)) == lat and float(loc.get('lon', 0)) == lon and float(loc.get('elevation', 0)) == elevation:
+                                status = info.get('status', 'starting')
+                                if status not in ('completed', 'error'):
+                                    task_id_attach = tid
+                                    break
+                    except Exception:
+                        pass
+                return {
+                    'status': 'skipped', 'reason': 'at_capacity', 'running': running, 'reserved': reserved,
+                    'task_id': task_id_attach
+                }
             # Reserve slot and mark inflight
             app.window_worker_reservations += 1
             app.active_range_tasks_by_loc[loc_key] = {

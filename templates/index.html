@@ -67,7 +67,7 @@
     import { LocationDialog } from './static/js/locationDialog.js';
     import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
-    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
+    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced, updateCacheStatusSilently } from './static/js/cacheStatusPanel.js';
     
     let renderer;
     let locationDialog;
@@ -76,10 +76,9 @@
     function refreshCacheStatus() {
         try {
             const loc = settingsManager.getLocation();
-            if (loc) {
-                // debounced to avoid spamming during rapid simulated time changes
-                updateCacheStatusForLocationDebounced(loc.latitude, loc.longitude, loc.elevation, loc.name);
-            }
+            if (!loc) return;
+            // Prefer silent refresh to avoid UI flicker, especially during active precompute
+            updateCacheStatusSilently(loc.latitude, loc.longitude, loc.elevation, loc.name);
         } catch (_) { /* noop */ }
     }
 
