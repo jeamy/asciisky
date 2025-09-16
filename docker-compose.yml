@@ -24,7 +24,7 @@ services:
       # Magnitude limits for asteroids and comets
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
       - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=18.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=16.0
       - ASCII_SKY_COMET_MAX_APPARENT_MAG=12.0
     restart: unless-stopped
  
