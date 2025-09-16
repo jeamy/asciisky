@@ -158,6 +158,13 @@ let precomputeTaskCheckInterval = null;
 
 // LocalStorage keys
 const STORAGE_KEY_ACTIVE_TASK = 'asciisky_active_precompute_task';
+const STORAGE_KEY_START_DATE = 'asciisky_precompute_start_date';
+const STORAGE_KEY_END_DATE = 'asciisky_precompute_end_date';
+
+// UI state mirrors to keep values stable across silent re-renders
+let __uiStartDate = '';
+let __uiEndDate = '';
+let __delegatedHandlerBound = false;
 
 function renderStatus(data, currentLocKey, locationName) {
   const el = ensurePanel();
@@ -220,6 +227,44 @@ function renderStatus(data, currentLocKey, locationName) {
     hasActiveTask = !!(activePrecomputeTask || (savedTaskId && savedTaskId !== 'null'));
   } catch (_) { /* noop */ }
   
+  // Restore previously selected dates (kept across re-renders)
+  // Prefer current DOM values if present, then UI state mirrors, then localStorage
+  let savedStartDate = '';
+  let savedEndDate = '';
+  try {
+    const prevStartEl = document.getElementById('cache-start-date');
+    const prevEndEl = document.getElementById('cache-end-date');
+    const prevStart = prevStartEl && prevStartEl.value ? prevStartEl.value : '';
+    const prevEnd = prevEndEl && prevEndEl.value ? prevEndEl.value : '';
+
+    const lsStart = localStorage.getItem(STORAGE_KEY_START_DATE) || '';
+    const lsEnd = localStorage.getItem(STORAGE_KEY_END_DATE) || '';
+
+    savedStartDate = prevStart || __uiStartDate || lsStart;
+    savedEndDate = prevEnd || __uiEndDate || lsEnd;
+  } catch (_) { /* noop */ }
+
+  // If still missing, compute sensible defaults and persist immediately
+  try {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    if (!savedStartDate) {
+      savedStartDate = todayStr;
+      __uiStartDate = savedStartDate;
+      try { localStorage.setItem(STORAGE_KEY_START_DATE, savedStartDate); } catch (_) { /* noop */ }
+    }
+    if (!savedEndDate) {
+      // Try to respect max_precompute_hours from backend data
+      let end = new Date(today.getTime());
+      const maxHours = Number(data?.max_precompute_hours || 168);
+      const days = Math.max(1, Math.floor(maxHours / 24));
+      end.setDate(end.getDate() + days);
+      savedEndDate = end.toISOString().split('T')[0];
+      __uiEndDate = savedEndDate;
+      try { localStorage.setItem(STORAGE_KEY_END_DATE, savedEndDate); } catch (_) { /* noop */ }
+    }
+  } catch (_) { /* noop */ }
+  
   // Prepare the precompute section
   const precomputeSection = `
     <div class="cache-precompute">
@@ -227,13 +272,13 @@ function renderStatus(data, currentLocKey, locationName) {
       <div class="cache-precompute-form">
         <div class="cache-precompute-row">
           <label class="cache-precompute-label">${t('start_date') || 'Start Date'}:</label>
-          <input type="date" id="cache-start-date" class="cache-precompute-input" ${hasActiveTask ? 'disabled' : ''}>
+          <input type="date" id="cache-start-date" class="cache-precompute-input" value="${savedStartDate}" ${hasActiveTask ? 'disabled' : ''}>
         </div>
         <div class="cache-precompute-row">
           <label class="cache-precompute-label">${t('end_date') || 'End Date'}:</label>
-          <input type="date" id="cache-end-date" class="cache-precompute-input" ${hasActiveTask ? 'disabled' : ''}>
+          <input type="date" id="cache-end-date" class="cache-precompute-input" value="${savedEndDate}" ${hasActiveTask ? 'disabled' : ''}>
         </div>
-        <button id="cache-precompute-button" class="cache-precompute-button" ${hasActiveTask ? 'disabled' : ''}>
+        <button type="button" id="cache-precompute-button" class="cache-precompute-button" ${hasActiveTask ? 'disabled' : ''}>
           ${hasActiveTask ? (t('processing') || 'Processing...') : (t('start_precompute') || 'Start Precompute')}
         </button>
       </div>
@@ -302,6 +347,38 @@ function renderStatus(data, currentLocKey, locationName) {
 export function initCacheStatusPanel(elementId = 'cache-status-panel') {
   const el = document.getElementById(elementId);
   if (el) setPanel(el);
+  // Bind delegated click handler once to survive re-renders
+  try {
+    if (!__delegatedHandlerBound) {
+      document.addEventListener('click', (ev) => {
+        const target = ev.target;
+        if (target && target.id === 'cache-precompute-button') {
+          const btn = target;
+          // If no click listeners yet, run form init and retry click once
+          const hasListener = btn.hasAttribute('data-listeners-added');
+          if (!hasListener) {
+            initializePrecomputeForm()
+              .then(() => {
+                // Retry click once after listeners attach
+                setTimeout(() => {
+                  try {
+                    // Avoid infinite recursion: if still no listener, do nothing
+                    if (btn.hasAttribute('data-listeners-added')) {
+                      btn.click();
+                    }
+                  } catch (_) { /* noop */ }
+                }, 30);
+              })
+              .catch(() => {});
+            // Prevent default to avoid duplicate attempts in the same tick
+            ev.preventDefault();
+            ev.stopPropagation();
+          }
+        }
+      }, true);
+      __delegatedHandlerBound = true;
+    }
+  } catch (_) { /* noop */ }
   
   // Start checking for active task immediately
   const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
@@ -383,6 +460,15 @@ async function restoreActivePrecomputeTask() {
         endDateInput.disabled = true;
         precomputeButton.disabled = true;
         precomputeButton.textContent = t('processing') || 'Processing...';
+        // Populate from saved values if available so they don't appear empty
+        try {
+          const s = localStorage.getItem(STORAGE_KEY_START_DATE);
+          const e = localStorage.getItem(STORAGE_KEY_END_DATE);
+          if (s) startDateInput.value = s;
+          if (e) endDateInput.value = e;
+          __uiStartDate = startDateInput.value || __uiStartDate;
+          __uiEndDate = endDateInput.value || __uiEndDate;
+        } catch (_) { /* noop */ }
       } else {
         console.error('Precompute inputs not found');
       }
@@ -579,10 +665,160 @@ async function initializePrecomputeForm() {
   
   if (!startDateInput || !endDateInput || !precomputeButton) return;
   
+  // Bind click handler immediately so the button works even while async init runs
+  if (!precomputeButton.hasAttribute('data-listeners-added')) {
+    precomputeButton.addEventListener('click', async () => {
+    const startDateInput = document.getElementById('cache-start-date');
+    const endDateInput = document.getElementById('cache-end-date');
+    const precomputeButton = document.getElementById('cache-precompute-button');
+    const progressContainer = document.getElementById('cache-progress');
+    const progressFill = document.getElementById('cache-progress-fill');
+    const progressPercent = document.getElementById('cache-progress-percent');
+    const progressHours = document.getElementById('cache-progress-hours');
+    const progressDetails = document.getElementById('cache-progress-details');
+    
+    let startDate = startDateInput.value;
+    let endDate = endDateInput.value;
+    
+    if (!startDate || !endDate) {
+      // Auto-fill sensible defaults and proceed instead of alerting
+      try {
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const maxHours = Number((window.currentCacheData && window.currentCacheData.max_precompute_hours) || 168);
+        const days = Math.max(1, Math.floor(maxHours / 24));
+        const end = new Date(today.getTime());
+        end.setDate(end.getDate() + days);
+        const endStr = end.toISOString().split('T')[0];
+        if (!startDate) startDateInput.value = todayStr;
+        if (!endDate) endDateInput.value = endStr;
+        __uiStartDate = startDateInput.value;
+        __uiEndDate = endDateInput.value;
+        localStorage.setItem(STORAGE_KEY_START_DATE, __uiStartDate);
+        localStorage.setItem(STORAGE_KEY_END_DATE, __uiEndDate);
+      } catch (_) { /* noop */ }
+      // Re-read values after auto-fill
+      startDate = startDateInput.value;
+      endDate = endDateInput.value;
+    }
+    
+    try {
+      // Persist selected dates so they are retained across re-renders
+      try {
+        localStorage.setItem(STORAGE_KEY_START_DATE, startDate);
+        localStorage.setItem(STORAGE_KEY_END_DATE, endDate);
+      } catch (_) { /* noop */ }
+      __uiStartDate = startDate;
+      __uiEndDate = endDate;
+      // Disable inputs during processing
+      startDateInput.disabled = true;
+      endDateInput.disabled = true;
+      precomputeButton.disabled = true;
+      precomputeButton.textContent = t('processing') || 'Processing...';
+      
+      // Get current location
+      const location = settingsManager.getLocation();
+      if (!location) {
+        throw new Error('No location set');
+      }
+      
+      // Start the precompute task
+      const response = await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: location.latitude,
+          lon: location.longitude,
+          elevation: location.elevation,
+          start_date: `${startDate}T00:00:00Z`,
+          end_date: `${endDate}T23:59:59Z`
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to start precompute task');
+      }
+      
+      const result = await response.json();
+      
+      // Handle cases where backend did not start a new task
+      if (!result || !result.task_id) {
+        // If backend reports an already running task and provides its ID, attach to it
+        if (result && result.status && result.task_id) {
+          activePrecomputeTask = result.task_id;
+          localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
+          if (progressContainer) progressContainer.style.display = 'block';
+          if (progressFill) progressFill.style.width = '0%';
+          if (progressPercent) progressPercent.textContent = '0%';
+          if (progressHours) progressHours.textContent = `0/${result.hours_total || 0} hours`;
+          if (progressDetails) progressDetails.textContent = t('attaching_to_running_task') || 'Attaching to running task...';
+          if (precomputeTaskCheckInterval) clearInterval(precomputeTaskCheckInterval);
+          precomputeTaskCheckInterval = setInterval(async () => {
+            await checkPrecomputeTaskProgress();
+          }, 2000);
+          return;
+        }
+        // Otherwise, show a non-blocking message and re-enable form
+        const reason = (result && result.reason) ? String(result.reason) : 'unknown';
+        const msg = (
+          (reason === 'at_capacity') ? (t('precompute_at_capacity') || 'At capacity. Please try again later.') :
+          (reason === 'inflight_for_location') ? (t('precompute_already_running') || 'A task is already running for this location.') :
+          (t('precompute_not_started') || 'Precompute was not started.')
+        );
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressDetails) progressDetails.textContent = msg;
+        // Re-enable inputs
+        startDateInput.disabled = false;
+        endDateInput.disabled = false;
+        precomputeButton.disabled = false;
+        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
+        return;
+      }
+      
+      activePrecomputeTask = result.task_id;
+      
+      // Save task ID to localStorage
+      localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
+      
+      // Show progress container
+      if (progressContainer) {
+        progressContainer.style.display = 'block';
+      }
+      if (progressFill) progressFill.style.width = '0%';
+      if (progressPercent) progressPercent.textContent = '0%';
+      if (progressHours) progressHours.textContent = `0/${result.hours_total} hours`;
+      if (progressDetails) progressDetails.textContent = t('task_started') || 'Task started...';
+      
+      // Start checking progress
+      if (precomputeTaskCheckInterval) {
+        clearInterval(precomputeTaskCheckInterval);
+      }
+      
+      precomputeTaskCheckInterval = setInterval(async () => {
+        await checkPrecomputeTaskProgress();
+      }, 2000); // Check every 2 seconds
+      
+    } catch (error) {
+      alert(error.message || 'Failed to start precompute task');
+      console.error('Precompute error:', error);
+      
+      // Re-enable inputs
+      startDateInput.disabled = false;
+      endDateInput.disabled = false;
+      precomputeButton.disabled = false;
+      precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
+    }
+    });
+    precomputeButton.setAttribute('data-listeners-added', 'true');
+  }
+  
   // Only initialize if not already set
   if (!startDateInput.value) {
     const today = new Date();
     startDateInput.value = today.toISOString().split('T')[0];
+    try { localStorage.setItem(STORAGE_KEY_START_DATE, startDateInput.value); } catch (_) { /* noop */ }
+    __uiStartDate = startDateInput.value;
   }
   
   if (!endDateInput.value) {
@@ -590,6 +826,8 @@ async function initializePrecomputeForm() {
     const nextWeek = new Date();
     nextWeek.setDate(new Date().getDate() + 7);
     endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
+    try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
+    __uiEndDate = endDateInput.value;
   }
   
   // Setze min-Attribute für die Eingabefelder
@@ -613,6 +851,10 @@ async function initializePrecomputeForm() {
         if (endDateInput.value && endDateInput.value < startDate) {
           endDateInput.value = startDate;
         }
+        try { localStorage.setItem(STORAGE_KEY_START_DATE, startDate); } catch (_) { /* noop */ }
+        try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
+        __uiStartDate = startDateInput.value;
+        __uiEndDate = endDateInput.value;
       }
     });
     startDateInput.setAttribute('data-listeners-added', 'true');
@@ -627,6 +869,8 @@ async function initializePrecomputeForm() {
       if (startDate && endDate && endDate < startDate) {
         endDateInput.value = startDate;
       }
+      try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
+      __uiEndDate = endDateInput.value;
     });
     endDateInput.setAttribute('data-listeners-added', 'true');
   }
@@ -652,6 +896,13 @@ async function initializePrecomputeForm() {
     }
     
     try {
+      // Persist selected dates so they are retained across re-renders
+      try {
+        localStorage.setItem(STORAGE_KEY_START_DATE, startDate);
+        localStorage.setItem(STORAGE_KEY_END_DATE, endDate);
+      } catch (_) { /* noop */ }
+      __uiStartDate = startDate;
+      __uiEndDate = endDate;
       // Disable inputs during processing
       startDateInput.disabled = true;
       endDateInput.disabled = true;
@@ -805,6 +1056,27 @@ async function checkPrecomputeTaskProgress() {
     
     const taskStatus = await response.json();
     
+    // Ensure date inputs reflect the server-provided date range (if available)
+    try {
+      const startDateInput = document.getElementById('cache-start-date');
+      const endDateInput = document.getElementById('cache-end-date');
+      if (taskStatus && taskStatus.date_range && startDateInput && endDateInput) {
+        const dr = taskStatus.date_range;
+        if (dr.start) {
+          const s = String(dr.start).slice(0, 10);
+          startDateInput.value = s;
+          localStorage.setItem(STORAGE_KEY_START_DATE, s);
+          __uiStartDate = s;
+        }
+        if (dr.end) {
+          const e = String(dr.end).slice(0, 10);
+          endDateInput.value = e;
+          localStorage.setItem(STORAGE_KEY_END_DATE, e);
+          __uiEndDate = e;
+        }
+      }
+    } catch (_) { /* noop */ }
+
     // Update progress UI
     const progressFill = document.getElementById('cache-progress-fill');
     const progressPercent = document.getElementById('cache-progress-percent');

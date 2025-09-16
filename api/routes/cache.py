@@ -48,6 +48,36 @@ async def get_precompute_status(request: Request, task_id: str):
                     worker_status = json.load(f)
                 task_info.update(worker_status)
 
+        # Always try to enrich with the original task definition (contains start/end)
+        try:
+            task_file = f"cache/task_{task_id}.json"
+            if os.path.exists(task_file):
+                with open(task_file, 'r') as tf:
+                    task_def = json.load(tf)
+                start_iso = task_def.get('start_dt_utc')
+                end_iso = task_def.get('end_dt_utc')
+                if start_iso or end_iso:
+                    task_info.setdefault('date_range', {})
+                    if start_iso:
+                        task_info['date_range']['start'] = start_iso
+                    if end_iso:
+                        task_info['date_range']['end'] = end_iso
+        except Exception:
+            pass
+
+        # Fallback: if status payload itself contains start/end, map them into date_range
+        try:
+            start_iso = task_info.get('start_dt_utc')
+            end_iso = task_info.get('end_dt_utc')
+            if start_iso or end_iso:
+                task_info.setdefault('date_range', {})
+                if start_iso:
+                    task_info['date_range']['start'] = start_iso
+                if end_iso:
+                    task_info['date_range']['end'] = end_iso
+        except Exception:
+            pass
+
         return task_info
     except Exception as e:
         return JSONResponse(status_code=500, content={'error': str(e)})
