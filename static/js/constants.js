@@ -9,8 +9,8 @@ export const API_ENDPOINTS = {
     SESSION_LOCATION: '/api/session/location',
     CACHE_STATUS: '/api/cache_status',
     CACHE_AVAILABILITY: '/api/cache_availability',
-    PRECOMPUTE_RANGE: '/api/precompute_range',
-    PRECOMPUTE_WINDOW: '/api/precompute_window'
+    PRECOMPUTE_WINDOW: '/api/precompute_window',
+    CONFIG: '/api/config'
     // ZODIAC endpoint removed as it's not implemented in the backend
 };
 

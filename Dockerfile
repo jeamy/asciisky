@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
     tzdata \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Set timezone to Europe/Berlin (MESZ/CEST)

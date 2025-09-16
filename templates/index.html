@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="./static/css/timeControls.css">
     <link rel="stylesheet" href="./static/css/cacheStatus.css">
     <link rel="stylesheet" href="./static/css/timeInputDialog.css">
+    <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
 </head>
 <body>
 <header>
@@ -67,7 +68,7 @@
     import { LocationDialog } from './static/js/locationDialog.js';
     import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
-    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced, updateCacheStatusSilently } from './static/js/cacheStatusPanel.js';
+    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     
     let renderer;
     let locationDialog;
@@ -76,9 +77,10 @@
     function refreshCacheStatus() {
         try {
             const loc = settingsManager.getLocation();
-            if (!loc) return;
-            // Prefer silent refresh to avoid UI flicker, especially during active precompute
-            updateCacheStatusSilently(loc.latitude, loc.longitude, loc.elevation, loc.name);
+            if (loc) {
+                // debounced to avoid spamming during rapid simulated time changes
+                updateCacheStatusForLocationDebounced(loc.latitude, loc.longitude, loc.elevation, loc.name);
+            }
         } catch (_) { /* noop */ }
     }
 
@@ -272,8 +274,6 @@
                 <h4>${t('help_cache_status') || 'Cache-Status'}</h4>
                 <p>${t('help_cache_status_desc') || 'Zeigt verfügbare vorberechnete Daten für den aktuellen Standort. "Snapshots" sind stündliche Berechnungen für schnelle Anzeige.'}</p>
                 
-                <h4>${t('help_cache_precompute') || 'Cache-Vorberechnung'}</h4>
-                <p>${t('help_cache_precompute_desc') || 'Mit der Cache-Vorberechnung können Sie Himmelsdaten für einen bestimmten Zeitraum im Voraus berechnen lassen. Wählen Sie Start- und Enddatum und klicken Sie auf "Berechnung starten". Der Fortschritt wird angezeigt und die Daten stehen nach Abschluss für schnelle Anzeige zur Verfügung.'}</p>
 
                 <h4>${t('help_simulation') || 'Zeitsimulation'}</h4>
                 <p>${t('help_simulation_desc') || 'Simuliert verschiedene Zeitpunkte um Himmelsbewegungen zu verfolgen. Die Steuerelemente erlauben präzise Zeitnavigation:'}</p>
@@ -493,7 +493,7 @@
                     
                     if (!isSelected && renderer) {
                         btn.classList.add('active');
-                        renderer.selectObject(name);
+                        renderer.selectObject(name, true); // true = show dialog
                     } else if (renderer) {
                         renderer.clearSelection();
                     }

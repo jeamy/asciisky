@@ -326,7 +326,7 @@ export class LocationDialog {
             console.log(`Triggering automatic precompute for location ${location.name} (${location.lat}, ${location.lon}) from ${startDate} to ${endDate}`);
             
             // Starte Precompute im Hintergrund - nicht warten
-            fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
+            fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -366,11 +366,11 @@ export class LocationDialog {
         // Aktualisiere Cache-Status alle 3 Sekunden während Berechnung läuft
         const updateInterval = setInterval(async () => {
             try {
-                // Importiere die SILENT Variante, um UI-Flicker zu vermeiden
-                const { updateCacheStatusSilently } = await import('./cacheStatusPanel.js');
-
-                // Aktualisiere Cache-Status, ohne den Panel-Inhalt auf "Loading" zu setzen
-                await updateCacheStatusSilently(
+                // Importiere updateCacheStatusForLocation dynamisch
+                const { updateCacheStatusForLocation } = await import('./cacheStatusPanel.js');
+                
+                // Aktualisiere Cache-Status
+                await updateCacheStatusForLocation(
                     location.lat, 
                     location.lon, 
                     location.elevation, 
@@ -378,7 +378,7 @@ export class LocationDialog {
                 );
                 
                 // Prüfe ob noch eine aktive Precompute-Task läuft
-                const activeTaskId = localStorage.getItem('asciisky_active_precompute_task');
+                const activeTaskId = localStorage.getItem('activePrecomputeTask');
                 if (!activeTaskId) {
                     // Keine aktive Task mehr - stoppe Updates
                     clearInterval(updateInterval);

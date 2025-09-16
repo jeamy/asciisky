@@ -6,6 +6,7 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
@@ -20,6 +21,11 @@ services:
       - ASCII_SKY_MAX_WINDOW_WORKERS=1
       # Session Secret (für Prod sinnvoll ändern)
       - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=18.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=12.0
     restart: unless-stopped
  
   worker:
@@ -32,11 +38,16 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=144
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=168
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
       - ASCII_SKY_PRECOMPUTE_WORKERS=4
       - ASCII_SKY_ADAPTIVE_WORKERS=0
       - ASCII_SKY_RETENTION_DAYS=30
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=18.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=16.0
     restart: unless-stopped
  
   worker_once:
@@ -49,12 +60,17 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=144
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=168
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
       - ASCII_SKY_PRECOMPUTE_KINDS=celestial,asteroids,comets
       - ASCII_SKY_PRECOMPUTE_WORKERS=4
       - ASCII_SKY_ADAPTIVE_WORKERS=0
       - ASCII_SKY_RETENTION_DAYS=30
       - ASCII_SKY_WORKER_RUN_ONCE=1
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=18.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=16.0
     restart: "no"
     profiles: ["once"]
 

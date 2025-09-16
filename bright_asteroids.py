@@ -32,9 +32,9 @@ MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
 # Magnitude thresholds (restored defaults)
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
-MAX_ABSOLUTE_MAGNITUDE = 12.0
+MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG', '12.0'))
 # V-limit for final apparent magnitude filtering
-MAX_APPARENT_MAGNITUDE = 10.0
+MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_APPARENT_MAG', '10.0'))
 # Gravitationskonstante der Sonne für Skyfield
 GM_SUN = 1.32712440041e20
 

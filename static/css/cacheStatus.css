@@ -24,37 +24,37 @@
 
 .cache-status-panel .cs-header {
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   font-size: 0.9rem;
 }
 
-.cache-status-panel .cs-subtle {
+.cache-status-panel .cs-location {
   color: var(--text-dim);
   font-size: 0.9em;
+  margin-bottom: 12px;
 }
 
 .cache-status-panel .cs-section {
+  margin-bottom: 12px;
+}
+
+.cache-status-panel .cs-section-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.cache-status-panel .cs-time-range {
+  margin-left: 8px;
+  color: var(--text-dim);
+  line-height: 1.2;
+}
+
+.cache-status-panel .cs-kinds-section {
   margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-color);
-}
-
-.cache-status-panel .cs-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 4px 0;
-}
-
-.cache-status-panel .cs-kinds {
-  list-style: none;
-  padding: 0;
-  margin: 6px 0 0 0;
 }
 
 .cache-status-panel .cs-kind {
-  padding: 6px 0;
-  border-bottom: 1px dotted var(--border-color);
+  margin-bottom: 8px;
 }
 
 .cache-status-panel .cs-kind .head {

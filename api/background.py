@@ -239,10 +239,13 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
             json.dump(task_data, f)
 
         try:
-            worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
-            # Wichtig: stdout/stderr nicht als PIPE capturen, um Deadlocks zu vermeiden
-            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd())
-            print(f"Started background window worker process for task {task_id} (PID: {process.pid})")
+            # Run task worker in the worker container instead of web container
+            docker_cmd = [
+                'docker', 'exec', '-d', 'asciisky-worker-1',
+                'python', 'precompute_task_worker.py', task_file
+            ]
+            process = subprocess.Popen(docker_cmd, cwd=os.getcwd())
+            print(f"Started background window worker in worker container for task {task_id} (docker exec PID: {process.pid})")
 
             if not hasattr(app, 'precompute_tasks'):
                 app.precompute_tasks = {}
@@ -308,67 +311,12 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
             # If a range task is already running for this location, skip
             inflight = app.active_range_tasks_by_loc.get(loc_key)
             if inflight:
-                # Try to return the existing task_id so clients can attach
-                task_id_attach = inflight.get('task_id') if isinstance(inflight, dict) else None
-                if not task_id_attach:
-                    # Also check window tasks for the same location
-                    try:
-                        win = getattr(app, 'active_window_tasks_by_loc', {}).get(loc_key)
-                        if isinstance(win, dict) and win.get('task_id'):
-                            task_id_attach = win.get('task_id')
-                    except Exception:
-                        pass
-                if not task_id_attach:
-                    # Fallback: search known tasks for matching location
-                    try:
-                        for tid, info in getattr(app, 'precompute_tasks', {}).items():
-                            loc = info.get('location') or {}
-                            if float(loc.get('lat', 0)) == lat and float(loc.get('lon', 0)) == lon and float(loc.get('elevation', 0)) == elevation:
-                                # Consider only tasks that are not finalized
-                                status = info.get('status', 'starting')
-                                if status not in ('completed', 'error'):
-                                    task_id_attach = tid
-                                    break
-                    except Exception:
-                        pass
-                return {
-                    'status': 'skipped', 'reason': 'inflight_for_location',
-                    'task_id': task_id_attach, 'hours_total': inflight.get('hours_total') if isinstance(inflight, dict) else None
-                }
+                return {'status': 'skipped', 'reason': 'inflight_for_location'}
             # Check capacity including reservations
             running = _count_running_window_workers()
             reserved = int(app.window_worker_reservations or 0)
             if (running + reserved) >= MAX_WINDOW_WORKERS:
-                # If at capacity, attempt to locate an existing task for this location to attach
-                task_id_attach = None
-                try:
-                    rng = getattr(app, 'active_range_tasks_by_loc', {}).get(loc_key)
-                    if isinstance(rng, dict) and rng.get('task_id'):
-                        task_id_attach = rng.get('task_id')
-                except Exception:
-                    pass
-                if not task_id_attach:
-                    try:
-                        win = getattr(app, 'active_window_tasks_by_loc', {}).get(loc_key)
-                        if isinstance(win, dict) and win.get('task_id'):
-                            task_id_attach = win.get('task_id')
-                    except Exception:
-                        pass
-                if not task_id_attach:
-                    try:
-                        for tid, info in getattr(app, 'precompute_tasks', {}).items():
-                            loc = info.get('location') or {}
-                            if float(loc.get('lat', 0)) == lat and float(loc.get('lon', 0)) == lon and float(loc.get('elevation', 0)) == elevation:
-                                status = info.get('status', 'starting')
-                                if status not in ('completed', 'error'):
-                                    task_id_attach = tid
-                                    break
-                    except Exception:
-                        pass
-                return {
-                    'status': 'skipped', 'reason': 'at_capacity', 'running': running, 'reserved': reserved,
-                    'task_id': task_id_attach
-                }
+                return {'status': 'skipped', 'reason': 'at_capacity', 'running': running, 'reserved': reserved}
             # Reserve slot and mark inflight
             app.window_worker_reservations += 1
             app.active_range_tasks_by_loc[loc_key] = {
@@ -394,10 +342,13 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
             json.dump(task_data, f)
 
         try:
-            worker_script = os.path.join(os.getcwd(), 'precompute_task_worker.py')
-            # Wichtig: stdout/stderr nicht als PIPE capturen, um Deadlocks zu vermeiden
-            process = subprocess.Popen([sys.executable, worker_script, task_file], cwd=os.getcwd())
-            print(f"Started background worker process for task {task_id} (PID: {process.pid})")
+            # Run task worker in the worker container instead of web container
+            docker_cmd = [
+                'docker', 'exec', '-d', 'asciisky-worker-1',
+                'python', 'precompute_task_worker.py', task_file
+            ]
+            process = subprocess.Popen(docker_cmd, cwd=os.getcwd())
+            print(f"Started background worker in worker container for task {task_id} (docker exec PID: {process.pid})")
             app.precompute_tasks[task_id]['worker_pid'] = process.pid
             # Mark running for this location
             async with app.bg_task_lock:

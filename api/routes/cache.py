@@ -48,36 +48,6 @@ async def get_precompute_status(request: Request, task_id: str):
                     worker_status = json.load(f)
                 task_info.update(worker_status)
 
-        # Always try to enrich with the original task definition (contains start/end)
-        try:
-            task_file = f"cache/task_{task_id}.json"
-            if os.path.exists(task_file):
-                with open(task_file, 'r') as tf:
-                    task_def = json.load(tf)
-                start_iso = task_def.get('start_dt_utc')
-                end_iso = task_def.get('end_dt_utc')
-                if start_iso or end_iso:
-                    task_info.setdefault('date_range', {})
-                    if start_iso:
-                        task_info['date_range']['start'] = start_iso
-                    if end_iso:
-                        task_info['date_range']['end'] = end_iso
-        except Exception:
-            pass
-
-        # Fallback: if status payload itself contains start/end, map them into date_range
-        try:
-            start_iso = task_info.get('start_dt_utc')
-            end_iso = task_info.get('end_dt_utc')
-            if start_iso or end_iso:
-                task_info.setdefault('date_range', {})
-                if start_iso:
-                    task_info['date_range']['start'] = start_iso
-                if end_iso:
-                    task_info['date_range']['end'] = end_iso
-        except Exception:
-            pass
-
         return task_info
     except Exception as e:
         return JSONResponse(status_code=500, content={'error': str(e)})
@@ -316,5 +286,40 @@ async def precompute_window(request: Request):
         await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=kinds)
 
         return { 'status': 'started', 'message': 'Background precompute window triggered', 'kinds': kinds, 'time': dt_utc.isoformat() }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/precompute_status/{task_id}")
+async def get_precompute_status(task_id: str, request: Request):
+    """Get status of a precompute task by task ID."""
+    try:
+        # First try to read from shared status file (written by worker container)
+        status_file = f"cache/task_status_{task_id}.json"
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                status_data = json.load(f)
+            
+            # Merge with in-memory task info if available
+            if hasattr(request.app, 'precompute_tasks') and task_id in request.app.precompute_tasks:
+                in_memory = request.app.precompute_tasks[task_id]
+                # Keep worker_pid and worker_process from in-memory data
+                status_data.update({
+                    'worker_pid': in_memory.get('worker_pid'),
+                    'worker_process': in_memory.get('worker_process', True)
+                })
+            
+            return status_data
+        
+        # Fallback to in-memory data if no status file exists
+        if not hasattr(request.app, 'precompute_tasks'):
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task_info = request.app.precompute_tasks.get(task_id)
+        if not task_info:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return task_info
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

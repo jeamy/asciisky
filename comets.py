@@ -13,10 +13,15 @@ from skyfield import almanac
 import os
 import time
 import pickle
+import time
 import logging
+from datetime import datetime, timedelta, timezone
+import gzip
 import urllib.request
-from datetime import datetime, timezone
-from typing import List, Optional
+from skyfield.data import mpc
+import math
+from types import SimpleNamespace
+from typing import Optional, List
 
 import pandas as pd
 import numpy as np
@@ -25,43 +30,42 @@ from skyfield.api import Loader, wgs84
 from skyfield.data import mpc
 from skyfield.magnitudelib import planetary_magnitude
 
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
-from db_utils import get_db_connection
+from cache_utils import build_cache_path, atomic_write_pickle, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
+from bright_asteroids import format_time
+import logging
+from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions, migrate_from_pickle_cache
 
 def should_update_comet_file():
     """
-    Überprüft ob Kometen-Datei aktualisiert werden sollte (täglich)
+    Überprüft ob Kometen-Datei aktualisiert werden sollte (wöchentlich)
     """
     if not os.path.exists(COMETS_FILE):
         return True
     
     # Prüfe Alter der Datei
     file_age = time.time() - os.path.getmtime(COMETS_FILE)
-    # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
-    return file_age > 86400
+    # Aktualisiere wöchentlich (7 Tage = 604800 Sekunden)
+    return file_age > 604800
+
+# Configuration
+COMETS_FILE = "COMET_ELEMENTS.txt"
+COMET_CACHE_TTL_SECONDS = 6 * 3600  # 6 hours
+COMET_CACHE_BUCKET_HOURS = 6
+COMET_DF_CACHE_TTL_SECONDS = 12 * 3600  # 12 hours
+MAX_COMETS_DEFAULT = 1000
+MAX_APPARENT_MAGNITUDE = 16.0
+MAX_ABSOLUTE_MAGNITUDE = 18.0  # M1 prefilter threshold
+COMET_USE_SQLITE = True
+GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
+
 
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
 CACHE_VALIDITY_SECONDS = 12 * 3600  # 12h
-COMETS_FILE = 'cache/CometEls.txt'
 # Final comet list cache (mirror bright_asteroids behavior)
 BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
-MAX_COMETS_DEFAULT = 200
-# Pre-filter by comet absolute magnitude parameter (M1); smaller = brighter
-MAX_ABSOLUTE_MAGNITUDE = 18.0
-# Final filter by estimated apparent magnitude at current time/location
-MAX_APPARENT_MAGNITUDE = 16.0
-
-# Module-specific cache granularity for per-location/time comet list
-# Use a 1-hour bucket; TTL should span the 48h precompute window so that
-# snapshots remain valid when served from cache-only endpoints.
-COMET_CACHE_BUCKET_HOURS = 1
-COMET_CACHE_TTL_SECONDS = 49 * 3600
-
-# SQLite backend configuration
-COMET_USE_SQLITE = os.getenv('COMET_USE_SQLITE', 'true').lower() == 'true'
 
 # Ensure cache directory exists
 os.makedirs('cache', exist_ok=True)
@@ -76,6 +80,41 @@ logger = logging.getLogger(__name__)
 
 def _now() -> datetime:
     return datetime.now()
+
+
+def _clear_comet_caches():
+    """Clear all comet-related cache files when new data is downloaded"""
+    import glob
+    import shutil
+    
+    cache_files_to_clear = [
+        COMET_DF_CACHE_FILE,  # DataFrame cache
+        BRIGHT_COMET_CACHE_FILE,  # Legacy bright comet cache
+    ]
+    
+    # Clear individual cache files
+    for cache_file in cache_files_to_clear:
+        if os.path.exists(cache_file):
+            try:
+                os.remove(cache_file)
+                logger.debug(f"Removed cache file: {cache_file}")
+            except Exception as e:
+                logger.warning(f"Failed to remove cache file {cache_file}: {e}")
+    
+    # Clear per-location comet cache directories
+    comet_cache_pattern = os.path.join(CACHE_ROOT, 'comets', '*')
+    for cache_dir in glob.glob(comet_cache_pattern):
+        if os.path.isdir(cache_dir):
+            try:
+                shutil.rmtree(cache_dir)
+                logger.debug(f"Removed comet cache directory: {cache_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to remove cache directory {cache_dir}: {e}")
+    
+    # Clear in-memory cache
+    global _comet_df_cache, _comet_df_timestamp
+    _comet_df_cache = None
+    _comet_df_timestamp = None
 
 
 def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
@@ -314,7 +353,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
     try:
         # Check if daily update is needed
         if should_update_comet_file():
-            logger.debug("Comet file needs daily update, downloading...")
+            logger.debug("Comet file needs weekly update, downloading...")
             try:
                 with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
                     content = rf.read()
@@ -324,6 +363,11 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                         with open(COMETS_FILE, 'wb') as wf:
                             wf.write(content)
                         logger.debug(f"Updated comet file: {COMETS_FILE}")
+                        
+                        # Clear comet caches when new data is downloaded
+                        _clear_comet_caches()
+                        logger.debug("Cleared comet caches after data update")
+                        
                     except Exception as we:
                         logger.warning(f"Failed to write {COMETS_FILE}: {we}")
             except Exception as ne:
@@ -465,6 +509,8 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         try:
             # Prepare row with expected aliases
             row2 = row.copy()
+            # Add designation field that mpc.comet_orbit() expects
+            row2['designation'] = designation
             # Coerce numeric fields at row level to avoid stray strings from upstream/caches
             row_numeric_cols = ['e', 'q', 'incl', 'i', 'om', 'node', 'w', 'peri', 'epoch_tt', 'Tp', 'M1', 'k1', 'M2', 'k2']
             for col in row_numeric_cols:
@@ -563,21 +609,22 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             try:
                 r = sun.at(t).observe(target).distance().au
                 delta = astrometric.distance().au
-                if pd.notna(row2.get('M1')):
-                    M1 = float(row2.get('M1'))
-                    n_raw = row2.get('k1')
-                    n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
-                    apparent_magnitude = (
-                        float(M1)
-                        + 5.0 * math.log10(max(delta, 1e-12))
-                        + 2.5 * float(n) * math.log10(max(r, 1e-12))
-                    )
+                M1 = float(row2.get('M1'))
+                n_raw = row2.get('k1')
+                n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
+                apparent_magnitude = (
+                    float(M1)
+                    + 5.0 * math.log10(max(delta, 1e-12))
+                    + 2.5 * float(n) * math.log10(max(r, 1e-12))
+                )
+                # Debug logging for bright comets
+                if apparent_magnitude <= 12.0:
+                    logger.debug(f"Bright comet found: {designation} mag={apparent_magnitude:.1f} (M1={M1}, r={r:.2f}, Δ={delta:.2f})")
+                # Skip if too faint
+                if apparent_magnitude > MAX_APPARENT_MAGNITUDE:
+                    continue
             except Exception:
                 pass
-
-            # Apply apparent magnitude filter; skip faint comets early
-            if not isinstance(apparent_magnitude, (int, float)) or apparent_magnitude > MAX_APPARENT_MAGNITUDE:
-                continue
 
             # Apparent position only for passing comets
             apparent = astrometric.apparent()
@@ -641,6 +688,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
             comet_list.append({
                 'name': name,
+                'designation': designation,
                 'symbol': '☄️',
                 'type': 'comet',
                 'ra': ra.hours * 15.0,

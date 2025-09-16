@@ -72,9 +72,14 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Celestial
     - `cache/celestial/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
 
-- Thresholds
-  - Asteroids: `MAX_ABSOLUTE_MAGNITUDE = 12.0`, `MAX_APPARENT_MAGNITUDE = 10.0` in `bright_asteroids.py`
-  - Comets: `MAX_ABSOLUTE_MAGNITUDE = 14.0`, `MAX_APPARENT_MAGNITUDE = 10.0` in `comets.py`
+- Thresholds (configurable via environment variables)
+  - Asteroids: 
+    - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` (default: 12.0)
+    - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` (default: 10.0)
+  - Comets:
+    - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 18.0)
+    - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 16.0)
+  - Current values exposed via `/api/config` endpoint
   - To force recomputation with new thresholds, delete both SQLite database and pickle cache files
 
 ### Without Docker
@@ -133,6 +138,7 @@ All endpoints are referenced in the frontend via `static/js/constants.js`.
 - `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
 - `GET /api/cache_status` — cache status and precomputed data availability; see `doc/cache.md`
+- `GET /api/config` — current configuration including magnitude limits from environment variables
 
 ### Simulated Time (optional)
 
@@ -171,6 +177,12 @@ The application can be configured using the following environment variables in `
 - `ASCII_SKY_PRECOMPUTE_WORKERS` - Number of worker threads for precomputation (default: 4)
 - `ASCII_SKY_ADAPTIVE_WORKERS` - Enable adaptive worker count based on CPU cores (default: 1)
 - `ASCII_SKY_WORKER_RUN_ONCE` - Run worker once and exit (default: not set, only for worker_once service)
+
+### Magnitude Limits Configuration
+- `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for asteroid prefiltering (default: 12.0)
+- `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` - Maximum apparent magnitude for asteroid display (default: 10.0)
+- `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for comet prefiltering (default: 18.0)
+- `ASCII_SKY_COMET_MAX_APPARENT_MAG` - Maximum apparent magnitude for comet display (default: 16.0)
 
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)

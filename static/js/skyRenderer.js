@@ -176,6 +176,9 @@ export class SkyRenderer {
         // Füge den Himmelstext hinzu
         this.container.appendChild(skyTextDiv);
 
+        // Füge Objektanzahl-Display hinzu
+        this.addObjectCountDisplay();
+
         // Füge immer neue Navigationspfeile hinzu
         this.addNavigationArrows();
 
@@ -223,6 +226,57 @@ export class SkyRenderer {
         arrowsDiv.appendChild(leftArrow);
         arrowsDiv.appendChild(rightArrow);
         this.container.appendChild(arrowsDiv);
+    }
+
+    async addObjectCountDisplay() {
+        // Entferne vorhandenes Count-Display
+        const existingCount = document.getElementById('object-count-display');
+        if (existingCount) {
+            existingCount.remove();
+        }
+
+        // Zähle sichtbare Asteroiden und Kometen
+        let asteroidCount = 0;
+        let cometCount = 0;
+
+        if (this.celestialData && this.celestialData.bodies) {
+            Object.values(this.celestialData.bodies).forEach(body => {
+                if (body.altitude > 0) { // Nur sichtbare Objekte über dem Horizont
+                    if (body.type === 'asteroid') {
+                        asteroidCount++;
+                    } else if (body.type === 'comet') {
+                        cometCount++;
+                    }
+                }
+            });
+        }
+
+        // Hole Magnitude-Werte aus der Config-API
+        let asteroidMag = 10.0; // Fallback
+        let cometMag = 16.0;    // Fallback
+        
+        try {
+            const response = await fetch(API_ENDPOINTS.CONFIG);
+            if (response.ok) {
+                const config = await response.json();
+                asteroidMag = config.magnitude_limits?.asteroids?.max_apparent || 10.0;
+                cometMag = config.magnitude_limits?.comets?.max_apparent || 16.0;
+            }
+        } catch (error) {
+            console.warn('Could not fetch magnitude limits from config API:', error);
+        }
+
+        // Erstelle Count-Display
+        const countDiv = document.createElement('div');
+        countDiv.id = 'object-count-display';
+        countDiv.className = 'object-count-display';
+        
+        countDiv.innerHTML = `
+            <div class="count-item">${t('asteroids_up_to_mag')} ${asteroidMag}: ${asteroidCount}</div>
+            <div class="count-item">${t('comets_up_to_mag')} ${cometMag}: ${cometCount}</div>
+        `;
+
+        this.container.appendChild(countDiv);
     }
 
     // Stellt sicher, dass eine Ebene für Labels existiert und gibt sie zurück
@@ -376,7 +430,7 @@ export class SkyRenderer {
             if (this._precomputeRequests.has(key)) return;
             this._precomputeRequests.add(key);
 
-            await fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW || API_ENDPOINTS.PRECOMPUTE_RANGE.replace('/precompute_range', '/precompute_window'), {
+            await fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

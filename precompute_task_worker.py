@@ -233,8 +233,12 @@ def process_precompute_task(task_file):
                 kind_had_cache = False
 
                 if k == 'celestial':
-                    ensure_celestial_cache(lat, lon, elevation, process_dt)
-                    print(f"[worker] generated celestial cache for {process_dt.isoformat()}")
+                    cache_existed = ensure_celestial_cache(lat, lon, elevation, process_dt)
+                    if cache_existed:
+                        kind_had_cache = True
+                        print(f"[worker] celestial cache exists for {process_dt.isoformat()}")
+                    else:
+                        print(f"[worker] generated celestial cache for {process_dt.isoformat()}")
                 elif k == 'asteroids':
                     cache_existed = _ensure_asteroids_cache(lat, lon, elevation, process_dt)
                     if cache_existed:
@@ -253,6 +257,7 @@ def process_precompute_task(task_file):
                 if not kind_had_cache:
                     hour_had_cache = False
             
+            # Count all processed hours, but track skipped separately
             hours_completed += 1
             if hour_had_cache:
                 hours_skipped += 1

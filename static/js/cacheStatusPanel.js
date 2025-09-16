@@ -104,9 +104,12 @@ function minIsoTimestamp(isos) {
       const hour = parseInt(s.slice(9, 11));
       t = new Date(year, month, day, hour, 0, 0).getTime();
     } else {
-      t = Date.parse(s);
+      t = new Date(s).getTime();
     }
-    if (!Number.isNaN(t) && t < minT) { minT = t; minS = s; }
+    if (!isNaN(t) && t < minT) {
+      minT = t;
+      minS = s;
+    }
   }
   return minS;
 }
@@ -126,21 +129,14 @@ function maxIsoTimestamp(isos) {
       const hour = parseInt(s.slice(9, 11));
       t = new Date(year, month, day, hour, 0, 0).getTime();
     } else {
-      t = Date.parse(s);
+      t = new Date(s).getTime();
     }
-    if (!Number.isNaN(t) && t > maxT) { maxT = t; maxS = s; }
+    if (!isNaN(t) && t > maxT) {
+      maxT = t;
+      maxS = s;
+    }
   }
   return maxS;
-}
-
-function renderLoading(locationName) {
-  const el = ensurePanel();
-  if (!el) return;
-  el.innerHTML = `
-    <div class="cs-header">${t('cache_status') || 'Cache Status'}</div>
-    <div class="cs-subtle">${locationName ? (t('location') || 'Location') + ': ' + locationName : ''}</div>
-    <div class="cs-section">${t('loading') || 'Loading...'} </div>
-  `;
 }
 
 function renderError(err, locationName) {
@@ -152,19 +148,6 @@ function renderError(err, locationName) {
     <div class="cs-section cs-error">${t('error') || 'Error'}: ${String(err)}</div>
   `;
 }
-
-let activePrecomputeTask = null;
-let precomputeTaskCheckInterval = null;
-
-// LocalStorage keys
-const STORAGE_KEY_ACTIVE_TASK = 'asciisky_active_precompute_task';
-const STORAGE_KEY_START_DATE = 'asciisky_precompute_start_date';
-const STORAGE_KEY_END_DATE = 'asciisky_precompute_end_date';
-
-// UI state mirrors to keep values stable across silent re-renders
-let __uiStartDate = '';
-let __uiEndDate = '';
-let __delegatedHandlerBound = false;
 
 function renderStatus(data, currentLocKey, locationName) {
   const el = ensurePanel();
@@ -179,38 +162,21 @@ function renderStatus(data, currentLocKey, locationName) {
     
     if (!match) {
       // Strategie 2: Koordinaten-basierter Match (ignoriere Höhe)
-      const keyParts = currentLocKey.split('_');
-      if (keyParts.length >= 2) {
-        const latPart = keyParts[0].substring(3); // Entferne 'lat'
-        const lonPart = keyParts[1].substring(3); // Entferne 'lon'
-        
-        // Finde alle Standorte mit ähnlichen Koordinaten
-        const coordMatches = data.locations.filter(loc => {
-          const latMatch = Math.abs(loc.latitude - parseFloat(latPart)) < 0.0001;
-          const lonMatch = Math.abs(loc.longitude - parseFloat(lonPart)) < 0.0001;
-          return latMatch && lonMatch;
+      const currentCoords = extractCoordsFromLocKey(currentLocKey);
+      if (currentCoords) {
+        match = data.locations.find(loc => {
+          const coords = extractCoordsFromLocKey(loc.loc_key);
+          return coords && 
+                 Math.abs(coords.lat - currentCoords.lat) < 0.001 && 
+                 Math.abs(coords.lon - currentCoords.lon) < 0.001;
         });
-        
-        if (coordMatches.length > 0) {
-          // Bevorzuge Standorte mit den meisten Snapshots
-          match = coordMatches.reduce((best, current) => {
-            const bestTotal = (best.counts?.celestial || 0) + (best.counts?.asteroids || 0) + (best.counts?.comets || 0);
-            const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
-            return currentTotal > bestTotal ? current : best;
-          });
-        }
       }
     }
     
-    // Strategie 3: Fallback auf besten verfügbaren Standort
     if (!match) {
-      match = data.locations.reduce((best, current) => {
-        const bestTotal = (best.counts?.celestial || 0) + (best.counts?.asteroids || 0) + (best.counts?.comets || 0);
-        const currentTotal = (current.counts?.celestial || 0) + (current.counts?.asteroids || 0) + (current.counts?.comets || 0);
-        return currentTotal > bestTotal ? current : best;
-      });
+      // Strategie 3: Nimm den ersten verfügbaren Standort
+      match = data.locations[0];
     }
-    
   }
 
   const start = data?.window?.start ? toLocalHM(data.window.start) : '—';
@@ -219,89 +185,12 @@ function renderStatus(data, currentLocKey, locationName) {
 
   const kinds = Array.isArray(data?.kinds) ? data.kinds : [];
 
-  // Determine if there is an active task persisted locally
-  // This keeps the progress UI visible across re-renders and silent updates
-  let hasActiveTask = false;
-  try {
-    const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
-    hasActiveTask = !!(activePrecomputeTask || (savedTaskId && savedTaskId !== 'null'));
-  } catch (_) { /* noop */ }
-  
-  // Restore previously selected dates (kept across re-renders)
-  // Prefer current DOM values if present, then UI state mirrors, then localStorage
-  let savedStartDate = '';
-  let savedEndDate = '';
-  try {
-    const prevStartEl = document.getElementById('cache-start-date');
-    const prevEndEl = document.getElementById('cache-end-date');
-    const prevStart = prevStartEl && prevStartEl.value ? prevStartEl.value : '';
-    const prevEnd = prevEndEl && prevEndEl.value ? prevEndEl.value : '';
-
-    const lsStart = localStorage.getItem(STORAGE_KEY_START_DATE) || '';
-    const lsEnd = localStorage.getItem(STORAGE_KEY_END_DATE) || '';
-
-    savedStartDate = prevStart || __uiStartDate || lsStart;
-    savedEndDate = prevEnd || __uiEndDate || lsEnd;
-  } catch (_) { /* noop */ }
-
-  // If still missing, compute sensible defaults and persist immediately
-  try {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    if (!savedStartDate) {
-      savedStartDate = todayStr;
-      __uiStartDate = savedStartDate;
-      try { localStorage.setItem(STORAGE_KEY_START_DATE, savedStartDate); } catch (_) { /* noop */ }
-    }
-    if (!savedEndDate) {
-      // Try to respect max_precompute_hours from backend data
-      let end = new Date(today.getTime());
-      const maxHours = Number(data?.max_precompute_hours || 168);
-      const days = Math.max(1, Math.floor(maxHours / 24));
-      end.setDate(end.getDate() + days);
-      savedEndDate = end.toISOString().split('T')[0];
-      __uiEndDate = savedEndDate;
-      try { localStorage.setItem(STORAGE_KEY_END_DATE, savedEndDate); } catch (_) { /* noop */ }
-    }
-  } catch (_) { /* noop */ }
-  
-  // Prepare the precompute section
-  const precomputeSection = `
-    <div class="cache-precompute">
-      <div class="cache-precompute-title">${t('precompute_cache') || 'Precompute Cache'}</div>
-      <div class="cache-precompute-form">
-        <div class="cache-precompute-row">
-          <label class="cache-precompute-label">${t('start_date') || 'Start Date'}:</label>
-          <input type="date" id="cache-start-date" class="cache-precompute-input" value="${savedStartDate}" ${hasActiveTask ? 'disabled' : ''}>
-        </div>
-        <div class="cache-precompute-row">
-          <label class="cache-precompute-label">${t('end_date') || 'End Date'}:</label>
-          <input type="date" id="cache-end-date" class="cache-precompute-input" value="${savedEndDate}" ${hasActiveTask ? 'disabled' : ''}>
-        </div>
-        <button type="button" id="cache-precompute-button" class="cache-precompute-button" ${hasActiveTask ? 'disabled' : ''}>
-          ${hasActiveTask ? (t('processing') || 'Processing...') : (t('start_precompute') || 'Start Precompute')}
-        </button>
-      </div>
-      <div id="cache-progress" class="cache-progress" style="display: ${hasActiveTask ? 'block' : 'none'};">
-        <div class="cache-progress-bar">
-          <div id="cache-progress-fill" class="cache-progress-fill" style="width: 0%"></div>
-        </div>
-        <div class="cache-progress-status">
-          <span id="cache-progress-percent">0%</span>
-          <span id="cache-progress-hours">0/0 hours</span>
-        </div>
-        <div id="cache-progress-details" class="cache-progress-details">${hasActiveTask ? (t('loading') || 'Loading...') : ''}</div>
-      </div>
-    </div>
-  `;
-
   if (!match) {
     el.innerHTML = `
       <div class="cs-header">${t('cache_status') || 'Cache Status'}</div>
       <div class="cs-subtle">${locationName ? (t('location') || 'Location') + ': ' + locationName : ''}</div>
       <div class="cs-section">${t('window') || 'Window'}: ${start} → ${end} ${horizon ? `(${horizon}h)` : ''}</div>
       <div class="cs-section cs-subtle">${t('no_data_for_location') || 'No cache data for this location in the current window.'}</div>
-      ${precomputeSection}
     `;
     return;
   }
@@ -314,837 +203,84 @@ function renderStatus(data, currentLocKey, locationName) {
   const overallEarliest = overallEarliestIso ? toLocalHM(overallEarliestIso) : '—';
   const overallLatest = overallLatestIso ? toLocalHM(overallLatestIso) : '—';
 
-  const items = kinds.map(k => {
-    const c = match.counts?.[k] ?? 0;
-    const e = match.earliest?.[k] ? toLocalHM(match.earliest[k]) : '—';
-    const l = match.latest?.[k] ? toLocalHM(match.latest[k]) : '—';
-    const kindName = t(k) || k; // Use i18n translation for kind name
-    return `
-      <li class="cs-kind">
-        <div class="head">
-          <span class="name">${kindName}</span>
-          <span class="counts">${c} ${(t('snapshots') || 'snapshots')}</span>
-        </div>
-        <div class="cs-row range"><span>${t('earliest') || 'Earliest'}:</span><span>${e}</span></div>
-        <div class="cs-row range"><span>${t('latest') || 'Latest'}:</span><span>${l}</span></div>
-      </li>
-    `;
+  // Render per-kind status
+  const items = kinds.map(kind => {
+    const count = match.counts?.[kind] || 0;
+    const earliest = match.earliest?.[kind] ? toLocalHM(match.earliest[kind]) : '—';
+    const latest = match.latest?.[kind] ? toLocalHM(match.latest[kind]) : '—';
+    const kindName = t(kind) || kind;
+    return `<div class="cs-kind">
+      <div class="cs-section-title">${kindName}: ${count} ${t('snapshots') || 'Snapshots'}</div>
+      <div class="cs-time-range">${earliest} →</div>
+      <div class="cs-time-range">${latest}</div>
+    </div>`;
   }).join('');
 
   el.innerHTML = `
-    <div class="cs-header">${t('cache_status') || 'Cache Status'}</div>
-    <div class="cs-subtle">${locationName ? (t('location') || 'Location') + ': ' + locationName : ''}</div>
+    <div class="cs-header">${t('cache_status') || 'Cache-Status'}</div>
+    <div class="cs-location">${locationName ? (t('location') || 'Standort') + ': ' + locationName : ''}</div>
+    
     <div class="cs-section">
-      <div class="cs-row"><span>${t('window') || 'Window'}:</span><span>${start} → ${end} ${horizon ? `(${horizon}h)` : ''}</span></div>
-      <div class="cs-row"><span>${t('overall_cache') || 'Total cache'}:</span><span>${overallEarliest} → ${overallLatest}</span></div>
+      <div class="cs-section-title">${t('window') || 'Zeitfenster'}:</div>
+      <div class="cs-time-range">${start} →</div>
+      <div class="cs-time-range">${end} ${horizon ? `(${horizon}h)` : ''}</div>
     </div>
-    <ul class="cs-kinds">${items}</ul>
-    ${precomputeSection}
+    
+    <div class="cs-section">
+      <div class="cs-section-title">${t('overall_cache') || 'Gesamter Cache'}:</div>
+      <div class="cs-time-range">${overallEarliest} →</div>
+      <div class="cs-time-range">${overallLatest}</div>
+    </div>
+    
+    <div class="cs-kinds-section">${items}</div>
   `;
-  
+}
+
+function extractCoordsFromLocKey(locKey) {
+  if (!locKey) return null;
+  try {
+    // Parse format: lat+46.7632_lon+14.8416_el+0400
+    const latMatch = locKey.match(/lat([+-]\d+\.\d+)/);
+    const lonMatch = locKey.match(/lon([+-]\d+\.\d+)/);
+    if (latMatch && lonMatch) {
+      return {
+        lat: parseFloat(latMatch[1]),
+        lon: parseFloat(lonMatch[1])
+      };
+    }
+  } catch (e) {
+    console.warn('Failed to parse location key:', locKey, e);
+  }
+  return null;
 }
 
 export function initCacheStatusPanel(elementId = 'cache-status-panel') {
   const el = document.getElementById(elementId);
   if (el) setPanel(el);
-  // Bind delegated click handler once to survive re-renders
+}
+
+export async function updateCacheStatusForLocation(lat, lon, elevation, locationName) {
   try {
-    if (!__delegatedHandlerBound) {
-      document.addEventListener('click', (ev) => {
-        const target = ev.target;
-        if (target && target.id === 'cache-precompute-button') {
-          const btn = target;
-          // If no click listeners yet, run form init and retry click once
-          const hasListener = btn.hasAttribute('data-listeners-added');
-          if (!hasListener) {
-            initializePrecomputeForm()
-              .then(() => {
-                // Retry click once after listeners attach
-                setTimeout(() => {
-                  try {
-                    // Avoid infinite recursion: if still no listener, do nothing
-                    if (btn.hasAttribute('data-listeners-added')) {
-                      btn.click();
-                    }
-                  } catch (_) { /* noop */ }
-                }, 30);
-              })
-              .catch(() => {});
-            // Prevent default to avoid duplicate attempts in the same tick
-            ev.preventDefault();
-            ev.stopPropagation();
-          }
-        }
-      }, true);
-      __delegatedHandlerBound = true;
-    }
-  } catch (_) { /* noop */ }
-  
-  // Start checking for active task immediately
-  const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
-  if (savedTaskId) {
-    console.log('Found active task on init:', savedTaskId);
-    
-    // First check if the task still exists on the server
-    fetch(`${API_ENDPOINTS.PRECOMPUTE_RANGE}/${savedTaskId}`)
-      .then(response => {
-        if (response.status === 404) {
-          // Task doesn't exist anymore (server restarted)
-          console.log('Task not found on server (server may have restarted)');
-          localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-          // Don't need to reset UI here as it will be rendered fresh
-          
-          // Show a user-friendly message
-          setTimeout(() => {
-            const message = t('task_not_found_server_restart') || 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.';
-            alert(message);
-          }, 1000); // Delay to ensure UI is ready
-          
-          return null;
-        } else if (response.ok) {
-          return response.json();
-        } else {
-          throw new Error('Failed to check task status');
-        }
-      })
-      .then(taskStatus => {
-        if (taskStatus) {
-          // Task exists, set up polling
-          activePrecomputeTask = savedTaskId;
-          
-          // Start checking progress
-          if (precomputeTaskCheckInterval) {
-            clearInterval(precomputeTaskCheckInterval);
-          }
-          
-          // Start polling for updates
-          precomputeTaskCheckInterval = setInterval(async () => {
-            await checkPrecomputeTaskProgress();
-          }, 2000); // Check every 2 seconds
-        }
-      })
-      .catch(error => {
-        console.error('Error checking task status:', error);
-        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-      });
-  }
-}
-
-// Function to restore active precompute task from localStorage
-async function restoreActivePrecomputeTask() {
-  const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
-  if (!savedTaskId) return;
-  
-  try {
-    console.log('Restoring active precompute task:', savedTaskId);
-    // Set the active task ID
-    activePrecomputeTask = savedTaskId;
-    
-    // Wait for the precompute section to be rendered
-    setTimeout(async () => {
-      // Show progress container
-      const progressContainer = document.getElementById('cache-progress');
-      if (progressContainer) {
-        progressContainer.style.display = 'block';
-      } else {
-        console.error('Progress container not found');
-      }
-      
-      // Disable inputs during processing
-      const startDateInput = document.getElementById('cache-start-date');
-      const endDateInput = document.getElementById('cache-end-date');
-      const precomputeButton = document.getElementById('cache-precompute-button');
-      
-      if (startDateInput && endDateInput && precomputeButton) {
-        startDateInput.disabled = true;
-        endDateInput.disabled = true;
-        precomputeButton.disabled = true;
-        precomputeButton.textContent = t('processing') || 'Processing...';
-        // Populate from saved values if available so they don't appear empty
-        try {
-          const s = localStorage.getItem(STORAGE_KEY_START_DATE);
-          const e = localStorage.getItem(STORAGE_KEY_END_DATE);
-          if (s) startDateInput.value = s;
-          if (e) endDateInput.value = e;
-          __uiStartDate = startDateInput.value || __uiStartDate;
-          __uiEndDate = endDateInput.value || __uiEndDate;
-        } catch (_) { /* noop */ }
-      } else {
-        console.error('Precompute inputs not found');
-      }
-      
-      // Start checking progress
-      if (precomputeTaskCheckInterval) {
-        clearInterval(precomputeTaskCheckInterval);
-      }
-      
-      // Check progress immediately
-      await checkPrecomputeTaskProgress();
-      
-      // Then start interval
-      precomputeTaskCheckInterval = setInterval(async () => {
-        await checkPrecomputeTaskProgress();
-      }, 2000); // Check every 2 seconds
-    }, 500); // Wait for DOM to be ready
-    
-  } catch (error) {
-    console.error('Error restoring precompute task:', error);
-    localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-  }
-}
-
-// Globale Variable für Cache-Daten
-let currentCacheData = null;
-let liveUpdateInterval = null;
-
-// Bestimme das maximale Enddatum basierend auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
-async function determineMaxEndDate() {
-  try {
-    // Hole die aktuelle Konfiguration vom Backend
-    const response = await fetch('/api/cache_status');
-    if (response.ok) {
-      const data = await response.json();
-      const maxHours = data.max_precompute_hours || 168;
-      
-      const today = new Date();
-      const maxDate = new Date();
-      maxDate.setTime(today.getTime() + (maxHours * 60 * 60 * 1000));
-      
-      // Formatiere als YYYY-MM-DD für das Eingabefeld
-      return maxDate.toISOString().split('T')[0];
-    }
-  } catch (error) {
-    console.error('Error fetching max precompute hours:', error);
-  }
-  
-  // Fallback: 168 Stunden (7 Tage) in die Zukunft
-  const today = new Date();
-  const maxDate = new Date();
-  maxDate.setTime(today.getTime() + (168 * 60 * 60 * 1000));
-  return maxDate.toISOString().split('T')[0];
-}
-
-// Starte automatische Live-Updates für Cache-Status
-function startAutomaticLiveUpdates(lat, lon, elevation, locationName) {
-  // Stoppe vorherige Updates
-  if (liveUpdateInterval) {
-    clearInterval(liveUpdateInterval);
-  }
-  
-  // Starte neue Live-Updates alle 5 Sekunden
-  liveUpdateInterval = setInterval(async () => {
-    try {
-      // Prüfe ob noch eine aktive Precompute-Task läuft
-      const activeTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
-      if (!activeTaskId || activeTaskId === 'null') {
-        // Keine aktive Task mehr - stoppe Updates
-        clearInterval(liveUpdateInterval);
-        liveUpdateInterval = null;
-        console.log('Automatic live updates stopped - no active task');
-        return;
-      }
-      
-      // Aktualisiere Cache-Status ohne Loading-Anzeige zu zeigen
-      await updateCacheStatusSilently(lat, lon, elevation, locationName);
-      
-    } catch (error) {
-      console.error('Error during automatic live update:', error);
-    }
-  }, 5000); // Alle 5 Sekunden aktualisieren
-  
-  // Automatisch nach 10 Minuten stoppen als Fallback
-  setTimeout(() => {
-    if (liveUpdateInterval) {
-      clearInterval(liveUpdateInterval);
-      liveUpdateInterval = null;
-      console.log('Automatic live updates stopped - timeout reached');
-    }
-  }, 600000); // 10 Minuten
-}
-
-// Stille Cache-Status-Aktualisierung ohne Loading-Anzeige
-export async function updateCacheStatusSilently(lat, lon, elevation, locationName = '') {
-  try {
-    // Store current location for potential task restoration
-    window.currentCacheLocation = { lat, lon, elevation, locationName };
-    let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
-    
-    // Wichtig: Sende die Rohdaten (lat, lon, elevation) an das Backend
-    // und lasse das Backend die Normalisierung durchführen
-    const sep = url.includes('?') ? '&' : '?';
-    url = `${url}${sep}lat=${lat}&lon=${lon}&elevation=${elevation}`;
-    
-    // Zusätzlich den loc_key senden für Kompatibilität
-    try {
-      const key = buildLocKey(lat, lon, elevation);
-      url = `${url}&loc_key=${encodeURIComponent(key)}`;
-    } catch (_) { /* noop */ }
-    
-    const resp = await fetch(url, { credentials: 'same-origin' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const key = buildLocKey(lat, lon, elevation);
-    
-    // Speichere Cache-Daten global für Datumsbereichsbestimmung
-    currentCacheData = data;
-    
-    // Render nur wenn sich die Daten geändert haben
-    renderStatus(data, key, locationName);
-
-    // After silent re-render, ensure UI is in a consistent state
-    // If there is an active task, restore progress UI; otherwise initialize form fields
-    setTimeout(() => {
-      try {
-        const savedTaskId = localStorage.getItem(STORAGE_KEY_ACTIVE_TASK);
-        if (savedTaskId && savedTaskId !== 'null') {
-          restoreActivePrecomputeTask();
-        } else {
-          initializePrecomputeForm();
-        }
-      } catch (_) { /* noop */ }
-    }, 50);
-  } catch (err) {
-    console.error('Silent cache status update error:', err);
-  }
-}
-
-export async function updateCacheStatusForLocation(lat, lon, elevation, locationName = '') {
-  try {
-    renderLoading(locationName);
-    
-    // Store current location for potential task restoration
-    window.currentCacheLocation = { lat, lon, elevation, locationName };
-    let url = appendTimeParam(API_ENDPOINTS.CACHE_STATUS);
-    
-    // Wichtig: Sende die Rohdaten (lat, lon, elevation) an das Backend
-    // und lasse das Backend die Normalisierung durchführen
-    const sep = url.includes('?') ? '&' : '?';
-    url = `${url}${sep}lat=${lat}&lon=${lon}&elevation=${elevation}`;
-    
-    // Zusätzlich den loc_key senden für Kompatibilität
-    try {
-      const key = buildLocKey(lat, lon, elevation);
-      url = `${url}&loc_key=${encodeURIComponent(key)}`;
-    } catch (_) { /* noop */ }
-    
-    console.log('Cache status URL:', url); // Debug-Ausgabe
-    
-    const resp = await fetch(url, { credentials: 'same-origin' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const key = buildLocKey(lat, lon, elevation);
-    
-    // Speichere Cache-Daten global für Datumsbereichsbestimmung
-    currentCacheData = data;
-    
-    console.log('Cache status data:', data); // Debug-Ausgabe
-    console.log('Generated key:', key); // Debug-Ausgabe
-    
-    renderStatus(data, key, locationName);
-    
-    // Now that the panel is rendered, initialize form and check for active precompute task
-    // This ensures all DOM elements are available
-    setTimeout(async () => {
-      await initializePrecomputeForm();
-      restoreActivePrecomputeTask();
-    }, 100);
-    
-    // Starte automatische Live-Updates wenn Daten verfügbar sind
-    startAutomaticLiveUpdates(lat, lon, elevation, locationName);
-  } catch (err) {
-    console.error('Cache status error:', err); // Debug-Ausgabe
-    renderError(err, locationName);
-  }
-}
-
-// Initialize precompute form only once when panel is first rendered
-async function initializePrecomputeForm() {
-  const startDateInput = document.getElementById('cache-start-date');
-  const endDateInput = document.getElementById('cache-end-date');
-  const precomputeButton = document.getElementById('cache-precompute-button');
-  
-  if (!startDateInput || !endDateInput || !precomputeButton) return;
-  
-  // Bind click handler immediately so the button works even while async init runs
-  if (!precomputeButton.hasAttribute('data-listeners-added')) {
-    precomputeButton.addEventListener('click', async () => {
-    const startDateInput = document.getElementById('cache-start-date');
-    const endDateInput = document.getElementById('cache-end-date');
-    const precomputeButton = document.getElementById('cache-precompute-button');
-    const progressContainer = document.getElementById('cache-progress');
-    const progressFill = document.getElementById('cache-progress-fill');
-    const progressPercent = document.getElementById('cache-progress-percent');
-    const progressHours = document.getElementById('cache-progress-hours');
-    const progressDetails = document.getElementById('cache-progress-details');
-    
-    let startDate = startDateInput.value;
-    let endDate = endDateInput.value;
-    
-    if (!startDate || !endDate) {
-      // Auto-fill sensible defaults and proceed instead of alerting
-      try {
-        const today = new Date();
-        const todayStr = today.toISOString().split('T')[0];
-        const maxHours = Number((window.currentCacheData && window.currentCacheData.max_precompute_hours) || 168);
-        const days = Math.max(1, Math.floor(maxHours / 24));
-        const end = new Date(today.getTime());
-        end.setDate(end.getDate() + days);
-        const endStr = end.toISOString().split('T')[0];
-        if (!startDate) startDateInput.value = todayStr;
-        if (!endDate) endDateInput.value = endStr;
-        __uiStartDate = startDateInput.value;
-        __uiEndDate = endDateInput.value;
-        localStorage.setItem(STORAGE_KEY_START_DATE, __uiStartDate);
-        localStorage.setItem(STORAGE_KEY_END_DATE, __uiEndDate);
-      } catch (_) { /* noop */ }
-      // Re-read values after auto-fill
-      startDate = startDateInput.value;
-      endDate = endDateInput.value;
-    }
-    
-    try {
-      // Persist selected dates so they are retained across re-renders
-      try {
-        localStorage.setItem(STORAGE_KEY_START_DATE, startDate);
-        localStorage.setItem(STORAGE_KEY_END_DATE, endDate);
-      } catch (_) { /* noop */ }
-      __uiStartDate = startDate;
-      __uiEndDate = endDate;
-      // Disable inputs during processing
-      startDateInput.disabled = true;
-      endDateInput.disabled = true;
-      precomputeButton.disabled = true;
-      precomputeButton.textContent = t('processing') || 'Processing...';
-      
-      // Get current location
-      const location = settingsManager.getLocation();
-      if (!location) {
-        throw new Error('No location set');
-      }
-      
-      // Start the precompute task
-      const response = await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lat: location.latitude,
-          lon: location.longitude,
-          elevation: location.elevation,
-          start_date: `${startDate}T00:00:00Z`,
-          end_date: `${endDate}T23:59:59Z`
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to start precompute task');
-      }
-      
-      const result = await response.json();
-      
-      // Handle cases where backend did not start a new task
-      if (!result || !result.task_id) {
-        // If backend reports an already running task and provides its ID, attach to it
-        if (result && result.status && result.task_id) {
-          activePrecomputeTask = result.task_id;
-          localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
-          if (progressContainer) progressContainer.style.display = 'block';
-          if (progressFill) progressFill.style.width = '0%';
-          if (progressPercent) progressPercent.textContent = '0%';
-          if (progressHours) progressHours.textContent = `0/${result.hours_total || 0} hours`;
-          if (progressDetails) progressDetails.textContent = t('attaching_to_running_task') || 'Attaching to running task...';
-          if (precomputeTaskCheckInterval) clearInterval(precomputeTaskCheckInterval);
-          precomputeTaskCheckInterval = setInterval(async () => {
-            await checkPrecomputeTaskProgress();
-          }, 2000);
-          return;
-        }
-        // Otherwise, show a non-blocking message and re-enable form
-        const reason = (result && result.reason) ? String(result.reason) : 'unknown';
-        const msg = (
-          (reason === 'at_capacity') ? (t('precompute_at_capacity') || 'At capacity. Please try again later.') :
-          (reason === 'inflight_for_location') ? (t('precompute_already_running') || 'A task is already running for this location.') :
-          (t('precompute_not_started') || 'Precompute was not started.')
-        );
-        if (progressContainer) progressContainer.style.display = 'block';
-        if (progressDetails) progressDetails.textContent = msg;
-        // Re-enable inputs
-        startDateInput.disabled = false;
-        endDateInput.disabled = false;
-        precomputeButton.disabled = false;
-        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-        return;
-      }
-      
-      activePrecomputeTask = result.task_id;
-      
-      // Save task ID to localStorage
-      localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
-      
-      // Show progress container
-      if (progressContainer) {
-        progressContainer.style.display = 'block';
-      }
-      if (progressFill) progressFill.style.width = '0%';
-      if (progressPercent) progressPercent.textContent = '0%';
-      if (progressHours) progressHours.textContent = `0/${result.hours_total} hours`;
-      if (progressDetails) progressDetails.textContent = t('task_started') || 'Task started...';
-      
-      // Start checking progress
-      if (precomputeTaskCheckInterval) {
-        clearInterval(precomputeTaskCheckInterval);
-      }
-      
-      precomputeTaskCheckInterval = setInterval(async () => {
-        await checkPrecomputeTaskProgress();
-      }, 2000); // Check every 2 seconds
-      
-    } catch (error) {
-      alert(error.message || 'Failed to start precompute task');
-      console.error('Precompute error:', error);
-      
-      // Re-enable inputs
-      startDateInput.disabled = false;
-      endDateInput.disabled = false;
-      precomputeButton.disabled = false;
-      precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-    }
-    });
-    precomputeButton.setAttribute('data-listeners-added', 'true');
-  }
-  
-  // Only initialize if not already set
-  if (!startDateInput.value) {
-    const today = new Date();
-    startDateInput.value = today.toISOString().split('T')[0];
-    try { localStorage.setItem(STORAGE_KEY_START_DATE, startDateInput.value); } catch (_) { /* noop */ }
-    __uiStartDate = startDateInput.value;
-  }
-  
-  if (!endDateInput.value) {
-    const maxEndDate = await determineMaxEndDate();
-    const nextWeek = new Date();
-    nextWeek.setDate(new Date().getDate() + 7);
-    endDateInput.value = maxEndDate || nextWeek.toISOString().split('T')[0];
-    try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
-    __uiEndDate = endDateInput.value;
-  }
-  
-  // Setze min-Attribute für die Eingabefelder
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  startDateInput.setAttribute('min', todayStr);
-  endDateInput.setAttribute('min', todayStr);
-  
-  // Kein Maximum setzen - Benutzer soll frei wählen können
-  // Das Backend begrenzt auf ASCII_SKY_MAX_PRECOMPUTE_HOURS
-  
-  // Event-Listener für Datumsvalidierung - nur einmal hinzufügen
-  if (!startDateInput.hasAttribute('data-listeners-added')) {
-    startDateInput.addEventListener('change', () => {
-      const startDate = startDateInput.value;
-      if (startDate) {
-        // Setze Mindestdatum für Enddatum auf Startdatum
-        endDateInput.setAttribute('min', startDate);
-        
-        // Falls Enddatum vor Startdatum liegt, setze es auf Startdatum
-        if (endDateInput.value && endDateInput.value < startDate) {
-          endDateInput.value = startDate;
-        }
-        try { localStorage.setItem(STORAGE_KEY_START_DATE, startDate); } catch (_) { /* noop */ }
-        try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
-        __uiStartDate = startDateInput.value;
-        __uiEndDate = endDateInput.value;
-      }
-    });
-    startDateInput.setAttribute('data-listeners-added', 'true');
-  }
-  
-  if (!endDateInput.hasAttribute('data-listeners-added')) {
-    endDateInput.addEventListener('change', () => {
-      const endDate = endDateInput.value;
-      const startDate = startDateInput.value;
-      
-      // Stelle sicher, dass Enddatum nicht vor Startdatum liegt
-      if (startDate && endDate && endDate < startDate) {
-        endDateInput.value = startDate;
-      }
-      try { localStorage.setItem(STORAGE_KEY_END_DATE, endDateInput.value); } catch (_) { /* noop */ }
-      __uiEndDate = endDateInput.value;
-    });
-    endDateInput.setAttribute('data-listeners-added', 'true');
-  }
-  
-  // Handle precompute button click - nur einmal hinzufügen
-  if (!precomputeButton.hasAttribute('data-listeners-added')) {
-    precomputeButton.addEventListener('click', async () => {
-    const startDateInput = document.getElementById('cache-start-date');
-    const endDateInput = document.getElementById('cache-end-date');
-    const precomputeButton = document.getElementById('cache-precompute-button');
-    const progressContainer = document.getElementById('cache-progress');
-    const progressFill = document.getElementById('cache-progress-fill');
-    const progressPercent = document.getElementById('cache-progress-percent');
-    const progressHours = document.getElementById('cache-progress-hours');
-    const progressDetails = document.getElementById('cache-progress-details');
-    
-    const startDate = startDateInput.value;
-    const endDate = endDateInput.value;
-    
-    if (!startDate || !endDate) {
-      alert(t('enter_both_dates') || 'Please enter both start and end dates');
-      return;
-    }
-    
-    try {
-      // Persist selected dates so they are retained across re-renders
-      try {
-        localStorage.setItem(STORAGE_KEY_START_DATE, startDate);
-        localStorage.setItem(STORAGE_KEY_END_DATE, endDate);
-      } catch (_) { /* noop */ }
-      __uiStartDate = startDate;
-      __uiEndDate = endDate;
-      // Disable inputs during processing
-      startDateInput.disabled = true;
-      endDateInput.disabled = true;
-      precomputeButton.disabled = true;
-      precomputeButton.textContent = t('processing') || 'Processing...';
-      
-      // Get current location
-      const location = settingsManager.getLocation();
-      if (!location) {
-        throw new Error('No location set');
-      }
-      
-      // Start the precompute task
-      const response = await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lat: location.latitude,
-          lon: location.longitude,
-          elevation: location.elevation,
-          start_date: `${startDate}T00:00:00Z`,
-          end_date: `${endDate}T23:59:59Z`
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to start precompute task');
-      }
-      
-      const result = await response.json();
-
-      // Handle cases where backend did not start a new task
-      if (!result || !result.task_id) {
-        // If backend reports an already running task and provides its ID, attach to it
-        if (result && result.status && result.task_id) {
-          activePrecomputeTask = result.task_id;
-          localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
-          if (progressContainer) progressContainer.style.display = 'block';
-          if (progressFill) progressFill.style.width = '0%';
-          if (progressPercent) progressPercent.textContent = '0%';
-          if (progressHours) progressHours.textContent = `0/${result.hours_total || 0} hours`;
-          if (progressDetails) progressDetails.textContent = t('attaching_to_running_task') || 'Attaching to running task...';
-          if (precomputeTaskCheckInterval) clearInterval(precomputeTaskCheckInterval);
-          precomputeTaskCheckInterval = setInterval(async () => {
-            await checkPrecomputeTaskProgress();
-          }, 2000);
-          return;
-        }
-        // Otherwise, show a non-blocking message and re-enable form
-        const reason = (result && result.reason) ? String(result.reason) : 'unknown';
-        const msg = (
-          (reason === 'at_capacity') ? (t('precompute_at_capacity') || 'At capacity. Please try again later.') :
-          (reason === 'inflight_for_location') ? (t('precompute_already_running') || 'A task is already running for this location.') :
-          (t('precompute_not_started') || 'Precompute was not started.')
-        );
-        if (progressDetails) progressDetails.textContent = msg;
-        // Re-enable inputs
-        startDateInput.disabled = false;
-        endDateInput.disabled = false;
-        precomputeButton.disabled = false;
-        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-        return;
-      }
-
-      activePrecomputeTask = result.task_id;
-      
-      // Save task ID to localStorage
-      localStorage.setItem(STORAGE_KEY_ACTIVE_TASK, activePrecomputeTask);
-      
-      // Show progress container
-      if (progressContainer) {
-        progressContainer.style.display = 'block';
-      }
-      if (progressFill) progressFill.style.width = '0%';
-      if (progressPercent) progressPercent.textContent = '0%';
-      if (progressHours) progressHours.textContent = `0/${result.hours_total} hours`;
-      if (progressDetails) progressDetails.textContent = t('task_started') || 'Task started...';
-      
-      // Start checking progress
-      if (precomputeTaskCheckInterval) {
-        clearInterval(precomputeTaskCheckInterval);
-      }
-      
-      precomputeTaskCheckInterval = setInterval(async () => {
-        await checkPrecomputeTaskProgress();
-      }, 2000); // Check every 2 seconds
-      
-    } catch (error) {
-      alert(error.message || 'Failed to start precompute task');
-      console.error('Precompute error:', error);
-      
-      // Re-enable inputs
-      startDateInput.disabled = false;
-      endDateInput.disabled = false;
-      precomputeButton.disabled = false;
-      precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-    }
-    });
-    precomputeButton.setAttribute('data-listeners-added', 'true');
-  }
-}
-
-async function checkPrecomputeTaskProgress() {
-  if (!activePrecomputeTask) return;
-  
-  try {
-    console.log('Checking progress for task:', activePrecomputeTask);
-    const response = await fetch(`${API_ENDPOINTS.PRECOMPUTE_RANGE}/${activePrecomputeTask}`);
-    
-    // Handle 404 Not Found (task doesn't exist on server, likely after restart)
-    if (response.status === 404) {
-      console.log('Task not found on server (server may have restarted)');
-      // Clear the task from localStorage
-      localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-      activePrecomputeTask = null;
-      
-      // Stop checking progress
-      if (precomputeTaskCheckInterval) {
-        clearInterval(precomputeTaskCheckInterval);
-        precomputeTaskCheckInterval = null;
-      }
-      
-      // Re-enable inputs
-      const startDateInput = document.getElementById('cache-start-date');
-      const endDateInput = document.getElementById('cache-end-date');
-      const precomputeButton = document.getElementById('cache-precompute-button');
-      const progressContainer = document.getElementById('cache-progress');
-      
-      if (startDateInput && endDateInput && precomputeButton) {
-        startDateInput.disabled = false;
-        endDateInput.disabled = false;
-        precomputeButton.disabled = false;
-        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-      }
-      
-      if (progressContainer) {
-        progressContainer.style.display = 'none';
-      }
-      
-      // Show a user-friendly message
-      const message = t('task_not_found_server_restart') || 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.';
-      alert(message);
-      
-      return;
-    }
+    const locKey = buildLocKey(lat, lon, elevation);
+    const url = appendTimeParam(`${API_ENDPOINTS.CACHE_STATUS}?lat=${lat}&lon=${lon}&elevation=${elevation}&loc_key=${encodeURIComponent(locKey)}`);
+    const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error('Failed to check task progress');
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    const taskStatus = await response.json();
-    
-    // Ensure date inputs reflect the server-provided date range (if available)
-    try {
-      const startDateInput = document.getElementById('cache-start-date');
-      const endDateInput = document.getElementById('cache-end-date');
-      if (taskStatus && taskStatus.date_range && startDateInput && endDateInput) {
-        const dr = taskStatus.date_range;
-        if (dr.start) {
-          const s = String(dr.start).slice(0, 10);
-          startDateInput.value = s;
-          localStorage.setItem(STORAGE_KEY_START_DATE, s);
-          __uiStartDate = s;
-        }
-        if (dr.end) {
-          const e = String(dr.end).slice(0, 10);
-          endDateInput.value = e;
-          localStorage.setItem(STORAGE_KEY_END_DATE, e);
-          __uiEndDate = e;
-        }
-      }
-    } catch (_) { /* noop */ }
-
-    // Update progress UI
-    const progressFill = document.getElementById('cache-progress-fill');
-    const progressPercent = document.getElementById('cache-progress-percent');
-    const progressHours = document.getElementById('cache-progress-hours');
-    const progressDetails = document.getElementById('cache-progress-details');
-    const precomputeButton = document.getElementById('cache-precompute-button');
-    const startDateInput = document.getElementById('cache-start-date');
-    const endDateInput = document.getElementById('cache-end-date');
-    
-    if (progressFill && progressPercent && progressHours && progressDetails) {
-      progressFill.style.width = `${taskStatus.percent_complete}%`;
-      progressPercent.textContent = `${taskStatus.percent_complete}%`;
-      progressHours.textContent = `${taskStatus.hours_completed}/${taskStatus.hours_total} hours`;
-      
-      if (taskStatus.status === 'completed') {
-        progressDetails.textContent = t('task_completed') || 'Task completed!';
-        
-        // Re-enable inputs
-        startDateInput.disabled = false;
-        endDateInput.disabled = false;
-        precomputeButton.disabled = false;
-        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-        
-        // Stop checking
-        clearInterval(precomputeTaskCheckInterval);
-        precomputeTaskCheckInterval = null;
-        activePrecomputeTask = null;
-        
-        // Remove task ID from localStorage
-        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-        
-        // Refresh cache status after a delay
-        setTimeout(() => {
-          const location = settingsManager.getLocation();
-          if (location) {
-            updateCacheStatusForLocation(location.latitude, location.longitude, location.elevation, location.name);
-          }
-        }, 1000);
-        
-      } else if (taskStatus.status === 'error') {
-        progressDetails.textContent = `${t('error') || 'Error'}: ${taskStatus.error || 'Unknown error'}`;
-        
-        // Re-enable inputs
-        startDateInput.disabled = false;
-        endDateInput.disabled = false;
-        precomputeButton.disabled = false;
-        precomputeButton.textContent = t('start_precompute') || 'Start Precompute';
-        
-        // Stop checking
-        clearInterval(precomputeTaskCheckInterval);
-        precomputeTaskCheckInterval = null;
-        activePrecomputeTask = null;
-        
-        // Remove task ID from localStorage
-        localStorage.removeItem(STORAGE_KEY_ACTIVE_TASK);
-        
-      } else {
-        progressDetails.textContent = `${t('status') || 'Status'}: ${taskStatus.status}`;
-      }
-    }
-    
+    const data = await response.json();
+    renderStatus(data, locKey, locationName);
   } catch (error) {
-    console.error('Error checking task progress:', error);
+    console.error('Error fetching cache status:', error);
+    renderError(error.message || String(error), locationName);
   }
 }
 
-export function updateCacheStatusForLocationDebounced(lat, lon, elevation, locationName = '') {
-  try { if (__debounceTimer) clearTimeout(__debounceTimer); } catch (_) { /* noop */ }
+export function updateCacheStatusForLocationDebounced(lat, lon, elevation, locationName) {
+  if (__debounceTimer) {
+    clearTimeout(__debounceTimer);
+  }
   __debounceTimer = setTimeout(() => {
     updateCacheStatusForLocation(lat, lon, elevation, locationName);
   }, 300);

@@ -183,6 +183,11 @@ export const i18n = {
         'help_time_display': 'Zeitanzeige',
         'help_time_display_desc': 'Klickbar, um ein beliebiges Datum und eine beliebige Uhrzeit für die Simulation einzugeben',
         'help_language': 'Sprachwechsel zwischen Deutsch und Englisch',
+        
+        // Object count display
+        'visible_objects': 'Sichtbare Objekte',
+        'asteroids_up_to_mag': 'Asteroiden bis Mag',
+        'comets_up_to_mag': 'Kometen bis Mag',
     },
     
     // Englisch als Fallback
@@ -343,7 +348,12 @@ export const i18n = {
         'help_location_change': 'Location Changes',
         'help_location_change_desc': 'When switching to a new location for the first time, calculations may take longer as sky data for this position needs to be computed and cached initially.',
         'help_github': 'Source Code',
-        'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:'
+        'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:',
+        
+        // Object count display
+        'visible_objects': 'Visible Objects',
+        'asteroids_up_to_mag': 'Asteroids up to Mag',
+        'comets_up_to_mag': 'Comets up to Mag'
     }
 };
 
