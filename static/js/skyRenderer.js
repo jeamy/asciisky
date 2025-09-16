@@ -148,7 +148,6 @@ export class SkyRenderer {
     }
 
     render() {
-        // Don't call initSky() here to avoid recursion
 
         // Initialisiere den Himmel neu (zeichnet den Horizont und die Himmelsrichtungen)
         this.initSky();
@@ -1071,7 +1070,7 @@ export class SkyRenderer {
             }
             
             url = this.appendTimeParam(url);
-            const response = await fetch(url);
+            const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`HTTP error loading asteroids! status: ${response.status}`);
             }
@@ -1103,7 +1102,7 @@ export class SkyRenderer {
             }
             
             url = this.appendTimeParam(url);
-            const response = await fetch(url);
+            const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`HTTP error loading comets! status: ${response.status}`);
             }
@@ -1159,7 +1158,7 @@ export class SkyRenderer {
             {
                 let url = `${API_ENDPOINTS.SKY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
                 url = this.appendTimeParam(url);
-                const response = await fetch(url);
+                const response = await fetch(url, { cache: 'no-store' });
                 if (!response.ok) {
                     throw new Error(`HTTP error loading sky data! status: ${response.status}`);
                 }
