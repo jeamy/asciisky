@@ -32,6 +32,9 @@ export class SkyRenderer {
             height: CONFIG.SKY_HEIGHT,
             horizonRow: CONFIG.HORIZON_ROW
         };
+        // Unterstützte Zoomstufen (Faktoren)
+        this.zoomLevels = [1, 2, 4];
+        this.zoomIndex = 0; // Start: 1×
 
         this.initSky();
         this.setupEventListeners();
@@ -238,8 +241,11 @@ export class SkyRenderer {
             btn.id = 'zoom-toggle';
             btn.className = 'zoom-button';
             btn.type = 'button';
-            btn.title = this.isZoomed ? 'Zoom 1x' : 'Zoom 2x';
-            btn.textContent = this.isZoomed ? '1×' : '2×';
+            const factor = (this.zoomLevels && this.zoomLevels[this.zoomIndex]) ? this.zoomLevels[this.zoomIndex] : 1;
+            const nextIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
+            const nextFactor = this.zoomLevels[nextIndex];
+            btn.title = `Zoom ${nextFactor}×`;
+            btn.textContent = `${factor}×`;
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.toggleZoom();
@@ -250,18 +256,13 @@ export class SkyRenderer {
 
     toggleZoom() {
         try {
-            this.isZoomed = !this.isZoomed;
-            if (this.isZoomed) {
-                // 2x Rasterauflösung
-                CONFIG.SKY_WIDTH = this.originalSkyConfig.width * 2;
-                CONFIG.SKY_HEIGHT = this.originalSkyConfig.height * 2;
-                CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
-            } else {
-                // Zurück zur Originalauflösung
-                CONFIG.SKY_WIDTH = this.originalSkyConfig.width;
-                CONFIG.SKY_HEIGHT = this.originalSkyConfig.height;
-                CONFIG.HORIZON_ROW = this.originalSkyConfig.horizonRow;
-            }
+            // Zyklisch auf nächste Zoomstufe schalten
+            this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            // Skalierte Rastergröße setzen (physische Größe bleibt dank adjustSkyScale konstant)
+            CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
+            CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
+            CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
             // Raster neu aufbauen und rendern
             this.initSky();
             this.render();
