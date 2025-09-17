@@ -25,6 +25,14 @@ export class SkyRenderer {
         this._updateCounter = 0;     // monotoner Zähler
         this._activeUpdate = 0;      // aktuell gültiger Token
         
+        // Zoom-State und Originalauflösung merken (für 1x/2x Umschaltung)
+        this.isZoomed = false;
+        this.originalSkyConfig = {
+            width: CONFIG.SKY_WIDTH,
+            height: CONFIG.SKY_HEIGHT,
+            horizonRow: CONFIG.HORIZON_ROW
+        };
+
         this.initSky();
         this.setupEventListeners();
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
@@ -140,6 +148,25 @@ export class SkyRenderer {
                 }
             }
         });
+
+        // Listen for fullscreen changes
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && this.isFullscreen) {
+                if (this.exitFullscreen && typeof this.exitFullscreen === 'function') {
+                    this.exitFullscreen();
+                } else {
+                    // Gracefully reset flag if no fullscreen API available in this branch
+                    this.isFullscreen = false;
+                }
+            }
+        });
+
+        // Keep physical size constant on window resizes (non-fullscreen)
+        window.addEventListener('resize', () => {
+            if (!this.isFullscreen) {
+                this.adjustSkyScale();
+            }
+        });
     }
 
     updateCelestialData(data) {
@@ -182,9 +209,65 @@ export class SkyRenderer {
         // Füge immer neue Navigationspfeile hinzu
         this.addNavigationArrows();
 
+        // Stelle sicher, dass der Zoom-Button nach jedem Rendern vorhanden ist
+        this.createZoomButton();
+
         // Aktualisiere Label-Overlay für helle Kleinplaneten nach dem Layout-Pass
         // requestAnimationFrame stellt sicher, dass getBoundingClientRect() valide Größen liefert
-        requestAnimationFrame(() => this.renderLabels());
+        requestAnimationFrame(() => {
+            this.renderLabels();
+            // Passe die Darstellung so an, dass bei erhöhter Auflösung die physische Größe gleich bleibt
+            if (!this.isFullscreen) {
+                this.adjustSkyScale();
+            }
+        });
+    }
+
+    // No-op fullscreen helpers for master branch (no fullscreen feature enabled)
+    createFullscreenButton() { /* noop: fullscreen not available in master */ }
+    updateFullscreenButton() { /* noop */ }
+
+    // Zoom-Schalter (1x/2x Auflösung), physische Größe bleibt dank adjustSkyScale gleich
+    createZoomButton() {
+        try {
+            // Entferne bestehenden Button
+            const existing = this.container.querySelector('#zoom-toggle');
+            if (existing) existing.remove();
+
+            const btn = document.createElement('button');
+            btn.id = 'zoom-toggle';
+            btn.className = 'zoom-button';
+            btn.type = 'button';
+            btn.title = this.isZoomed ? 'Zoom 1x' : 'Zoom 2x';
+            btn.textContent = this.isZoomed ? '1×' : '2×';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleZoom();
+            });
+            this.container.appendChild(btn);
+        } catch (_) { /* noop */ }
+    }
+
+    toggleZoom() {
+        try {
+            this.isZoomed = !this.isZoomed;
+            if (this.isZoomed) {
+                // 2x Rasterauflösung
+                CONFIG.SKY_WIDTH = this.originalSkyConfig.width * 2;
+                CONFIG.SKY_HEIGHT = this.originalSkyConfig.height * 2;
+                CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
+            } else {
+                // Zurück zur Originalauflösung
+                CONFIG.SKY_WIDTH = this.originalSkyConfig.width;
+                CONFIG.SKY_HEIGHT = this.originalSkyConfig.height;
+                CONFIG.HORIZON_ROW = this.originalSkyConfig.horizonRow;
+            }
+            // Raster neu aufbauen und rendern
+            this.initSky();
+            this.render();
+        } catch (e) {
+            console.error('Error toggling zoom:', e);
+        }
     }
 
     addNavigationArrows() {
@@ -690,11 +773,21 @@ export class SkyRenderer {
         // Handle click on the sky to select objects
         this.container.addEventListener('click', (e) => {
             console.log('Click event detected on sky container');
-            const rect = this.container.getBoundingClientRect();
+            const skyEl = this.container.querySelector('.sky-text');
+            const rect = skyEl ? skyEl.getBoundingClientRect() : this.container.getBoundingClientRect();
+
+            // If we have a sky element and click is outside of it, ignore to avoid wrong mapping
+            if (skyEl) {
+                const within = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+                if (!within) {
+                    return;
+                }
+            }
+
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Convert click coordinates to grid position
+            // Convert click coordinates to grid position based on actual text box size
             const colWidth = rect.width / CONFIG.SKY_WIDTH;
             const rowHeight = rect.height / CONFIG.SKY_HEIGHT;
 

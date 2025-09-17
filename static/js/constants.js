@@ -43,7 +43,7 @@ export const CONFIG = {
     UPDATE_INTERVAL_MS: 60000, // 60 seconds
     SKY_WIDTH: 80,
     SKY_HEIGHT: 40,
-    HORIZON_ROW: 20, // Row where the horizon is drawn
+    HORIZON_ROW: 20, // Row where the horizon is drawn (middle of SKY_HEIGHT)
     CARDINAL_DIRECTIONS: ['N', 'O', 'S', 'W'],
     OBJECT_SYMBOLS: OBJECT_SYMBOLS,  // Reference to the constant defined above
     SHOW_BELOW_HORIZON: true,       // Zeige Objekte unter dem Horizont
