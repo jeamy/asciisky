@@ -25,7 +25,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Horizontal navigation with arrow controls
 - Labels for bright asteroids and comets
 - Responsive design with mobile/tablet support
-- Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll
+- Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - SQLite database backend for efficient data storage and retrieval
 
 ## Prerequisites
@@ -67,9 +67,9 @@ A web application that displays the current positions of celestial bodies (Sun, 
     - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
     - `cache/asteroids/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
   - Comets
-    - `cache/CometEls.txt` (download-once copy of MPC comet elements)
-    - `cache/comets_dataframe.pkl` (standardized DataFrame; ~6h TTL)
-    - `cache/comets/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
+    - `cache/COMET_ELEMENTS.txt` (download-once copy of MPC comet elements)
+    - `cache/comets_dataframe.pkl` (standardized DataFrame; 49h TTL)
+    - `cache/comets/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache with 1h TTL and 1h buckets)
   - Celestial
     - `cache/celestial/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
 
@@ -106,7 +106,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - `templates/` - HTML templates
 - `static/js/` - JavaScript modules
   - `constants.js` - Configuration parameters and centralized API endpoints
-  - `skyRenderer.js` - ASCII sky rendering, dialogs, name normalization and time label handling
+  - `skyRenderer.js` - ASCII sky rendering, dialogs, zoom/pan functionality, name normalization and time label handling
   - `skyManager.js` - Sky rendering initialization and update management
   - `i18n.js` - Internationalization module with translations
   - `locationDialog.js` - User location dialog logic
@@ -158,6 +158,18 @@ Notes:
 - The frontend simulated time controls persist an offset in minutes and, when enabled, automatically append `time=<ISO8601>` to requests.
 
 Times returned by the backend are plain local `HH:MM`. The frontend appends the localized hour label.
+
+### Zoom and Pan Functionality
+
+The application provides zoom and pan functionality for desktop users:
+
+- **Zoom Levels**: Toggle between 1×, 2×, and 4× magnification using the zoom button in the top-right corner
+- **Pan Control**: When zoomed (2× or 4×), click and drag to pan vertically through the sky view
+- **Visual Indicators**: 
+  - Cursor changes to "grab" when hovering over zoomable content
+  - Cursor changes to "grabbing" during active panning
+- **Mobile Behavior**: Zoom and pan are automatically disabled on mobile devices (screen width ≤ 768px)
+- **Reset**: Zoom level resets vertical offset when toggled
 
 ### Environment Variables
 
