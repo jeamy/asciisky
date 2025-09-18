@@ -25,6 +25,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Horizontal navigation with arrow controls
 - Labels for bright asteroids and comets
 - Responsive design with mobile/tablet support
+- Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll
 - SQLite database backend for efficient data storage and retrieval
 
 ## Prerequisites

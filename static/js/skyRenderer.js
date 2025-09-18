@@ -34,7 +34,12 @@ export class SkyRenderer {
         };
         // Unterstützte Zoomstufen (Faktoren)
         this.zoomLevels = [1, 2, 4];
-        this.zoomIndex = 0; // Start: 1×
+        this.zoomIndex = 0; // Start: 1×, bleibt bei mobilen Geräten immer 0
+        
+        // Pan-Funktionalität für gezoomte Ansicht
+        this.verticalOffset = 0; // Vertikale Verschiebung in Pixeln
+        this.isDragging = false;
+        this.lastMouseY = 0;
 
         this.initSky();
         this.setupEventListeners();
@@ -164,12 +169,6 @@ export class SkyRenderer {
             }
         });
 
-        // Keep physical size constant on window resizes (non-fullscreen)
-        window.addEventListener('resize', () => {
-            if (!this.isFullscreen) {
-                this.adjustSkyScale();
-            }
-        });
     }
 
     updateCelestialData(data) {
@@ -219,10 +218,11 @@ export class SkyRenderer {
         // requestAnimationFrame stellt sicher, dass getBoundingClientRect() valide Größen liefert
         requestAnimationFrame(() => {
             this.renderLabels();
-            // Passe die Darstellung so an, dass bei erhöhter Auflösung die physische Größe gleich bleibt
-            if (!this.isFullscreen) {
-                this.adjustSkyScale();
-            }
+            // Update cursor style and apply vertical offset for pan functionality
+            this.updateCursorStyle();
+            this.applyVerticalOffset();
+            // Re-setup pan events since DOM element was recreated
+            this.setupPanEvents();
         });
     }
 
@@ -236,6 +236,11 @@ export class SkyRenderer {
             // Entferne bestehenden Button
             const existing = this.container.querySelector('#zoom-toggle');
             if (existing) existing.remove();
+
+            // Zoom-Button nur auf Desktop-Geräten anzeigen
+            if (this.isMobileDevice()) {
+                return;
+            }
 
             const btn = document.createElement('button');
             btn.id = 'zoom-toggle';
@@ -256,18 +261,48 @@ export class SkyRenderer {
 
     toggleZoom() {
         try {
+            // Zoom nur auf Desktop-Geräten erlauben
+            if (this.isMobileDevice()) {
+                return;
+            }
+            
             // Zyklisch auf nächste Zoomstufe schalten
             this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const factor = this.zoomLevels[this.zoomIndex] || 1;
+            
+            // Reset vertical offset when switching zoom levels
+            this.verticalOffset = 0;
+            
             // Skalierte Rastergröße setzen (physische Größe bleibt dank adjustSkyScale konstant)
             CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
             CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
             CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
+            
+            // Update cursor style based on zoom level
+            this.updateCursorStyle();
+            
             // Raster neu aufbauen und rendern
             this.initSky();
             this.render();
         } catch (e) {
             console.error('Error toggling zoom:', e);
+        }
+    }
+
+    isMobileDevice() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+               window.innerWidth <= 768;
+    }
+
+    updateCursorStyle() {
+        const skyEl = this.container.querySelector('.sky-text');
+        if (skyEl) {
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            if (factor > 1 && !this.isMobileDevice()) {
+                skyEl.style.cursor = 'grab';
+            } else {
+                skyEl.style.cursor = 'default';
+            }
         }
     }
 
@@ -883,8 +918,73 @@ export class SkyRenderer {
             this.clearSelection();
         });
 
+        // Pan functionality for zoomed view
+        this.setupPanEvents();
+
         // Touch events for sky navigation
         this.setupTouchEvents();
+    }
+
+    setupPanEvents() {
+        const skyEl = this.container.querySelector('.sky-text');
+        if (!skyEl) return;
+
+        // Pan nur auf Desktop-Geräten aktivieren
+        if (this.isMobileDevice()) {
+            return;
+        }
+
+        // Mouse events for panning
+        skyEl.addEventListener('mousedown', (e) => {
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            if (factor <= 1) return; // Only pan when zoomed
+
+            this.isDragging = true;
+            this.lastMouseY = e.clientY;
+            skyEl.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!this.isDragging) return;
+
+            const deltaY = e.clientY - this.lastMouseY;
+            this.verticalOffset += deltaY;
+            
+            // Limit vertical offset to reasonable bounds
+            const maxOffset = CONFIG.SKY_HEIGHT * 10; // Allow scrolling beyond visible area
+            this.verticalOffset = Math.max(-maxOffset, Math.min(maxOffset, this.verticalOffset));
+            
+            this.lastMouseY = e.clientY;
+            this.applyVerticalOffset();
+            e.preventDefault();
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (this.isDragging) {
+                this.isDragging = false;
+                const skyEl = this.container.querySelector('.sky-text');
+                if (skyEl) {
+                    const factor = this.zoomLevels[this.zoomIndex] || 1;
+                    skyEl.style.cursor = factor > 1 ? 'grab' : 'default';
+                }
+            }
+        });
+
+        // Prevent context menu on right click during pan
+        skyEl.addEventListener('contextmenu', (e) => {
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            if (factor > 1) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    applyVerticalOffset() {
+        const skyEl = this.container.querySelector('.sky-text');
+        if (skyEl) {
+            skyEl.style.transform = `translateY(${this.verticalOffset}px)`;
+        }
     }
 
     setupTouchEvents() {
