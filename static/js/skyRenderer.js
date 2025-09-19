@@ -985,6 +985,12 @@ export class SkyRenderer {
         if (skyEl) {
             skyEl.style.transform = `translateY(${this.verticalOffset}px)`;
         }
+        
+        // Auch die Labels verschieben
+        const labelsLayer = this.container.querySelector('.labels-layer');
+        if (labelsLayer) {
+            labelsLayer.style.transform = `translateY(${this.verticalOffset}px)`;
+        }
     }
 
     setupTouchEvents() {
