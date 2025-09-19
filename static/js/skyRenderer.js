@@ -250,7 +250,7 @@ export class SkyRenderer {
             const nextIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const nextFactor = this.zoomLevels[nextIndex];
             btn.title = `Zoom ${nextFactor}×`;
-            btn.textContent = `${factor}×`;
+            btn.textContent = `${nextFactor}×`;
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.toggleZoom();

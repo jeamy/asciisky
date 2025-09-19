@@ -136,7 +136,6 @@ All endpoints are referenced in the frontend via `static/js/constants.js`.
 - `GET /api/celestial` — positions for Sun, Moon, and planets
 - `GET /api/celestial/{body}` — position for a single body
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
-- `GET /api/asteroids` — same data shape as bright asteroids (filtered by apparent magnitude)
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
 - `GET /api/cache_status` — cache status and precomputed data availability; see `doc/cache.md`
 - `GET /api/config` — current configuration including magnitude limits from environment variables

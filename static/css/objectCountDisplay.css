@@ -1,13 +1,12 @@
 /* Object Count Display Styles */
 .object-count-display {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(0, 0, 0, 0.8);
+    top: 6px;
+    left: 20px;
     color: #00ff00;
     font-family: 'Courier New', monospace;
     font-size: 12px;
-    padding: 0px 12px;
+    padding: 0px 10px;
 /*    border-radius: 4px;
     border: 1px solid #333; */
     z-index: 100;
@@ -26,6 +25,5 @@
         padding: 0px 8px;
         min-width: 180px;
         top: 5px;
-        left: 5px;
     }
 }
