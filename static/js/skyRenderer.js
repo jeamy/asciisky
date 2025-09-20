@@ -73,6 +73,10 @@ export class SkyRenderer {
         
         // Aktualisiere die Anzeige
         this.render();
+        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
+        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
+        }
     }
     
     // Methode zum Verschieben des Horizonts nach rechts
@@ -85,6 +89,10 @@ export class SkyRenderer {
         
         // Aktualisiere die Anzeige
         this.render();
+        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
+        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
+        }
     }
 
     drawHorizon() {
@@ -862,6 +870,11 @@ export class SkyRenderer {
     setupEventListeners() {
         // Handle click on the sky to select objects
         this.container.addEventListener('click', (e) => {
+            // If a drag just finished, suppress the immediate click to avoid mis-selection
+            if (this._suppressNextClick) {
+                this._suppressNextClick = false;
+                return;
+            }
             console.log('Click event detected on sky container');
             const skyEl = this.container.querySelector('.sky-text');
             const rect = skyEl ? skyEl.getBoundingClientRect() : this.container.getBoundingClientRect();
@@ -1013,6 +1026,27 @@ export class SkyRenderer {
         const skyEl = this.container.querySelector('.sky-text');
         if (!skyEl) return;
 
+        // Throttle-Mechanismus für flüssigeres Rendering
+        this._horizDragPending = false;
+        this._horizDragScheduled = false;
+        this._horizDragDirection = 0; // -1=links, 0=keine, 1=rechts
+        
+        // Hilfsfunktion für throttled horizon shift
+        const throttledHorizonShift = () => {
+            if (!this._horizDragPending) return;
+            
+            // Führe den anstehenden Shift aus
+            if (this._horizDragDirection < 0) {
+                this.shiftHorizonLeft();
+            } else if (this._horizDragDirection > 0) {
+                this.shiftHorizonRight();
+            }
+            
+            // Markiere als erledigt
+            this._horizDragPending = false;
+            this._horizDragScheduled = false;
+        };
+
         // Pan nur auf Desktop-Geräten aktivieren
         if (this.isMobileDevice()) {
             return;
@@ -1029,6 +1063,10 @@ export class SkyRenderer {
             this._didDrag = false;
             // Accumulator for horizontal drag in pixels -> convert to 5° steps
             this._horizDragAccumPx = 0;
+            // Reset throttling state
+            this._horizDragPending = false;
+            this._horizDragScheduled = false;
+            this._horizDragDirection = 0;
             skyEl.style.cursor = 'grabbing';
             e.preventDefault();
         });
@@ -1066,14 +1104,26 @@ export class SkyRenderer {
                 const rect = skyEl.getBoundingClientRect();
                 const stepPx = rect.width * (5 / 360); // 5° step size in pixels
                 if (stepPx > 0) {
-                    // Apply as many 5° steps as accumulated
+                    // Apply as many 5° steps as accumulated, but throttle to animation frames
                     while (Math.abs(this._horizDragAccumPx) >= stepPx) {
+                        // Bestimme die Richtung für den nächsten Shift
+                        const direction = this._horizDragAccumPx > 0 ? -1 : 1; // -1=links, 1=rechts
+                        
+                        // Reduziere den Akkumulator
                         if (this._horizDragAccumPx > 0) {
-                            this.shiftHorizonLeft();  // drag left -> look left
                             this._horizDragAccumPx -= stepPx;
                         } else {
-                            this.shiftHorizonRight(); // drag right -> look right
                             this._horizDragAccumPx += stepPx;
+                        }
+                        
+                        // Merke die letzte Richtung und markiere als anstehend
+                        this._horizDragDirection = direction;
+                        this._horizDragPending = true;
+                        
+                        // Schedule nur einmal pro Frame
+                        if (!this._horizDragScheduled) {
+                            this._horizDragScheduled = true;
+                            requestAnimationFrame(throttledHorizonShift);
                         }
                     }
                 }
@@ -1093,6 +1143,10 @@ export class SkyRenderer {
                 }
                 // Reset horizontal accumulator
                 this._horizDragAccumPx = 0;
+                // Clear any pending drag operations
+                this._horizDragPending = false;
+                this._horizDragScheduled = false;
+                this._horizDragDirection = 0;
                 // Prevent click selection immediately after a drag
                 if (this._didDrag) {
                     this._suppressNextClick = true;

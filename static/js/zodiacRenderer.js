@@ -385,9 +385,24 @@ export class ZodiacRenderer {
         // Nur Sterne über der Mindesthöhe für Label-Positionierung verwenden
         const visibleStars = starPositions.filter(s => s.altitude > ZodiacRenderer.MIN_ALTITUDE_DEG);
         if (visibleStars.length > 0) {
-            const centerX = visibleStars.reduce((sum, s) => sum + s.x, 0) / visibleStars.length;
-            const centerY = visibleStars.reduce((sum, s) => sum + s.y, 0) / visibleStars.length;
-            
+            // Wrap-Aware Schwerpunkt in X:
+            // Wenn sich Sterne beidseits der 0°/360°-Grenze befinden (große Spanne), verschiebe die kleineren X-Werte um +skyWidth,
+            // bilde den Mittelwert und falte anschließend wieder in den sichtbaren Bereich zurück.
+            const xs = visibleStars.map(s => s.x);
+            const ys = visibleStars.map(s => s.y);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+            let adjustedXs = xs.slice();
+            if ((maxX - minX) > (skyWidth / 2)) {
+                adjustedXs = xs.map(x => (x < skyWidth / 2) ? x + skyWidth : x);
+            }
+            let centerX = adjustedXs.reduce((sum, x) => sum + x, 0) / adjustedXs.length;
+            // Zurück in den Bereich [0, skyWidth)
+            while (centerX < 0) centerX += skyWidth;
+            while (centerX >= skyWidth) centerX -= skyWidth;
+
+            const centerY = ys.reduce((sum, y) => sum + y, 0) / ys.length;
+
             const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             label.setAttribute('x', centerX);
             label.setAttribute('y', centerY - 15);
