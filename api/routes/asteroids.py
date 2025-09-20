@@ -83,4 +83,8 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Removed redundant /asteroids endpoint - use /bright_asteroids instead
+# Add back /asteroids endpoint for backward compatibility
+@router.get("/asteroids")
+async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None):
+    """Alias for /bright_asteroids endpoint for backward compatibility."""
+    return await get_bright_asteroids(request, lat, lon, elevation, location_name, save_location, time)

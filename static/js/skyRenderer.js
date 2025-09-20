@@ -1,6 +1,7 @@
 import { API_ENDPOINTS, CONFIG, ASCII_ART, ASTRO_CONSTANTS } from './constants.js';
 import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
+import { ZodiacRenderer } from './zodiacRenderer.js';
 
 export class SkyRenderer {
     constructor(containerId) {
@@ -43,6 +44,12 @@ export class SkyRenderer {
 
         this.initSky();
         this.setupEventListeners();
+        
+        // Initialize zodiac renderer if enabled
+        if (CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) {
+            this.zodiacRenderer = new ZodiacRenderer(this);
+        }
+        
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
         this.update();
     }
@@ -98,7 +105,7 @@ export class SkyRenderer {
         
         // Add cardinal directions along the horizon (dehnen: nur 3 gleichzeitig anzeigen)
         // Azimut-Mapping: 0°=Nord, 90°=Ost, 180°=Süd, 270°=West
-        const positions = [
+        const dirDefs = [
             { dir: 'N', azimuth: 0 },
             { dir: 'O', azimuth: 90 },
             { dir: 'S', azimuth: 180 },
@@ -107,7 +114,7 @@ export class SkyRenderer {
         
         // Bestimme die Richtung, die aktuell "aus dem Blick" liegt: die mit effektivem Azimut am nächsten zu 0°
         // Standard (horizontalShift=0): N ist am nächsten zu 0° => O,S,W bleiben sichtbar
-        const withEffective = positions.map(p => {
+        const withEffective = dirDefs.map(p => {
             let eff = p.azimuth - this.horizontalShift;
             while (eff < 0) eff += 360;
             while (eff >= 360) eff -= 360;
@@ -171,6 +178,36 @@ export class SkyRenderer {
 
     }
 
+    // Converts altitude/azimuth into integer grid coordinates (row, col)
+    // This projection is used by both ASCII rendering and SVG overlays
+    altAzToGridPosition(altitude, azimuth) {
+        const horizonRow = CONFIG.HORIZON_ROW;
+        const height = CONFIG.SKY_HEIGHT;
+        const width = CONFIG.SKY_WIDTH;
+
+        // Vertical mapping: above the horizon goes from horizonRow up to 0
+        let row;
+        if (altitude >= 0) {
+            row = Math.round(horizonRow - (altitude / 90 * horizonRow));
+        } else {
+            row = Math.round(horizonRow + (Math.abs(altitude) / 90 * (height - horizonRow - 1)));
+        }
+
+        // Horizontal mapping with the current horizontalShift applied
+        let effectiveAzimuth = azimuth - this.horizontalShift;
+        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
+        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
+        let col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
+
+        // Clamp to bounds to avoid dropping stars at the edges due to rounding
+        if (row < 0 || row >= height || col < 0 || col >= width) {
+            // console.debug('[proj] clamp needed', { row, col, width, height, altitude, azimuth, effectiveAzimuth });
+        }
+        row = Math.max(0, Math.min(height - 1, row));
+        col = Math.max(0, Math.min(width - 1, col));
+        return { row, col };
+    }
+
     updateCelestialData(data) {
         this.celestialData = data;
         this.render();
@@ -199,11 +236,23 @@ export class SkyRenderer {
         // Speichere die vorhandenen Navigationspfeile
         const existingArrows = document.getElementById('navigation-arrows');
 
+        // Rette das SVG-Layer vor dem Leeren
+        const svgLayer = document.getElementById('constellation-layer');
+        
+        // Entferne alte object-count-displays vor dem Leeren
+        const oldCounts = document.querySelectorAll('#object-count-display');
+        oldCounts.forEach(count => count.remove());
+        
         // Leere den Container
         this.container.innerHTML = '';
 
         // Füge den Himmelstext hinzu
         this.container.appendChild(skyTextDiv);
+        
+        // Füge das SVG-Layer wieder hinzu, falls es existierte
+        if (svgLayer) {
+            this.container.appendChild(svgLayer);
+        }
 
         // Füge Objektanzahl-Display hinzu
         this.addObjectCountDisplay();
@@ -223,6 +272,10 @@ export class SkyRenderer {
             this.applyVerticalOffset();
             // Re-setup pan events since DOM element was recreated
             this.setupPanEvents();
+            // Reproject constellation overlay to match the new layout and horizon shift
+            if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+                this.zodiacRenderer.updatePositions();
+            }
         });
     }
 
@@ -800,6 +853,7 @@ export class SkyRenderer {
     }
 
     clearSelection() {
+        this.removeDialog();
         this.selectedObject = null;
         // Nutze den normalen Renderpfad, damit auch die Pfeile erhalten bleiben
         this.render();
@@ -990,6 +1044,12 @@ export class SkyRenderer {
         const labelsLayer = this.container.querySelector('.labels-layer');
         if (labelsLayer) {
             labelsLayer.style.transform = `translateY(${this.verticalOffset}px)`;
+        }
+        
+        // Auch die Sternbilder-SVG-Layer verschieben
+        const constellationLayer = this.container.querySelector('#constellation-layer');
+        if (constellationLayer) {
+            constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
     }
 
@@ -1428,7 +1488,7 @@ export class SkyRenderer {
             }
             
             // Prüfe Cache-Verfügbarkeit und lade nur, was bereits vorliegt; fehlendes im Hintergrund anstoßen
-            const avail = await this.checkCacheAvailability(location);
+            const avail = await this.checkCacheAvailability(this.location);
             const availableAsteroids = !!(avail && avail.available && avail.available.asteroids);
             const availableComets = !!(avail && avail.available && avail.available.comets);
             const timeISO = (avail && avail.time) ? avail.time : (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO());
@@ -1442,13 +1502,18 @@ export class SkyRenderer {
             if (availableComets) {
                 tasks.push(this.loadComets(token));
             }
+            
+            // Load zodiac constellations if enabled
+            if (this.zodiacRenderer) {
+                tasks.push(this.loadZodiacData(token, this.location, timeISO));
+            }
 
             // Fehlt etwas? Dann Hintergrundberechnung anstoßen (dedupliziert)
             const missing = [];
             if (!availableAsteroids) missing.push('asteroids');
             if (!availableComets) missing.push('comets');
             if (missing.length > 0) {
-                this.triggerPrecomputeWindowIfNeeded(location, timeISO, missing, locKey);
+                this.triggerPrecomputeWindowIfNeeded(this.location, timeISO, missing, locKey);
             }
 
             // Warte optional auf geladene Zusatzdaten und rendere erneut
@@ -1468,6 +1533,19 @@ export class SkyRenderer {
         } finally {
             // Verstecke den Ladeindikator am Ende des gesamten Update-Zyklus
             this.hideLoading();
+        }
+    }
+    
+    async loadZodiacData(token, location, timeISO) {
+        try {
+            if (this.zodiacRenderer) {
+                await this.zodiacRenderer.fetchZodiacData(location, timeISO);
+                if (this.isActiveUpdate(token)) {
+                    this.zodiacRenderer.updatePositions();
+                }
+            }
+        } catch (error) {
+            console.error('Error loading zodiac data:', error);
         }
     }
 }
