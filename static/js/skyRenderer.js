@@ -977,6 +977,36 @@ export class SkyRenderer {
 
         // Touch events for sky navigation
         this.setupTouchEvents();
+
+        // Keyboard controls for horizon panning
+        this.setupKeyboardControls();
+    }
+
+    // Keyboard navigation: ArrowLeft/ArrowRight pan the horizon in 5° steps
+    setupKeyboardControls() {
+        // Bind once per instance
+        if (this._keyboardSetup) return;
+        this._keyboardSetup = true;
+
+        document.addEventListener('keydown', (e) => {
+            try {
+                // Ignore when focused on text inputs or editable elements
+                const tag = (document.activeElement && document.activeElement.tagName) ? document.activeElement.tagName.toLowerCase() : '';
+                const isEditable = document.activeElement && (document.activeElement.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select');
+                if (isEditable) return;
+
+                // Ignore when modifier keys are pressed to avoid clashes
+                if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    this.shiftHorizonLeft();
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    this.shiftHorizonRight();
+                }
+            } catch (_) { /* noop */ }
+        });
     }
 
     setupPanEvents() {
@@ -990,11 +1020,15 @@ export class SkyRenderer {
 
         // Mouse events for panning
         skyEl.addEventListener('mousedown', (e) => {
-            const factor = this.zoomLevels[this.zoomIndex] || 1;
-            if (factor <= 1) return; // Only pan when zoomed
-
+            // Start dragging always (vertical pan only when zoomed, horizontal pan always)
             this.isDragging = true;
             this.lastMouseY = e.clientY;
+            this.lastMouseX = e.clientX;
+            this._dragStartX = e.clientX;
+            this._dragStartY = e.clientY;
+            this._didDrag = false;
+            // Accumulator for horizontal drag in pixels -> convert to 5° steps
+            this._horizDragAccumPx = 0;
             skyEl.style.cursor = 'grabbing';
             e.preventDefault();
         });
@@ -1002,14 +1036,49 @@ export class SkyRenderer {
         document.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
 
-            const deltaY = e.clientY - this.lastMouseY;
-            this.verticalOffset += deltaY;
-            
-            // Limit vertical offset to reasonable bounds
-            const maxOffset = CONFIG.SKY_HEIGHT * 10; // Allow scrolling beyond visible area
-            this.verticalOffset = Math.max(-maxOffset, Math.min(maxOffset, this.verticalOffset));
-            
-            this.lastMouseY = e.clientY;
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+
+            // Vertical drag only when zoomed
+            if (factor > 1) {
+                const deltaY = e.clientY - this.lastMouseY;
+                this.verticalOffset += deltaY;
+                
+                // Limit vertical offset to reasonable bounds
+                const maxOffset = CONFIG.SKY_HEIGHT * 10; // Allow scrolling beyond visible area
+                this.verticalOffset = Math.max(-maxOffset, Math.min(maxOffset, this.verticalOffset));
+                
+                this.lastMouseY = e.clientY;
+            }
+
+            // Horizontal drag -> pan horizon in 5° steps (same as arrow buttons), always active
+            {
+                const deltaX = e.clientX - this.lastMouseX;
+                this._horizDragAccumPx += deltaX;
+                this.lastMouseX = e.clientX;
+                // Mark as drag if movement exceeds small threshold
+                if (!this._didDrag) {
+                    const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
+                    const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
+                    if (totalDx > 3 || totalDy > 3) this._didDrag = true;
+                }
+
+                // Convert pixels to degrees based on current sky element width
+                const rect = skyEl.getBoundingClientRect();
+                const stepPx = rect.width * (5 / 360); // 5° step size in pixels
+                if (stepPx > 0) {
+                    // Apply as many 5° steps as accumulated
+                    while (Math.abs(this._horizDragAccumPx) >= stepPx) {
+                        if (this._horizDragAccumPx > 0) {
+                            this.shiftHorizonLeft();  // drag left -> look left
+                            this._horizDragAccumPx -= stepPx;
+                        } else {
+                            this.shiftHorizonRight(); // drag right -> look right
+                            this._horizDragAccumPx += stepPx;
+                        }
+                    }
+                }
+            }
+
             this.applyVerticalOffset();
             e.preventDefault();
         });
@@ -1021,6 +1090,14 @@ export class SkyRenderer {
                 if (skyEl) {
                     const factor = this.zoomLevels[this.zoomIndex] || 1;
                     skyEl.style.cursor = factor > 1 ? 'grab' : 'default';
+                }
+                // Reset horizontal accumulator
+                this._horizDragAccumPx = 0;
+                // Prevent click selection immediately after a drag
+                if (this._didDrag) {
+                    this._suppressNextClick = true;
+                    // Reset flag shortly after to only suppress the immediate click
+                    setTimeout(() => { this._suppressNextClick = false; }, 50);
                 }
             }
         });
