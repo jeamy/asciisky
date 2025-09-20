@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 
 export class ZodiacRenderer {
     // Konstanten für Sternbild-Filter
-    static MIN_ALTITUDE_DEG = -40;     // Auch Sterne weit unter dem Horizont erlauben
+    static MIN_ALTITUDE_DEG = -90;     // Alle Sterne anzeigen, auch weit unter dem Horizont
     static MAX_AZ_SEPARATION_DEG = 180; // Keine Beschränkung der Azimut-Trennung mehr
     static MAX_ALT_SEPARATION_DEG = 180; // Keine Beschränkung der Höhen-Trennung mehr
     static DEBUG_GRID = false;          // Deaktiviert für normale Nutzung
@@ -15,7 +15,8 @@ export class ZodiacRenderer {
     constructor(skyRenderer) {
         this.skyRenderer = skyRenderer;
         this.constellations = [];
-        this.visible = false;
+        // Default Sichtbarkeit aus Konfiguration übernehmen (standard: aus)
+        this.visible = !!(CONFIG.CONSTELLATIONS && CONFIG.CONSTELLATIONS.DEFAULT_VISIBLE === true);
         this.svgLayer = null;
         this.toggleButton = null;
         
@@ -92,6 +93,8 @@ export class ZodiacRenderer {
                 lon: location.longitude,
                 elevation: location.elevation || 0
             });
+            // Ensure we bypass any previously cached 12-only result
+            params.append('nocache', '1');
             
             if (time) {
                 params.append('time', time);
@@ -115,10 +118,65 @@ export class ZodiacRenderer {
                 this.renderSVGConstellations();
             }
             
+            // Debug-Funktion optional aufrufbar
+            // this.debugConstellations();
+            
         } catch (error) {
             console.error('Error fetching zodiac data:', error);
             this.constellations = [];
         }
+    }
+
+    /**
+     * Cleanup method to remove event listeners
+     */
+    cleanup() {
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        }
+    }
+    
+    /**
+     * Zeigt alle Sternbilder an, unabhängig von ihrer Position
+     */
+    showAllConstellations() {
+        // Aktiviere Sternbilder falls noch nicht aktiv
+        if (!this.visible) {
+            this.toggleVisibility();
+        }
+        
+        // Setze MIN_ALTITUDE_DEG auf -90, um alle Sterne zu zeigen
+        ZodiacRenderer.MIN_ALTITUDE_DEG = -90;
+        
+        // Rendere alle Sternbilder neu
+        this.renderSVGConstellations();
+        
+    }
+    
+    /**
+     * Debug-Funktion: Gibt alle Sternbilder und ihre Sterne in der Konsole aus
+     */
+    debugConstellations() {
+        
+        // Gruppiere nach Sichtbarkeit
+        const visibleStars = {};
+        const belowHorizonStars = {};
+        
+        for (const constellation of this.constellations) {
+            const starsAbove = constellation.stars.filter(s => s.altitude >= 0).length;
+            const starsBelow = constellation.stars.filter(s => s.altitude < 0).length;
+            const totalStars = constellation.stars.length;
+            const percentVisible = totalStars > 0 ? (starsAbove / totalStars * 100).toFixed(0) : 0;
+            
+            
+            if (percentVisible >= 50) {
+                visibleStars[constellation.name] = { starsAbove, totalStars, percentVisible };
+            } else {
+                belowHorizonStars[constellation.name] = { starsAbove, totalStars, percentVisible };
+            }
+        }
+        
     }
 
     /**
@@ -159,8 +217,14 @@ export class ZodiacRenderer {
         
         // Render all constellations
         console.debug(`[zodiac] render overlay at ${skyWidth}x${skyHeight}`);
-        for (const constellation of this.constellations) {
-            this.renderSVGConstellation(constellation, offsetX, offsetY, skyWidth, skyHeight);
+        console.debug(`[zodiac] rendering ${this.constellations.length} constellations: ${this.constellations.map(c => c.name).join(', ')}`);
+        
+        // Sortiere Sternbilder nach Namen für bessere Übersicht
+        const sortedConstellations = [...this.constellations].sort((a, b) => a.name.localeCompare(b.name));
+        
+        for (const constellation of sortedConstellations) {
+            console.debug(`[zodiac] rendering constellation: ${constellation.name} (${constellation.name_de})`);
+            this.renderSVGConstellation(constellation, 0, 0, skyWidth, skyHeight);
         }
     }
     
@@ -245,12 +309,12 @@ export class ZodiacRenderer {
         // 3. Nicht zu große Höhenunterschiede
         
         // Debug: Zeige alle Linien-Definitionen
-        console.debug(`[zodiac] ${constellation.name} has ${constellation.lines.length} line definitions:`, 
+        console.debug(`[zodiac] ${constellation.name} (${constellation.name_de}) has ${constellation.lines.length} line definitions:`, 
                      constellation.lines.map(([a, b]) => `${a}-${b}`).join(', '));
         
         // Debug: Zeige alle Sternpositionen für dieses Sternbild
-        console.debug(`[zodiac] ${constellation.name} star positions:`, 
-                     starPositions.map(s => `${s.hip_id}:(${s.x.toFixed(1)},${s.y.toFixed(1)})`).join(', '));
+        console.debug(`[zodiac] ${constellation.name} (${constellation.name_de}) star positions:`, 
+                     starPositions.map(s => `${s.hip_id}:(${s.x.toFixed(1)},${s.y.toFixed(1)}), alt:${s.altitude.toFixed(1)}`).join(', '));
         
         for (const [star1Id, star2Id] of constellation.lines) {
             const star1 = starPositions.find(s => s.hip_id === star1Id);

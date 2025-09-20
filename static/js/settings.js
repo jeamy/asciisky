@@ -123,7 +123,7 @@ export class SettingsManager {
     // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
     async fetchSessionLocation() {
         try {
-            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION_GET, {
+            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_GET}?nocache=1`, {
                 credentials: 'same-origin'
             });
             if (!resp.ok) return null;
@@ -157,7 +157,7 @@ export class SettingsManager {
                 elevation: location.elevation,
                 name: location.name || 'Unbekannt'
             };
-            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION_POST, {
+            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_POST}?nocache=1`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
@@ -193,7 +193,7 @@ export class SettingsManager {
 
             // 2) Optional: Hintergrund-Precompute für neues Ziel anstoßen (nicht blockierend)
             try {
-                fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
+                fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -218,7 +218,7 @@ export class SettingsManager {
             const location = this.getLocation();
             
             // Standortdaten zum Server senden
-            const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true`);
+            const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true&nocache=1`);
             
             if (response.ok) {
                 console.log('Location successfully synced with server');

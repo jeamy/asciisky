@@ -358,7 +358,7 @@ let liveUpdateInterval = null;
 async function determineMaxEndDate() {
   try {
     // Hole die aktuelle Konfiguration vom Backend
-    const response = await fetch('/api/cache_status');
+    const response = await fetch('/api/cache_status?nocache=1');
     if (response.ok) {
       const data = await response.json();
       const maxHours = data.max_precompute_hours || 168;
@@ -437,7 +437,7 @@ async function updateCacheStatusSilently(lat, lon, elevation, locationName = '')
       url = `${url}&loc_key=${encodeURIComponent(key)}`;
     } catch (_) { /* noop */ }
     
-    const resp = await fetch(url, { credentials: 'same-origin' });
+    const resp = await fetch(`${url}${url.includes('?') ? '&' : '?'}nocache=1`, { credentials: 'same-origin' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const key = buildLocKey(lat, lon, elevation);
@@ -621,7 +621,7 @@ async function initializePrecomputeForm() {
       }
       
       // Start the precompute task
-      const response = await fetch(API_ENDPOINTS.PRECOMPUTE_RANGE, {
+      const response = await fetch(`${API_ENDPOINTS.PRECOMPUTE_RANGE}?nocache=1`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -686,7 +686,7 @@ async function checkPrecomputeTaskProgress() {
   
   try {
     console.log('Checking progress for task:', activePrecomputeTask);
-    const response = await fetch(`${API_ENDPOINTS.PRECOMPUTE_STATUS}/${activePrecomputeTask}`);
+    const response = await fetch(`${API_ENDPOINTS.PRECOMPUTE_STATUS}/${activePrecomputeTask}?nocache=1`);
     
     // Handle 404 Not Found (task doesn't exist on server, likely after restart)
     if (response.status === 404) {

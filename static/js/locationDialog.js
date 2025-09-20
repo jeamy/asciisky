@@ -326,7 +326,7 @@ export class LocationDialog {
             console.log(`Triggering automatic precompute for location ${location.name} (${location.lat}, ${location.lon}) from ${startDate} to ${endDate}`);
             
             // Starte Precompute im Hintergrund - nicht warten
-            fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
+            fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

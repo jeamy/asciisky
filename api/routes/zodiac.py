@@ -17,22 +17,37 @@ from cache_utils import build_cache_path, time_bucket_utc
 # Constants
 STELLARIUM_CONSTELLATION_PATH = 'constellationship.fab'
 
-ZODIAC_NAMES = [
+# Liste der anzuzeigenden Sternbilder (Tierkreis + zusätzliche bekannte Sternbilder)
+CONSTELLATION_NAMES = [
+    # Tierkreis (Zodiac)
     'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
-    'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces'
+    'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces',
+    # Zusätzliche bekannte Sternbilder
+    'Ursa Major', 'Ursa Minor', 'Pegasus', 'Andromeda', 'Cassiopeia', 'Orion', 'Canis Major', 'Perseus'
 ]
 
-ZODIAC_TRANSLATIONS = {
+# Deutsche Übersetzungen der Sternbildnamen
+CONSTELLATION_TRANSLATIONS = {
+    # Tierkreis (Zodiac)
     'Aries': 'Widder', 'Taurus': 'Stier', 'Gemini': 'Zwillinge',
     'Cancer': 'Krebs', 'Leo': 'Löwe', 'Virgo': 'Jungfrau',
     'Libra': 'Waage', 'Scorpius': 'Skorpion', 'Sagittarius': 'Schütze',
-    'Capricornus': 'Steinbock', 'Aquarius': 'Wassermann', 'Pisces': 'Fische'
+    'Capricornus': 'Steinbock', 'Aquarius': 'Wassermann', 'Pisces': 'Fische',
+    # Zusätzliche bekannte Sternbilder
+    'Ursa Major': 'Großer Bär', 'Ursa Minor': 'Kleiner Bär', 'Pegasus': 'Pegasus',
+    'Andromeda': 'Andromeda', 'Cassiopeia': 'Kassiopeia', 'Orion': 'Orion',
+    'Canis Major': 'Großer Hund', 'Perseus': 'Perseus'
 }
 
+# Zuordnung der Stellarium-Codes zu vollständigen IAU-Namen
 STELLARIUM_CODE_TO_NAME = {
+    # Tierkreis (Zodiac)
     'Ari': 'Aries', 'Tau': 'Taurus', 'Gem': 'Gemini', 'Cnc': 'Cancer',
     'Leo': 'Leo', 'Vir': 'Virgo', 'Lib': 'Libra', 'Sco': 'Scorpius',
-    'Sgr': 'Sagittarius', 'Cap': 'Capricornus', 'Aqr': 'Aquarius', 'Psc': 'Pisces'
+    'Sgr': 'Sagittarius', 'Cap': 'Capricornus', 'Aqr': 'Aquarius', 'Psc': 'Pisces',
+    # Zusätzliche bekannte Sternbilder
+    'UMa': 'Ursa Major', 'UMi': 'Ursa Minor', 'Peg': 'Pegasus', 'And': 'Andromeda',
+    'Cas': 'Cassiopeia', 'Ori': 'Orion', 'CMa': 'Canis Major', 'Per': 'Perseus'
 }
 
 router = APIRouter()
@@ -108,7 +123,8 @@ async def get_zodiac_constellations(
     lat: float = Query(..., description="Latitude in degrees"),
     lon: float = Query(..., description="Longitude in degrees"), 
     elevation: float = Query(0, description="Elevation in meters"),
-    time: Optional[str] = Query(None, description="ISO time string (optional)")
+    time: Optional[str] = Query(None, description="ISO time string (optional)"),
+    nocache: Optional[bool] = Query(False, description="Bypass cached zodiac result")
 ):
     """Get zodiac constellation data with calculated star positions"""
     
@@ -132,11 +148,12 @@ async def get_zodiac_constellations(
         else:
             dt_utc = datetime.now(timezone.utc)
         
-        # Check cache first
+        # Check cache first (unless bypassed)
         cache_path = build_cache_path(str(lat), str(lon), str(elevation), time_bucket_utc(dt_utc))
-        cached_result = get_cache_data(cache_path, 'zodiac')
-        if cached_result:
-            return cached_result
+        if not nocache:
+            cached_result = get_cache_data(cache_path, 'zodiac')
+            if cached_result:
+                return cached_result
             
         # Calculate constellation data using Skyfield
         skyfield_time = ts.from_datetime(dt_utc)
@@ -154,12 +171,12 @@ async def get_zodiac_constellations(
         # Process Stellarium constellations
         for code, edges in stellarium_data:
             full_name = STELLARIUM_CODE_TO_NAME.get(code)
-            if full_name not in ZODIAC_NAMES:
+            if full_name not in CONSTELLATION_NAMES:
                 continue
                 
             constellation = {
                 'name': full_name,
-                'name_de': ZODIAC_TRANSLATIONS.get(full_name, full_name),
+                'name_de': CONSTELLATION_TRANSLATIONS.get(full_name, full_name),
                 'stars': [],
                 'lines': [[a, b] for (a, b) in edges],
                 'boundary_ra': [0, 0],

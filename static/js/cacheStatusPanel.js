@@ -262,7 +262,7 @@ export function initCacheStatusPanel(elementId = 'cache-status-panel') {
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName) {
   try {
     const locKey = buildLocKey(lat, lon, elevation);
-    const url = appendTimeParam(`${API_ENDPOINTS.CACHE_STATUS}?lat=${lat}&lon=${lon}&elevation=${elevation}&loc_key=${encodeURIComponent(locKey)}`);
+    const url = appendTimeParam(`${API_ENDPOINTS.CACHE_STATUS}?lat=${lat}&lon=${lon}&elevation=${elevation}&loc_key=${encodeURIComponent(locKey)}&nocache=1`);
     const response = await fetch(url);
     
     if (!response.ok) {

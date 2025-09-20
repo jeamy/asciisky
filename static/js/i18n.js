@@ -193,10 +193,34 @@ export const i18n = {
         'comets_up_to_mag': 'Kometen bis Mag',
         
         // Constellation controls
-        'constellations': 'Sterne',
-        'toggle_constellations': 'Sterne ein/ausblenden',
-        'show_constellations': 'Sterne anzeigen',
-        'hide_constellations': 'Sterne ausblenden',
+        'constellations': 'Sternbilder',
+        'toggle_constellations': 'Sternbilder ein/ausblenden',
+        'show_constellations': 'Sternbilder anzeigen',
+        'hide_constellations': 'Sternbilder ausblenden',
+        
+        // Constellation names
+        // Zodiac
+        'Aries': 'Widder',
+        'Taurus': 'Stier',
+        'Gemini': 'Zwillinge',
+        'Cancer': 'Krebs',
+        'Leo': 'Löwe',
+        'Virgo': 'Jungfrau',
+        'Libra': 'Waage',
+        'Scorpius': 'Skorpion',
+        'Sagittarius': 'Schütze',
+        'Capricornus': 'Steinbock',
+        'Aquarius': 'Wassermann',
+        'Pisces': 'Fische',
+        // Additional constellations
+        'Ursa Major': 'Großer Bär',
+        'Ursa Minor': 'Kleiner Bär',
+        'Pegasus': 'Pegasus',
+        'Andromeda': 'Andromeda',
+        'Cassiopeia': 'Kassiopeia',
+        'Orion': 'Orion',
+        'Canis Major': 'Großer Hund',
+        'Perseus': 'Perseus',
     },
     
     // Englisch als Fallback
@@ -378,10 +402,34 @@ export const i18n = {
         'comets_up_to_mag': 'Comets up to Mag',
         
         // Constellation controls
-        'constellations': 'Stars',
-        'toggle_constellations': 'Toggle stars',
-        'show_constellations': 'Show stars',
-        'hide_constellations': 'Hide stars'
+        'constellations': 'Constellations',
+        'toggle_constellations': 'Toggle constellations',
+        'show_constellations': 'Show constellations',
+        'hide_constellations': 'Hide constellations',
+        
+        // Constellation names
+        // Zodiac
+        'Aries': 'Aries',
+        'Taurus': 'Taurus',
+        'Gemini': 'Gemini',
+        'Cancer': 'Cancer',
+        'Leo': 'Leo',
+        'Virgo': 'Virgo',
+        'Libra': 'Libra',
+        'Scorpius': 'Scorpius',
+        'Sagittarius': 'Sagittarius',
+        'Capricornus': 'Capricorn',
+        'Aquarius': 'Aquarius',
+        'Pisces': 'Pisces',
+        // Additional constellations
+        'Ursa Major': 'Great Bear',
+        'Ursa Minor': 'Little Bear',
+        'Pegasus': 'Pegasus',
+        'Andromeda': 'Andromeda',
+        'Cassiopeia': 'Cassiopeia',
+        'Orion': 'Orion',
+        'Canis Major': 'Great Dog',
+        'Perseus': 'Perseus'
     }
 };
 

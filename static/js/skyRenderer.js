@@ -428,7 +428,7 @@ export class SkyRenderer {
         let cometMag = 16.0;    // Fallback
         
         try {
-            const response = await fetch(API_ENDPOINTS.CONFIG);
+            const response = await fetch(`${API_ENDPOINTS.CONFIG}?nocache=1`);
             if (response.ok) {
                 const config = await response.json();
                 asteroidMag = config.magnitude_limits?.asteroids?.max_apparent || 10.0;
@@ -584,7 +584,7 @@ export class SkyRenderer {
     // Prüfe schnell, ob Cache für aktuelle Stunde vorhanden ist (per Backend-Shortcut)
     async checkCacheAvailability(location) {
         try {
-            let url = `${API_ENDPOINTS.CACHE_AVAILABILITY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+            let url = `${API_ENDPOINTS.CACHE_AVAILABILITY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&nocache=1`;
             url = this.appendTimeParam(url);
             const resp = await fetch(url, { cache: 'no-store' });
             if (!resp.ok) return null;
@@ -602,7 +602,7 @@ export class SkyRenderer {
             if (this._precomputeRequests.has(key)) return;
             this._precomputeRequests.add(key);
 
-            await fetch(API_ENDPOINTS.PRECOMPUTE_WINDOW, {
+            await fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1376,11 +1376,11 @@ export class SkyRenderer {
     async loadAsteroids(token) {
         try {
             // Erstelle die URL mit Standortparametern
-            let url = API_ENDPOINTS.ASTEROIDS;
+            let url = `${API_ENDPOINTS.ASTEROIDS}?nocache=1`;
             
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
-                url += `?lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+                url += `&lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
             
             url = this.appendTimeParam(url);
@@ -1408,7 +1408,7 @@ export class SkyRenderer {
     async loadComets(token) {
         try {
             // Erstelle die URL mit Standortparametern
-            let url = API_ENDPOINTS.COMETS;
+            let url = `${API_ENDPOINTS.COMETS}?nocache=1`;
             
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
@@ -1470,7 +1470,7 @@ export class SkyRenderer {
             
             // Lade die Basisdaten (Sonne, Mond, Planeten)
             {
-                let url = `${API_ENDPOINTS.SKY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}`;
+                let url = `${API_ENDPOINTS.SKY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&nocache=1`;
                 url = this.appendTimeParam(url);
                 const response = await fetch(url, { cache: 'no-store' });
                 if (!response.ok) {
