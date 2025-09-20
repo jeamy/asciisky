@@ -9,7 +9,7 @@
     z-index: 1000;
     opacity: 0;
     transition: opacity 0.3s ease;
-    background: rgba(255, 0, 128, 0.2); /* DEBUG: Sehr transparenter Hintergrund */
+    background: rgba(255, 0, 128, 0.05); /* DEBUG: Extrem transparenter Hintergrund */
 }
 
 #constellation-layer.visible {
@@ -30,11 +30,33 @@
     stroke-width: 0.5;
 }
 
+/* Sterne unter dem Horizont */
+.constellation circle.below-horizon {
+    opacity: 0.4;
+    fill: #3a70b2;
+    stroke: #3a70b2;
+    stroke-width: 0.3;
+}
+
 .constellation line {
     stroke: #4a90e2;
     stroke-width: 1.0;
     opacity: 0.6;
     stroke-linecap: round;
+}
+
+/* Verbindungslinien mit Sternen unter dem Horizont */
+.constellation line.below-horizon {
+    stroke: #3a70b2;
+    opacity: 0.4;
+    stroke-dasharray: 3, 3;
+}
+
+/* Verbindungslinien mit beiden Sternen unter dem Horizont */
+.constellation line.both-below-horizon {
+    stroke: #2a5092;
+    opacity: 0.3;
+    stroke-dasharray: 2, 4;
 }
 
 .constellation text {

@@ -7,10 +7,10 @@ import { t } from './i18n.js';
 
 export class ZodiacRenderer {
     // Konstanten für Sternbild-Filter
-    static MIN_ALTITUDE_DEG = 10;      // Nur Sterne deutlich über dem Horizont
-    static MAX_AZ_SEPARATION_DEG = 30; // Sehr strikt: nur lokale Verbindungen
-    static MAX_ALT_SEPARATION_DEG = 40; // Nicht zu steile Verbindungen
-    static DEBUG_GRID = true;          // Wenn true, wird ein Hilfsraster gezeichnet
+    static MIN_ALTITUDE_DEG = -40;     // Auch Sterne weit unter dem Horizont erlauben
+    static MAX_AZ_SEPARATION_DEG = 180; // Keine Beschränkung der Azimut-Trennung mehr
+    static MAX_ALT_SEPARATION_DEG = 180; // Keine Beschränkung der Höhen-Trennung mehr
+    static DEBUG_GRID = false;          // Deaktiviert für normale Nutzung
     
     constructor(skyRenderer) {
         this.skyRenderer = skyRenderer;
@@ -168,12 +168,17 @@ export class ZodiacRenderer {
      * Render a single constellation in SVG
      */
     renderSVGConstellation(constellation, offsetX, offsetY, skyWidth, skyHeight) {
-        // Prüfe, ob genug Sterne des Sternbilds sichtbar sind (mind. 50%)
+        // Zeige alle Sternbilder an, auch wenn alle Sterne unter dem Horizont sind
+        // Wir filtern nur nach der absoluten Mindesthöhe
         const constellationVisibleStars = constellation.stars.filter(s => s.altitude > ZodiacRenderer.MIN_ALTITUDE_DEG);
-        if (constellationVisibleStars.length < constellation.stars.length * 0.5) {
-            // Zu wenig sichtbare Sterne - Sternbild nicht zeichnen
-            return;
+        
+        // Nur Debug-Ausgabe, aber keine Filterung mehr
+        if (constellationVisibleStars.length === 0) {
+            console.debug(`[zodiac] All stars in ${constellation.name} are below minimum altitude`);
         }
+        
+        // Debug: Zeige die sichtbaren Sterne und ihre IDs
+        console.debug(`[zodiac] Visible stars in ${constellation.name}: ${constellationVisibleStars.map(s => s.hip_id).join(', ')}`);
         const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         group.setAttribute('class', 'constellation');
         group.setAttribute('data-name', constellation.name);
@@ -190,7 +195,13 @@ export class ZodiacRenderer {
             
             // Konvertiere zu Grid-Position
             const gridPos = this.altAzToGridPosition(altitude, azimuth);
-            if (!gridPos) continue;
+            if (!gridPos) {
+                console.warn(`[zodiac] Failed to convert coordinates for star ${star.hip_id}: alt=${altitude.toFixed(2)}°, az=${azimuth.toFixed(2)}°`);
+                continue;
+            }
+            
+            // Debug: Zeige Koordinatenumrechnung
+            console.debug(`[zodiac] Star ${star.hip_id}: alt=${altitude.toFixed(1)}°, az=${azimuth.toFixed(1)}° -> grid(${gridPos.row}, ${gridPos.col})`);
             
             // Konvertiere zu Pixel-Koordinaten (Zellmitte)
             const cellW = skyWidth / CONFIG.SKY_WIDTH;
@@ -198,6 +209,9 @@ export class ZodiacRenderer {
             // Exakte Zellmitte für präzise Ausrichtung
             const x = gridPos.col * cellW + (cellW / 2);
             const y = gridPos.row * cellH + (cellH / 2);
+            
+            // Debug: Zeige Pixel-Koordinaten
+            console.debug(`[zodiac] Star ${star.hip_id}: pixel(${x.toFixed(1)}, ${y.toFixed(1)}) cellSize(${cellW.toFixed(1)}, ${cellH.toFixed(1)})`);
             
             // Speichere Position und Winkel für Linien/Filter
             starPositions.push({
@@ -215,7 +229,12 @@ export class ZodiacRenderer {
             starCircle.setAttribute('cx', x);
             starCircle.setAttribute('cy', y);
             starCircle.setAttribute('r', this.getStarRadius(star.magnitude));
-            starCircle.setAttribute('opacity', star.visible ? '0.8' : '0.3');
+            
+            // Unterschiedliche Darstellung für Sterne über/unter dem Horizont
+            if (star.altitude < 0) {
+                starCircle.classList.add('below-horizon');
+            }
+            
             group.appendChild(starCircle);
         }
         
@@ -225,21 +244,44 @@ export class ZodiacRenderer {
         // 2. Nur Sterne über Mindesthöhe verbinden
         // 3. Nicht zu große Höhenunterschiede
         
+        // Debug: Zeige alle Linien-Definitionen
+        console.debug(`[zodiac] ${constellation.name} has ${constellation.lines.length} line definitions:`, 
+                     constellation.lines.map(([a, b]) => `${a}-${b}`).join(', '));
+        
+        // Debug: Zeige alle Sternpositionen für dieses Sternbild
+        console.debug(`[zodiac] ${constellation.name} star positions:`, 
+                     starPositions.map(s => `${s.hip_id}:(${s.x.toFixed(1)},${s.y.toFixed(1)})`).join(', '));
+        
         for (const [star1Id, star2Id] of constellation.lines) {
             const star1 = starPositions.find(s => s.hip_id === star1Id);
             const star2 = starPositions.find(s => s.hip_id === star2Id);
             
             // Beide Sterne müssen vorhanden sein
-            if (!star1 || !star2) continue;
+            if (!star1 || !star2) {
+                console.warn(`[zodiac] Missing star in line ${star1Id}-${star2Id}. Available stars: ${starPositions.map(s => s.hip_id).join(', ')}`);
+                continue;
+            }
+            
+            // Debug: Zeige die Linie, die gezeichnet wird
+            console.debug(`[zodiac] Drawing line ${star1Id}-${star2Id}: (${star1.x.toFixed(1)},${star1.y.toFixed(1)}) -> (${star2.x.toFixed(1)},${star2.y.toFixed(1)})`);
 
-            // Beide Endpunkte müssen über der Mindesthöhe sein
-            if (star1.altitude < ZodiacRenderer.MIN_ALTITUDE_DEG || star2.altitude < ZodiacRenderer.MIN_ALTITUDE_DEG) continue;
+            // Alle Linien zeichnen, auch wenn beide Sterne unter dem Horizont sind
+            // Wir filtern nur nach der minimalen Höhe, um extrem tief stehende Sterne auszuschließen
+            if (star1.altitude < ZodiacRenderer.MIN_ALTITUDE_DEG || star2.altitude < ZodiacRenderer.MIN_ALTITUDE_DEG) {
+                // Nur Debug-Ausgabe, aber keine Filterung mehr
+                console.debug(`[zodiac] Line with stars below MIN_ALTITUDE: ${star1.hip_id}-${star2.hip_id}: ${star1.altitude.toFixed(1)}°, ${star2.altitude.toFixed(1)}°`);
+            }
 
-            // Azimut- und Altitude-Trennung prüfen
+            // Keine Filterung nach Azimut oder Höhe mehr
+            // Wir zeichnen alle Linien, wie sie in den äquatorialen Koordinaten definiert sind
+            // Debug-Information für sehr weit entfernte Sterne
             const dAz = Math.abs(star2.azimuth - star1.azimuth);
             const azSeparation = Math.min(dAz, 360 - dAz);
-            if (azSeparation > ZodiacRenderer.MAX_AZ_SEPARATION_DEG) continue;
-            if (Math.abs(star2.altitude - star1.altitude) > ZodiacRenderer.MAX_ALT_SEPARATION_DEG) continue;
+            const altSeparation = Math.abs(star2.altitude - star1.altitude);
+            
+            if (azSeparation > 90 || altSeparation > 60) {
+                console.debug(`[zodiac] Wide separation in line ${star1.hip_id}-${star2.hip_id}: azimuth=${azSeparation.toFixed(1)}°, altitude=${altSeparation.toFixed(1)}°`);
+            }
 
             // Azimut-Wrap-around behandeln: kürzeste Verbindung wählen
             let x1 = star1.x;
@@ -264,9 +306,14 @@ export class ZodiacRenderer {
             line.setAttribute('y1', y1);
             line.setAttribute('x2', x2);
             line.setAttribute('y2', y2);
-            // Schwächere Linien für unsichtbare Sterne
-            const opacity = (star1.visible && star2.visible) ? '0.7' : '0.3';
-            line.setAttribute('opacity', opacity);
+            
+            // Unterschiedliche Darstellung für Linien mit Sternen unter dem Horizont
+            if (star1.altitude < 0 && star2.altitude < 0) {
+                line.classList.add('both-below-horizon');
+            } else if (star1.altitude < 0 || star2.altitude < 0) {
+                line.classList.add('below-horizon');
+            }
+            
             group.appendChild(line);
         }
         
@@ -294,7 +341,14 @@ export class ZodiacRenderer {
         if (!this.skyRenderer || typeof this.skyRenderer.altAzToGridPosition !== 'function') {
             return null;
         }
-        return this.skyRenderer.altAzToGridPosition(altitude, azimuth);
+        const result = this.skyRenderer.altAzToGridPosition(altitude, azimuth);
+        // Debug: Zeige die Umrechnung im Detail
+        if (result) {
+            console.debug(`[zodiac] altAzToGridPosition: alt=${altitude.toFixed(2)}°, az=${azimuth.toFixed(2)}° -> row=${result.row}, col=${result.col}`);
+        } else {
+            console.warn(`[zodiac] altAzToGridPosition failed for alt=${altitude.toFixed(2)}°, az=${azimuth.toFixed(2)}°`);
+        }
+        return result;
     }
     
     /**
