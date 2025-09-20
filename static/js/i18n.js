@@ -191,6 +191,12 @@ export const i18n = {
         'visible_objects': 'Sichtbare Objekte',
         'asteroids_up_to_mag': 'Asteroiden bis Mag',
         'comets_up_to_mag': 'Kometen bis Mag',
+        
+        // Constellation controls
+        'constellations': 'Sterne',
+        'toggle_constellations': 'Sterne ein/ausblenden',
+        'show_constellations': 'Sterne anzeigen',
+        'hide_constellations': 'Sterne ausblenden',
     },
     
     // Englisch als Fallback
@@ -369,7 +375,13 @@ export const i18n = {
         // Object count display
         'visible_objects': 'Visible Objects',
         'asteroids_up_to_mag': 'Asteroids up to Mag',
-        'comets_up_to_mag': 'Comets up to Mag'
+        'comets_up_to_mag': 'Comets up to Mag',
+        
+        // Constellation controls
+        'constellations': 'Stars',
+        'toggle_constellations': 'Toggle stars',
+        'show_constellations': 'Show stars',
+        'hide_constellations': 'Hide stars'
     }
 };
 

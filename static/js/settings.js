@@ -123,7 +123,7 @@ export class SettingsManager {
     // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
     async fetchSessionLocation() {
         try {
-            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, {
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION_GET, {
                 credentials: 'same-origin'
             });
             if (!resp.ok) return null;
@@ -157,7 +157,7 @@ export class SettingsManager {
                 elevation: location.elevation,
                 name: location.name || 'Unbekannt'
             };
-            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, {
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION_POST, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',

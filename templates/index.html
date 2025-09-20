@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="./static/css/cacheStatus.css">
     <link rel="stylesheet" href="./static/css/timeInputDialog.css">
     <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
+    <link rel="stylesheet" href="./static/css/constellations.css">
 </head>
 <body>
 <header>
@@ -500,6 +501,31 @@
                 };
                 container.appendChild(btn);
             });
+            
+            // Sternbilder-Button hinzufügen
+            if (CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) {
+                const constellationBtn = document.createElement('button');
+                constellationBtn.id = 'constellation-toggle';
+                constellationBtn.className = 'object-btn';
+                constellationBtn.innerHTML = '✦ ' + (t('constellations') || 'Sternbilder');
+                constellationBtn.title = t('toggle_constellations') || 'Sternbilder ein/ausblenden';
+                constellationBtn.onclick = async () => {
+                    if (renderer && renderer.zodiacRenderer) {
+                        // Load data if not already loaded
+                        if (renderer.zodiacRenderer.constellations.length === 0) {
+                            const location = renderer.location || settingsManager.getLocation();
+                            const timeISO = settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO();
+                            await renderer.zodiacRenderer.fetchZodiacData(location, timeISO);
+                        }
+                        
+                        renderer.zodiacRenderer.toggleVisibility();
+                        // Update button appearance
+                        const isActive = renderer.zodiacRenderer.visible;
+                        constellationBtn.classList.toggle('active', isActive);
+                    }
+                };
+                container.appendChild(constellationBtn);
+            }
         }
         
         // Funktion zum Einrichten der Navigationspfeile - nicht mehr benötigt, da im SkyRenderer implementiert

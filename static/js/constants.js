@@ -1,17 +1,17 @@
 // API Endpoints
 export const API_ENDPOINTS = {
+    SKY: '/api/celestial',  // Alias for backward compatibility
     CELESTIAL: '/api/celestial',
-    CELESTIAL_OBJECT: '/api/celestial',  // + '/{body_id}'
-    SKY: '/api/celestial',
-    ASTEROIDS: '/api/bright_asteroids',
-    COMETS: '/api/comets',
+    ASTEROIDS: '/api/bright_asteroids',  // Alias for backward compatibility
     BRIGHT_ASTEROIDS: '/api/bright_asteroids',
-    SESSION_LOCATION: '/api/session/location',
+    COMETS: '/api/comets',
+    ZODIAC: '/api/zodiac',
     CACHE_STATUS: '/api/cache_status',
-    CACHE_AVAILABILITY: '/api/cache_availability',
     PRECOMPUTE_WINDOW: '/api/precompute_window',
+    SESSION_LOCATION_GET: '/api/session/location',
+    SESSION_LOCATION_POST: '/api/session/location',
+    CACHE_AVAILABILITY: '/api/cache_availability',
     CONFIG: '/api/config'
-    // ZODIAC endpoint removed as it's not implemented in the backend
 };
 
 // Astronomical Constants
@@ -43,7 +43,7 @@ export const CONFIG = {
     UPDATE_INTERVAL_MS: 60000, // 60 seconds
     SKY_WIDTH: 80,
     SKY_HEIGHT: 40,
-    HORIZON_ROW: 20, // Row where the horizon is drawn (middle of SKY_HEIGHT)
+        HORIZON_ROW: 20, // Row where the horizon is drawn (middle of SKY_HEIGHT)
     CARDINAL_DIRECTIONS: ['N', 'O', 'S', 'W'],
     OBJECT_SYMBOLS: OBJECT_SYMBOLS,  // Reference to the constant defined above
     SHOW_BELOW_HORIZON: true,       // Zeige Objekte unter dem Horizont
@@ -56,6 +56,16 @@ export const CONFIG = {
         BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
         ENABLE_BRIGHT_COMET_LABELS: true,
         BRIGHT_COMET_MAG_THRESHOLD: 9.0
+    },
+    CONSTELLATIONS: {
+        ENABLE_CONSTELLATION_LAYER: true,
+        DEFAULT_VISIBLE: false,
+        STROKE_WIDTH: 1.5,
+        STROKE_COLOR: '#4a90e2',
+        STROKE_OPACITY: 0.7,
+        LABEL_COLOR: '#4a90e2',
+        LABEL_OPACITY: 0.8,
+        LABEL_FONT_SIZE: '12px'
     }
 };
 
