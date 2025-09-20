@@ -15,7 +15,7 @@ from api.helpers import get_location_params, get_cache_data, store_cache_data
 from cache_utils import build_cache_path, time_bucket_utc
 
 # Constants
-STELLARIUM_CONSTELLATION_PATH = '/app/cache/constellations/constellationship.fab'
+STELLARIUM_CONSTELLATION_PATH = 'constellationship.fab'
 
 ZODIAC_NAMES = [
     'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',

@@ -58,10 +58,8 @@ docker-compose.override.yml
 logs/
 *.log
 
-hip_main.dat
 CometEls.txt
 MPCORB.DAT*
 hipparcos.dat
 cache/
 .cache
-!cache/constellations/constellationship.fab
