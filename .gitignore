@@ -64,3 +64,4 @@ MPCORB.DAT*
 hipparcos.dat
 cache/
 .cache
+!cache/constellations/constellationship.fab
