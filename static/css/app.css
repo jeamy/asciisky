@@ -128,7 +128,7 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    margin-bottom: 20px;
+    margin-bottom: 0px;
 }
 
 .object-btn {
@@ -229,7 +229,7 @@ h1 {
 
 #object-dialog button {
     position: absolute;
-    top: 5px;
+    top: -5px;
     right: 5px;
     background: rgba(0, 20, 0, 0.5);
     border: none;

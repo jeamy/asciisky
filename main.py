@@ -9,7 +9,7 @@ from starlette.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Import routers from the new modules
-from api.routes import session, celestial, asteroids, comets, cache, config
+from api.routes import session, celestial, asteroids, comets, cache, config, zodiac
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -46,6 +46,7 @@ app.include_router(session.router, prefix="/api", tags=["session"])
 app.include_router(celestial.router, prefix="/api", tags=["celestial"])
 app.include_router(asteroids.router, prefix="/api", tags=["asteroids"])
 app.include_router(comets.router, prefix="/api", tags=["comets"])
+app.include_router(zodiac.router, prefix="/api", tags=["zodiac"])
 app.include_router(cache.router, prefix="/api", tags=["cache"])
 app.include_router(config.router, prefix="/api", tags=["config"])
 
