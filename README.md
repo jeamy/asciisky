@@ -14,7 +14,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
 - Constellation visualization with:
   - Interactive toggle to show/hide constellations
-  - Constellation lines connecting major stars
+  - Constellation lines connecting major stars (using data from [constellationship.fab](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
   - Constellation names in the selected language
   - Smooth panning and zooming
 - Auto-updates every 60 seconds
