@@ -12,6 +12,11 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Distance and magnitude information for all objects
 - Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
 - Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
+- Constellation visualization with:
+  - Interactive toggle to show/hide constellations
+  - Constellation lines connecting major stars
+  - Constellation names in the selected language
+  - Smooth panning and zooming
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
 - Simulated time controls (optional): view the sky at a chosen UTC time
@@ -20,10 +25,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Frontend appends `?time=<ISO8601>` to API calls automatically when enabled
   - Automatic background precomputation for smooth time navigation
 - Minimalist UI design with optimized space usage
-- Cache status panel showing precomputed data availability
-- Custom date range cache precomputation with progress tracking
-- Horizontal navigation with arrow controls
-- Labels for bright asteroids and comets
+- Horizontal navigation with arrow controls and mouse drag panning
+- Labels for bright asteroids, comets, and constellations
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - SQLite database backend for efficient data storage and retrieval
@@ -49,10 +52,6 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - The first startup can take longer because the app downloads and parses MPC orbital data and creates caches.
 
 - Cache Precomputation
-  - The cache status panel allows precomputing celestial data for a custom date range
-  - Select start and end dates, then click "Start Precompute" to begin background calculation
-  - Progress is displayed in real-time with a progress bar
-  - Maximum range is 7 days (168 hours) to prevent excessive resource usage
   - Precomputed data is stored in SQLite database and location-specific cache files for fast retrieval
 
 - SQLite Database Cache
@@ -80,8 +79,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Comets:
     - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 18.0)
     - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 16.0)
-  - Current values exposed via `/api/config` endpoint
-  - To force recomputation with new thresholds, delete both SQLite database and pickle cache files
+  - Current values are exposed via the `/api/config` endpoint
 
 ### Without Docker
 
