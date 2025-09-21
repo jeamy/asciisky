@@ -199,6 +199,24 @@ The application can be configured using the following environment variables in `
 - `TZ` - Timezone for the application (default: Europe/Berlin)
 - `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (default: "dev-secret-please-change")
 
+## Documentation
+
+### Core Features
+- [Asteroids](doc/asteroids.md) - Implementation details for asteroid tracking
+- [Comets](doc/comets.md) - Comet tracking and M1/k1 magnitude model
+- [Planets](doc/planets.md) - Planetary positions and calculations
+- [Constellations](doc/constellations.md) - Star patterns and visualization (using data from [Stellarium](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
+
+### Architecture
+- [Runtime Ephemerides](doc/runtime_ephemerides.md) - On-demand position computation strategy
+- [SQLite Database](doc/sqlite.md) - Database schema and caching strategy
+- [Cache Management](doc/cache.md) - Caching layers and performance considerations
+
+### Migration & Maintenance
+- [Runtime Migration Plan](doc/migration_plan_runtime_ephemerides.md) - Transitioning to on-the-fly computation
+- [Session Management](doc/sessionmgm.md) - User sessions and state handling
+- [Session Management (English)](doc/sessionmgm_en.md) - English version of session management docs
+
 ## Technologies Used
 
 - Backend: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), SQLite
