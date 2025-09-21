@@ -203,6 +203,13 @@
                 }
             });
             
+            // Aktualisiere den Sternbilder-Button, wenn vorhanden
+            const constellationBtn = document.getElementById('constellation-toggle');
+            if (constellationBtn) {
+                constellationBtn.innerHTML = '✦ ' + t('constellations');
+                constellationBtn.title = t('toggle_constellations');
+            }
+            
             // Aktualisiere den Standort-Button-Tooltip
             document.getElementById('location-btn').title = t('location_settings');
             
@@ -507,8 +514,8 @@
                 const constellationBtn = document.createElement('button');
                 constellationBtn.id = 'constellation-toggle';
                 constellationBtn.className = 'object-btn';
-                constellationBtn.innerHTML = '✦ ' + (t('constellations') || 'Sternbilder');
-                constellationBtn.title = t('toggle_constellations') || 'Sternbilder ein/ausblenden';
+                constellationBtn.innerHTML = '✦ ' + t('constellations');
+                constellationBtn.title = t('toggle_constellations');
                 constellationBtn.onclick = async () => {
                     if (renderer && renderer.zodiacRenderer) {
                         // Load data if not already loaded

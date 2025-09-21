@@ -406,7 +406,8 @@ export class ZodiacRenderer {
             const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             label.setAttribute('x', centerX);
             label.setAttribute('y', centerY - 15);
-            label.textContent = constellation.name_de || constellation.name;
+            // Verwende i18n-Übersetzung für Sternbildnamen, wenn verfügbar
+            label.textContent = t(constellation.name) || constellation.name_de || constellation.name;
             group.appendChild(label);
         }
         
@@ -558,8 +559,8 @@ export class ZodiacRenderer {
         if (this.toggleButton) {
             this.toggleButton.classList.toggle('active', this.visible);
             this.toggleButton.title = this.visible ? 
-                (t('hide_constellations') || 'Sternbilder ausblenden') :
-                (t('show_constellations') || 'Sternbilder anzeigen');
+                t('hide_constellations') :
+                t('show_constellations');
         }
         
         // Re-render if visible
