@@ -3,9 +3,7 @@ Module for calculating positions of comets using real MPC data.
 - Loads MPC comet dataframe and caches it (~6h) to disk and memory
 - Builds comet orbits from pandas rows (not dict) to avoid attribute errors
 - Computes apparent position, optional magnitude estimate (M1/k1), and rise/set/transit times
-- Returns a list of comet dicts compatible with the frontend (like bright_asteroids.py)
 """
-from skyfield.api import Topos, load
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2
 from skyfield.data import mpc
 from skyfield import almanac
@@ -13,33 +11,28 @@ from skyfield import almanac
 import os
 import time
 import pickle
-import time
 import logging
 from datetime import datetime, timedelta, timezone
 import gzip
 import urllib.request
-from skyfield.data import mpc
 import math
 from types import SimpleNamespace
 from typing import Optional, List
+from functools import lru_cache
 
 import pandas as pd
 import numpy as np
-from skyfield import almanac
 from skyfield.api import Loader, wgs84
-from skyfield.data import mpc
 from skyfield.magnitudelib import planetary_magnitude
 
-from cache_utils import build_cache_path, atomic_write_pickle, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
+from cache_utils import build_cache_path, atomic_write_pickle, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc, CACHE_ROOT
 from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
 from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions, migrate_from_pickle_cache
 
-def should_update_comet_file():
-    """
-    Überprüft ob Kometen-Datei aktualisiert werden sollte (wöchentlich)
-    """
+def should_update_comet_file() -> bool:
+    """Prueft, ob die Kometen-Elemente-Datei woechentlich aktualisiert werden sollte."""
     if not os.path.exists(COMETS_FILE):
         return True
     
@@ -58,6 +51,8 @@ MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG'
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
+COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
+DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
 
 
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
@@ -409,6 +404,42 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         return pd.DataFrame(columns=['designation'])
 
 
+class _RowProxy:
+    """Lightweight dict-like proxy to satisfy skyfield.mpc.comet_orbit() row access."""
+    def __init__(self, data: dict):
+        self._d = data
+    def __getitem__(self, key):
+        return self._d[key]
+    def get(self, key, default=None):
+        return self._d.get(key, default)
+
+
+@lru_cache(maxsize=2048)
+def _make_comet_orbit_cached(key: tuple):
+    """Build and cache comet orbit from essential elements.
+    key = (designation, e, q, i, om, w, epoch_tt, Tp)
+    Note: uses global timescale from api.computation to avoid hashing ts.
+    """
+    from api.computation import ts as _ts  # import here to avoid top-level circulars
+    designation, e, q, i, om, w, epoch_tt, Tp = key
+    data = {
+        'designation': designation,
+        'e': e,
+        'q': q,
+        # Provide both alias pairs for robustness
+        'i': i,
+        'incl': i,
+        'om': om,
+        'node': om,
+        'w': w,
+        'peri': w,
+        'epoch_tt': epoch_tt,
+        'Tp': Tp,
+    }
+    row = _RowProxy(data)
+    return mpc.comet_orbit(row, _ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+
+
 def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: Optional[datetime] = None) -> List[dict]:
     """
     Compute comet positions and times for the given observer location.
@@ -494,14 +525,15 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         df_pref = df
 
     t = ts.from_datetime(dt_utc)
-    topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
-    observer = eph['earth'] + topos
+    location = wgs84.latlon(lat, lon, elevation_m=elevation)
+    observer = eph['earth'] + location
     sun = eph['sun']
     # Determine observer timezone for formatting and local-day selection
     tz = get_tzinfo(lat, lon)
 
     comet_list: List[dict] = []
     count = 0
+    events_computed = 0
 
     for designation, row in df_pref.iterrows():
         if count >= max_comets:
@@ -593,8 +625,14 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             if any(pd.isna(row2.get(c)) for c in essentials):
                 raise ValueError(f"Missing essential elements in row for {designation}: {[c for c in essentials if pd.isna(row2.get(c))]}")
 
-            # Build comet orbit from pandas row (not dict)
-            orbit = mpc.comet_orbit(row2, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+            # Build comet orbit using cached builder from essential elements
+            i_val_for_orbit = float(row2.get('i')) if pd.notna(row2.get('i')) else float(row2.get('incl'))
+            om_val_for_orbit = float(row2.get('om')) if pd.notna(row2.get('om')) else float(row2.get('node'))
+            w_val_for_orbit = float(row2.get('w')) if pd.notna(row2.get('w')) else float(row2.get('peri'))
+            epoch_tt_val = float(row2.get('epoch_tt')) if ('epoch_tt' in row2.index and pd.notna(row2.get('epoch_tt'))) else None
+            tp_val = float(row2.get('Tp')) if ('Tp' in row2.index and pd.notna(row2.get('Tp'))) else None
+            orbit_key = (designation, float(row2.get('e')), float(row2.get('q')), i_val_for_orbit, om_val_for_orbit, w_val_for_orbit, epoch_tt_val, tp_val)
+            orbit = _make_comet_orbit_cached(orbit_key)
 
             # Ensure barycentric target like in c.py: if orbit is Sun-centered, shift to SSB by adding Sun
             try:
@@ -631,51 +669,53 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()
 
-            # Rise/Set over next 48h starting at UTC midnight (mirror bright_asteroids)
-            try:
-                start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(hours=24))
-                rise_set_func = almanac.risings_and_settings(eph, target, topos)
-                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+            # Rise/Set/Transit over next 24h, limited to top-N event computations
+            rise_time, set_time, transit_time = None, None, None
+            if events_computed < COMET_EVENTS_MAX:
+                try:
+                    start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+                    end_time = ts.utc(start_time.utc_datetime() + timedelta(hours=24))
+                    rise_set_func = almanac.risings_and_settings(eph, target, location)
+                    times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
-                rise_time, set_time = None, None
-                for ti, event in zip(times, events):
-                    if event == 1 and rise_time is None:
-                        rise_time = ti.utc_datetime()
-                    elif event == 0 and set_time is None:
-                        set_time = ti.utc_datetime()
+                    for ti, event in zip(times, events):
+                        if event == 1 and rise_time is None:
+                            rise_time = ti.utc_datetime()
+                        elif event == 0 and set_time is None:
+                            set_time = ti.utc_datetime()
 
-                # Transit time (choose highest altitude for local day)
-                f = almanac.meridian_transits(eph, target, topos)
-                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                chosen_local_dt = None
-                if len(t_times):
-                    now_local = dt_utc.astimezone(tz)
-                    today_local = now_local.date()
-                    candidates = []
-                    for ti, ev in zip(t_times, t_events):
-                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        try:
-                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                        except Exception:
-                            alt_deg = float('-inf')
-                        candidates.append((utc_dt, alt_deg, int(ev)))
-                    # Kandidaten auf heutigen lokalen Tag beschränken
-                    today_candidates = []
-                    for utc_dt, alt_deg, ev in candidates:
-                        local_dt = utc_dt.astimezone(tz)
-                        if local_dt.date() == today_local:
-                            today_candidates.append((utc_dt, alt_deg, ev))
-                    pool = today_candidates if today_candidates else candidates
-                    if pool:
-                        pool.sort(key=lambda x: (-x[1], x[0]))
-                        chosen_local_dt = pool[0][0]
-                transit_time = chosen_local_dt
-            except Exception as e:
-                logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
-                rise_time = None
-                set_time = None
-                transit_time = None
+                    # Transit time (choose highest altitude for local day)
+                    f = almanac.meridian_transits(eph, target, location)
+                    t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                    chosen_local_dt = None
+                    if len(t_times):
+                        now_local = dt_utc.astimezone(tz)
+                        today_local = now_local.date()
+                        candidates = []
+                        for ti, ev in zip(t_times, t_events):
+                            utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                            try:
+                                alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                            except Exception:
+                                alt_deg = float('-inf')
+                            candidates.append((utc_dt, alt_deg, int(ev)))
+                        # Kandidaten auf heutigen lokalen Tag beschränken
+                        today_candidates = []
+                        for utc_dt, alt_deg, ev in candidates:
+                            local_dt = utc_dt.astimezone(tz)
+                            if local_dt.date() == today_local:
+                                today_candidates.append((utc_dt, alt_deg, ev))
+                        pool = today_candidates if today_candidates else candidates
+                        if pool:
+                            pool.sort(key=lambda x: (-x[1], x[0]))
+                            chosen_local_dt = pool[0][0]
+                    transit_time = chosen_local_dt
+                    events_computed += 1
+                except Exception as e:
+                    logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                    rise_time = None
+                    set_time = None
+                    transit_time = None
         except Exception as e:
             logger.debug(f"Error processing comet {designation}: {e}")
             continue
@@ -720,11 +760,12 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             logger.debug(f"Failed to write SQLite comet cache: {e}")
     
     # Also save to pickle cache as fallback
-    try:
-        cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
-        atomic_write_pickle(cache_file, comet_list)
-        logger.debug(f"Saved {len(comet_list)} bright comets to pickle cache ({cache_file})")
-    except Exception as e:
-        logger.debug(f"Failed to write comet pickle cache {cache_file}: {e}")
+    if not DISABLE_PICKLE:
+        try:
+            cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
+            atomic_write_pickle(cache_file, comet_list)
+            logger.debug(f"Saved {len(comet_list)} bright comets to pickle cache ({cache_file})")
+        except Exception as e:
+            logger.debug(f"Failed to write comet pickle cache {cache_file}: {e}")
 
     return comet_list

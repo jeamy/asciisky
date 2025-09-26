@@ -41,15 +41,11 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             except Exception:
                 pass
 
-            # Fallback: Pickle cache (fresh or even stale on disk)
-            cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-            asteroid_list = read_pickle_if_fresh(cache_file, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
-            if asteroid_list is None and os.path.exists(cache_file):
-                try:
-                    with open(cache_file, 'rb') as f:
-                        asteroid_list = pickle.load(f)
-                except Exception:
-                    asteroid_list = None
+            # Fallback: Pickle cache (respect TTL only) unless disabled
+            asteroid_list = None
+            if not getattr(bright_asteroids, 'DISABLE_PICKLE', False):
+                cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                asteroid_list = read_pickle_if_fresh(cache_file, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
 
             if isinstance(asteroid_list, list):
                 result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
@@ -60,7 +56,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
 
             # Compute (this will also store to SQLite/pickle internally)
             location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-            bright_asteroid_list = bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt=dt_utc)
+            bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt=dt_utc))
             result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             for i, asteroid in enumerate(bright_asteroid_list):
                 if isinstance(asteroid, dict) and "name" in asteroid:
@@ -70,7 +66,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        bright_asteroid_list = bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, current_dt=dt_utc)
+        bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, current_dt=dt_utc))
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         for i, asteroid in enumerate(bright_asteroid_list):
             if isinstance(asteroid, dict) and "name" in asteroid:

@@ -317,6 +317,24 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
     cursor.close()
     return all_positions if all_positions else None
 
+def has_asteroid_positions(location_key: str, time_bucket: str,
+                           max_age_seconds: int = 49 * 3600) -> bool:
+    """Fast existence check for cached asteroid positions without loading blobs."""
+    conn = get_db_connection()
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    cursor = conn.execute(
+        """
+        SELECT 1 FROM asteroid_positions
+        WHERE location_key = ? AND time_bucket = ?
+          AND strftime('%s', computed_at) > ?
+        LIMIT 1
+        """,
+        (str(location_key), str(time_bucket), str(cutoff_time))
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    return bool(row)
+
 def cleanup_old_positions(retention_days: int = 30) -> int:
     """Remove position cache entries older than retention period."""
     with db_transaction() as conn:
@@ -429,6 +447,24 @@ def get_comet_positions(location_key: str, time_bucket: str,
         return pickle.loads(row['position_data'])
     
     return None
+
+def has_comet_positions(location_key: str, time_bucket: str,
+                        max_age_seconds: int = 49 * 3600) -> bool:
+    """Fast existence check for cached comet positions without loading blobs."""
+    conn = get_db_connection()
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    cursor = conn.execute(
+        """
+        SELECT 1 FROM comet_positions
+        WHERE location_key = ? AND time_bucket = ?
+          AND strftime('%s', computed_at) > ?
+        LIMIT 1
+        """,
+        (str(location_key), str(time_bucket), str(cutoff_time))
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    return bool(row)
 
 def store_celestial_snapshot(location_key: str, time_bucket: str,
                             observer_lat: float, observer_lon: float, observer_elevation: float,

@@ -51,7 +51,9 @@ from db_utils import (
     store_asteroid_positions,
     get_asteroid_positions,
     get_database_stats,
-    cleanup_old_positions
+    cleanup_old_positions,
+    has_asteroid_positions,
+    has_comet_positions,
 )
 
 # Skyfield objects are imported from api.computation
@@ -296,18 +298,17 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
     
     # Check both SQLite and pickle cache
     if bright_asteroids.ASTEROID_USE_SQLITE:
-        # Check SQLite cache first
+        # Check SQLite cache first via fast existence query
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-        
-        cached_positions = get_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
-        if cached_positions:
+        if has_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS):
             return False  # Already cached in SQLite
     
-    # Check pickle cache as fallback
+    # Check pickle cache as fallback (unless disabled)
+    disable_pickle = os.environ.get("ASCII_SKY_DISABLE_PICKLE", "0").strip() == "1"
     path = build_cache_path("asteroids", lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-    if os.path.exists(path):
+    if (not disable_pickle) and os.path.exists(path):
         return False
     
     try:
@@ -338,20 +339,18 @@ def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) ->
     # Check SQLite cache first if enabled
     if comets.COMET_USE_SQLITE:
         try:
-            from db_utils import get_comet_positions
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             loc_key = location_key(lat_norm, lon_norm, elev_norm)
             time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
-            
-            cached_positions = get_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
-            if cached_positions:
+            if has_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS):
                 return False  # Cache exists
         except Exception as e:
             print(f"[comets] SQLite cache check failed: {e}")
     
-    # Check pickle cache as fallback
+    # Check pickle cache as fallback (unless disabled)
+    disable_pickle = os.environ.get("ASCII_SKY_DISABLE_PICKLE", "0").strip() == "1"
     path = build_cache_path("comets", lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-    if os.path.exists(path):
+    if (not disable_pickle) and os.path.exists(path):
         return False
     
     try:

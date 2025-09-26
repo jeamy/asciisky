@@ -53,6 +53,12 @@ ASTEROID_ENABLE_LEGACY_FALLBACK = False
 # Enable SQLite backend (set to False to use legacy pickle cache)
 ASTEROID_USE_SQLITE = True
 
+# Limit number of event computations (rise/set/transit) per request to reduce CPU peaks
+ASTEROIDS_EVENTS_MAX = int(os.environ.get('ASCII_SKY_ASTEROIDS_EVENTS_MAX', '50'))
+
+# Optionally disable pickle cache IO entirely (read + write)
+DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
+
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
 
@@ -182,13 +188,14 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 return cached_positions
         else:
             # Legacy pickle backend
-            cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
-            cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
-            if isinstance(cached, list):
-                print(f"Loading {cache_file} (valid per-location/time cache)")
-                return cached
+            if not DISABLE_PICKLE:
+                cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
+                cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
+                if isinstance(cached, list):
+                    print(f"Loading {cache_file} (valid per-location/time cache)")
+                    return cached
             # Optional legacy global cache fallback (disabled by default)
-            if ASTEROID_ENABLE_LEGACY_FALLBACK:
+            if ASTEROID_ENABLE_LEGACY_FALLBACK and (not DISABLE_PICKLE):
                 legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
                 if isinstance(legacy, list):
                     print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
@@ -294,12 +301,13 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 pass  # Skip if mapping fails
             
             # Also save to pickle cache as fallback (for consistency with comets/celestial)
-            try:
-                cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt or datetime.now(timezone.utc), bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
-                atomic_write_pickle(cache_file, asteroid_list)
-                print(f"Saved {len(asteroid_list)} bright asteroids to pickle fallback cache ({cache_file})")
-            except Exception as e:
-                print(f"Failed to write asteroid pickle cache {cache_file}: {e}")
+            if not DISABLE_PICKLE:
+                try:
+                    cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt or datetime.now(timezone.utc), bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
+                    atomic_write_pickle(cache_file, asteroid_list)
+                    print(f"Saved {len(asteroid_list)} bright asteroids to pickle fallback cache ({cache_file})")
+                except Exception as e:
+                    print(f"Failed to write asteroid pickle cache {cache_file}: {e}")
         
         return asteroid_list
     
@@ -354,6 +362,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         print(f"Found {len(top_df)} asteroids with apparent mag <= {max_magnitude}")
 
         asteroid_list = []
+        events_computed = 0
         for index, row in top_df.iterrows():
             try:
                 orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
@@ -365,59 +374,62 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
 
-                # Start/end window anchored at simulated day's UTC midnight
-                start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                rise_set_func = almanac.risings_and_settings(eph, target, topos)
-                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
-                
-                rise_time, set_time = None, None
-                for ti, event in zip(times, events):
-                    if event == 1 and rise_time is None: rise_time = ti.utc_datetime()
-                    elif event == 0 and set_time is None: set_time = ti.utc_datetime()
-                # Bestimme die nächste Nacht (Rise->Set) nach dt_utc als Fenster für die obere Kulmination
-                night_start_utc, night_end_utc = None, None
-                last_rise_utc = None
-                for ti_rs, ev_rs in zip(times, events):
-                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
-                    if ev_rs == 1:  # rise
-                        last_rise_utc = ev_dt_utc
-                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
-                        # wähle das erste Rise->Set Paar, dessen Set in der Zukunft liegt
-                        if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
-                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
-                            break
-                if night_start_utc is None or night_end_utc is None:
-                    # Fallback: benutze die zuerst gefundenen rise/set Zeiten, wenn vorhanden
-                    night_start_utc, night_end_utc = rise_time, set_time
-                
-                f = almanac.meridian_transits(eph, target, topos)
-                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                # Wähle die nächste obere Kulmination innerhalb des Nachtfensters (UTC-basiert)
-                chosen_time_utc = None
-                if len(t_times):
-                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
-                    candidates = []
-                    for ti, ev in zip(t_times, t_events):
-                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        # Altitude am Transit-Zeitpunkt bestimmen (höher = obere Kulmination)
-                        try:
-                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                        except Exception:
-                            alt_deg = float('-inf')
-                        candidates.append((utc_dt, alt_deg, int(ev)))
-                    # Filtere auf das Nachtfenster (falls vorhanden)
-                    if night_start_utc is not None and night_end_utc is not None:
-                        pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
-                    else:
-                        # Bevorzuge zukünftige Ereignisse
-                        pool = [c for c in candidates if c[0] >= now_utc]
-                        if not pool:
-                            pool = candidates
-                    if pool:
-                        pool.sort(key=lambda x: (-x[1], x[0]))
-                        chosen_time_utc = pool[0][0]
-                transit_time = chosen_time_utc
+                # Event times limited to reduce CPU
+                rise_time, set_time, transit_time = None, None, None
+                if events_computed < ASTEROIDS_EVENTS_MAX:
+                    # Start/end window anchored at simulated day's UTC midnight
+                    start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+                    end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+                    rise_set_func = almanac.risings_and_settings(eph, target, topos)
+                    times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+                    
+                    for ti, event in zip(times, events):
+                        if event == 1 and rise_time is None: rise_time = ti.utc_datetime()
+                        elif event == 0 and set_time is None: set_time = ti.utc_datetime()
+                    # Bestimme die nächste Nacht (Rise->Set) nach dt_utc als Fenster für die obere Kulmination
+                    night_start_utc, night_end_utc = None, None
+                    last_rise_utc = None
+                    for ti_rs, ev_rs in zip(times, events):
+                        ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
+                        if ev_rs == 1:  # rise
+                            last_rise_utc = ev_dt_utc
+                        elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
+                            # wähle das erste Rise->Set Paar, dessen Set in der Zukunft liegt
+                            if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
+                                night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
+                                break
+                    if night_start_utc is None or night_end_utc is None:
+                        # Fallback: benutze die zuerst gefundenen rise/set Zeiten, wenn vorhanden
+                        night_start_utc, night_end_utc = rise_time, set_time
+                    
+                    f = almanac.meridian_transits(eph, target, topos)
+                    t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                    # Wähle die nächste obere Kulmination innerhalb des Nachtfensters (UTC-basiert)
+                    chosen_time_utc = None
+                    if len(t_times):
+                        now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
+                        candidates = []
+                        for ti, ev in zip(t_times, t_events):
+                            utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                            # Altitude am Transit-Zeitpunkt bestimmen (höher = obere Kulmination)
+                            try:
+                                alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                            except Exception:
+                                alt_deg = float('-inf')
+                            candidates.append((utc_dt, alt_deg, int(ev)))
+                        # Filtere auf das Nachtfenster (falls vorhanden)
+                        if night_start_utc is not None and night_end_utc is not None:
+                            pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
+                        else:
+                            # Bevorzuge zukünftige Ereignisse
+                            pool = [c for c in candidates if c[0] >= now_utc]
+                            if not pool:
+                                pool = candidates
+                        if pool:
+                            pool.sort(key=lambda x: (-x[1], x[0]))
+                            chosen_time_utc = pool[0][0]
+                    transit_time = chosen_time_utc
+                    events_computed += 1
 
                 asteroid_list.append({
                     "name": row['designation'], "number": str(row.name),
@@ -432,8 +444,9 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 print(f"Error in final processing for {row['designation']}: {e}")
                 continue
 
-        atomic_write_pickle(cache_file, asteroid_list)
-        print(f"Saved {len(asteroid_list)} bright asteroids to cache ({cache_file}).")
+        if not DISABLE_PICKLE:
+            atomic_write_pickle(cache_file, asteroid_list)
+            print(f"Saved {len(asteroid_list)} bright asteroids to cache ({cache_file}).")
         
         return asteroid_list
 
@@ -463,6 +476,7 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
     observer = eph['earth'] + topos
     
     asteroid_list = []
+    events_computed = 0
     
     for row in asteroid_rows:
         try:
@@ -497,66 +511,68 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()
             
-            # Calculate rise/set/transit times (same logic as before)
-            start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-            end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-            rise_set_func = almanac.risings_and_settings(eph, target, topos)
-            times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
-            
-            rise_time, set_time = None, None
-            for ti, event in zip(times, events):
-                if event == 1 and rise_time is None: 
-                    rise_time = ti.utc_datetime()
-                elif event == 0 and set_time is None: 
-                    set_time = ti.utc_datetime()
-            
-            # Determine next night window for transit
-            night_start_utc, night_end_utc = None, None
-            last_rise_utc = None
-            for ti_rs, ev_rs in zip(times, events):
-                ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
-                if ev_rs == 1:  # rise
-                    last_rise_utc = ev_dt_utc
-                elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
-                    if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
-                        night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
-                        break
-            
-            if night_start_utc is None or night_end_utc is None:
-                night_start_utc, night_end_utc = rise_time, set_time
-            
-            # Calculate transit time
-            f = almanac.meridian_transits(eph, target, topos)
-            t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-            chosen_time_utc = None
-            
-            if len(t_times):
-                now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
-                candidates = []
-                for ti, ev in zip(t_times, t_events):
-                    utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                    try:
-                        alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                    except Exception:
-                        alt_deg = float('-inf')
-                    candidates.append((utc_dt, alt_deg, int(ev)))
+            # Calculate rise/set/transit times with limit
+            rise_time, set_time, transit_time = None, None, None
+            if events_computed < ASTEROIDS_EVENTS_MAX:
+                start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+                rise_set_func = almanac.risings_and_settings(eph, target, topos)
+                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
                 
-                # Filter to night window if available
-                if night_start_utc is not None and night_end_utc is not None:
-                    if night_end_utc < night_start_utc:  # Crosses midnight
-                        pool = [c for c in candidates if c[0] >= night_start_utc or c[0] <= night_end_utc]
+                for ti, event in zip(times, events):
+                    if event == 1 and rise_time is None: 
+                        rise_time = ti.utc_datetime()
+                    elif event == 0 and set_time is None: 
+                        set_time = ti.utc_datetime()
+                
+                # Determine next night window for transit
+                night_start_utc, night_end_utc = None, None
+                last_rise_utc = None
+                for ti_rs, ev_rs in zip(times, events):
+                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
+                    if ev_rs == 1:  # rise
+                        last_rise_utc = ev_dt_utc
+                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
+                        if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
+                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
+                            break
+                
+                if night_start_utc is None or night_end_utc is None:
+                    night_start_utc, night_end_utc = rise_time, set_time
+                
+                # Calculate transit time
+                f = almanac.meridian_transits(eph, target, topos)
+                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                chosen_time_utc = None
+                
+                if len(t_times):
+                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
+                    candidates = []
+                    for ti, ev in zip(t_times, t_events):
+                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        try:
+                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                        except Exception:
+                            alt_deg = float('-inf')
+                        candidates.append((utc_dt, alt_deg, int(ev)))
+                    
+                    # Filter to night window if available
+                    if night_start_utc is not None and night_end_utc is not None:
+                        if night_end_utc < night_start_utc:  # Crosses midnight
+                            pool = [c for c in candidates if c[0] >= night_start_utc or c[0] <= night_end_utc]
+                        else:
+                            pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
                     else:
-                        pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
-                else:
-                    pool = [c for c in candidates if c[0] >= now_utc]
-                    if not pool:
-                        pool = candidates
+                        pool = [c for c in candidates if c[0] >= now_utc]
+                        if not pool:
+                            pool = candidates
+                    
+                    if pool:
+                        pool.sort(key=lambda x: (-x[1], x[0]))
+                        chosen_time_utc = pool[0][0]
                 
-                if pool:
-                    pool.sort(key=lambda x: (-x[1], x[0]))
-                    chosen_time_utc = pool[0][0]
-            
-            transit_time = chosen_time_utc
+                transit_time = chosen_time_utc
+                events_computed += 1
             
             asteroid_list.append({
                 "name": row['designation'], 
@@ -575,7 +591,12 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             })
             
         except Exception as e:
-            print(f"Error processing asteroid {row.get('designation', 'unknown')}: {e}")
+            # sqlite3.Row has no .get; use keys() to check presence
+            try:
+                name = row['designation'] if 'designation' in row.keys() else 'unknown'
+            except Exception:
+                name = 'unknown'
+            print(f"Error processing asteroid {name}: {e}")
             continue
     
     return asteroid_list

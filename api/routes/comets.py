@@ -45,15 +45,11 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             except Exception:
                 pass
 
-            # Fallback: Pickle cache (fresh or, as last resort, file on disk)
-            cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-            comet_list = read_pickle_if_fresh(cache_file, comets.COMET_CACHE_TTL_SECONDS)
-            if comet_list is None and os.path.exists(cache_file):
-                try:
-                    with open(cache_file, 'rb') as f:
-                        comet_list = pickle.load(f)
-                except Exception:
-                    comet_list = None
+            # Fallback: Pickle cache (respect DISABLE_PICKLE and TTL)
+            comet_list = None
+            if not getattr(comets, 'DISABLE_PICKLE', False):
+                cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                comet_list = read_pickle_if_fresh(cache_file, comets.COMET_CACHE_TTL_SECONDS)
 
             if isinstance(comet_list, list):
                 result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
@@ -63,7 +59,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 return result
 
             location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-            comet_list = comets.load_comets(ts, eph, location_dict, max_comets=max_comets, use_cache=True, current_dt=dt_utc)
+            comet_list = await asyncio.to_thread(lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, use_cache=True, current_dt=dt_utc))
             result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             for i, comet in enumerate(comet_list[:max_comets]):
                 if isinstance(comet, dict) and "name" in comet:
@@ -73,7 +69,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        comet_list = comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc)
+        comet_list = await asyncio.to_thread(lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc))
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         for i, comet in enumerate(comet_list):
             if isinstance(comet, dict) and "name" in comet:
