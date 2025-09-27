@@ -651,6 +651,27 @@ def main() -> None:
     else:
         print("  retention_days=disabled")
 
+    # Ensure orbital element sources are fresh before computing
+    try:
+        # Forces weekly refresh check and rebuilds comet dataframe cache
+        comets.load_comet_dataframe(use_cache=False)
+    except Exception:
+        traceback.print_exc()
+    try:
+        if bright_asteroids.should_update_mpcorb_file():
+            updated = bright_asteroids.download_mpcorb_file()
+            if not updated:
+                print("Warning: MPCORB download reported failure; continuing with existing file")
+        # Drop stale asteroid dataframe cache so it will be rebuilt on demand
+        if os.path.exists(bright_asteroids.ASTEROID_DF_CACHE_FILE):
+            try:
+                os.remove(bright_asteroids.ASTEROID_DF_CACHE_FILE)
+                print(f"Removed stale asteroid dataframe cache {bright_asteroids.ASTEROID_DF_CACHE_FILE}")
+            except Exception as cache_err:
+                print(f"Warning: could not remove asteroid dataframe cache: {cache_err}")
+    except Exception:
+        traceback.print_exc()
+
     # Initial sweep immediately
     try:
         precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
