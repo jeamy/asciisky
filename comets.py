@@ -421,12 +421,20 @@ class _RowProxy:
 
 @lru_cache(maxsize=2048)
 def _make_comet_orbit_cached(key: tuple):
-    """Build and cache comet orbit from essential elements.
-    key = (designation, e, q, i, om, w, epoch_tt, Tp)
+    """Build and cache comet orbit from essential elements plus MPC time metadata.
+    key = (
+        designation, e, q, i, om, w, epoch_tt, Tp,
+        perihelion_year, perihelion_month, perihelion_day,
+        epoch_year, epoch_month, epoch_day,
+    )
     Note: uses global timescale from api.computation to avoid hashing ts.
     """
     from api.computation import ts as _ts  # import here to avoid top-level circulars
-    designation, e, q, i, om, w, epoch_tt, Tp = key
+    (
+        designation, e, q, i, om, w, epoch_tt, Tp,
+        perihelion_year, perihelion_month, perihelion_day,
+        epoch_year, epoch_month, epoch_day,
+    ) = key
     data = {
         'designation': designation,
         'e': e,
@@ -447,12 +455,12 @@ def _make_comet_orbit_cached(key: tuple):
         'longitude_of_ascending_node_degrees': om,
         'argument_of_perihelion_degrees': w,
         # Time and magnitude fields that skyfield may query via attributes
-        'perihelion_year': None,
-        'perihelion_month': None,
-        'perihelion_day': None,
-        'epoch_year': None,
-        'epoch_month': None,
-        'epoch_day': None,
+        'perihelion_year': perihelion_year,
+        'perihelion_month': perihelion_month,
+        'perihelion_day': perihelion_day,
+        'epoch_year': epoch_year,
+        'epoch_month': epoch_month,
+        'epoch_day': epoch_day,
         'M1': None,
         'k1': None,
         'M2': None,
@@ -653,7 +661,36 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             w_val_for_orbit = float(row2.get('w')) if pd.notna(row2.get('w')) else float(row2.get('peri'))
             epoch_tt_val = float(row2.get('epoch_tt')) if ('epoch_tt' in row2.index and pd.notna(row2.get('epoch_tt'))) else None
             tp_val = float(row2.get('Tp')) if ('Tp' in row2.index and pd.notna(row2.get('Tp'))) else None
-            orbit_key = (designation, float(row2.get('e')), float(row2.get('q')), i_val_for_orbit, om_val_for_orbit, w_val_for_orbit, epoch_tt_val, tp_val)
+
+            def _float_or_none(val):
+                try:
+                    return float(val) if val is not None and not pd.isna(val) else None
+                except Exception:
+                    return None
+
+            peri_year = _float_or_none(row2.get('perihelion_year'))
+            peri_month = _float_or_none(row2.get('perihelion_month'))
+            peri_day = _float_or_none(row2.get('perihelion_day'))
+            epoch_year = _float_or_none(row2.get('epoch_year'))
+            epoch_month = _float_or_none(row2.get('epoch_month'))
+            epoch_day = _float_or_none(row2.get('epoch_day'))
+
+            orbit_key = (
+                designation,
+                float(row2.get('e')),
+                float(row2.get('q')),
+                i_val_for_orbit,
+                om_val_for_orbit,
+                w_val_for_orbit,
+                epoch_tt_val,
+                tp_val,
+                peri_year,
+                peri_month,
+                peri_day,
+                epoch_year,
+                epoch_month,
+                epoch_day,
+            )
             orbit = _make_comet_orbit_cached(orbit_key)
 
             # Ensure barycentric target like in c.py: if orbit is Sun-centered, shift to SSB by adding Sun
