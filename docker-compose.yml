@@ -18,7 +18,7 @@ services:
       - CELESTIAL_USE_SQLITE=true
       # Duplikate und Last begrenzen (siehe api/background.py)
       - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=15
-      - ASCII_SKY_MAX_WINDOW_WORKERS=1
+      - ASCII_SKY_MAX_WINDOW_WORKERS=2
       # Session Secret (für Prod sinnvoll ändern)
       - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757
       # Magnitude limits for asteroids and comets
