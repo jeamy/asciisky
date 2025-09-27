@@ -412,6 +412,11 @@ class _RowProxy:
         return self._d[key]
     def get(self, key, default=None):
         return self._d.get(key, default)
+    def __getattr__(self, key):
+        try:
+            return self._d[key]
+        except KeyError:
+            raise AttributeError(key) from None
 
 
 @lru_cache(maxsize=2048)
@@ -435,6 +440,23 @@ def _make_comet_orbit_cached(key: tuple):
         'peri': w,
         'epoch_tt': epoch_tt,
         'Tp': Tp,
+        # Legacy MPC column names expected by skyfield
+        'eccentricity': e,
+        'perihelion_distance_au': q,
+        'inclination_degrees': i,
+        'longitude_of_ascending_node_degrees': om,
+        'argument_of_perihelion_degrees': w,
+        # Time and magnitude fields that skyfield may query via attributes
+        'perihelion_year': None,
+        'perihelion_month': None,
+        'perihelion_day': None,
+        'epoch_year': None,
+        'epoch_month': None,
+        'epoch_day': None,
+        'M1': None,
+        'k1': None,
+        'M2': None,
+        'k2': None,
     }
     row = _RowProxy(data)
     return mpc.comet_orbit(row, _ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)

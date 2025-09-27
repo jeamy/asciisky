@@ -10,7 +10,7 @@ ts = load.timescale()
 eph = load('de421.bsp')
 earth = eph['earth']
 sun = eph['sun']
-berlin = earth + Topos('52.5109 N', '13.3989 E')
+berlin = earth + Topos('46.7632 N', '14.3076 E')
 
 # Beobachtungszeitpunkt
 t = ts.now()
