@@ -5,7 +5,7 @@ from skyfield.data import mpc
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2 as GM_SUN
 
 # Setup
-load = Loader('~/skyfield-data')
+load = Loader('/app/cache')
 ts = load.timescale()
 eph = load('de421.bsp')
 earth = eph['earth']
