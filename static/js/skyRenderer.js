@@ -1271,6 +1271,64 @@ export class SkyRenderer {
         }
     }
 
+    buildObjectInfoLines(obj) {
+        if (!obj) return [];
+        const displayName = this.getLocalizedDisplayName(obj.name);
+        const info = [
+            `${obj.symbol || ''} ${displayName}`.trim(),
+            `${t('altitude')}: ${obj.altitude?.toFixed ? obj.altitude.toFixed(1) : obj.altitude}°`,
+            `${t('azimuth')}: ${obj.azimuth?.toFixed ? obj.azimuth.toFixed(1) : obj.azimuth}°`,
+            `${t('distance')}: ${obj.distance?.toFixed ? obj.distance.toFixed(3) : obj.distance} ${t('au')}`
+        ];
+
+        if (obj.rise_time) {
+            const label = this.buildTimeLabel(obj.rise_time);
+            info.push(`${t('rise_time')}: ${label}`);
+        }
+
+        if (obj.transit_time) {
+            const label = this.buildTimeLabel(obj.transit_time);
+            info.push(`${t('transit_time')}: ${label}`);
+        }
+
+        if (obj.set_time) {
+            const label = this.buildTimeLabel(obj.set_time);
+            info.push(`${t('set_time')}: ${label}`);
+        }
+
+        if (obj.phase !== undefined) {
+            const phaseName = obj.phase_name ? t(obj.phase_name) : '';
+            const phaseValue = (typeof obj.phase === 'number') ? (obj.phase * 100).toFixed(1) : obj.phase;
+            info.push(`${t('phase')}: ${phaseValue}% ${phaseName}`.trim());
+        }
+
+        if (obj.magnitude !== undefined) {
+            const mag = obj.magnitude?.toFixed ? obj.magnitude.toFixed(1) : obj.magnitude;
+            info.push(`${t('magnitude')}: ${mag}`);
+        }
+
+        return info;
+    }
+
+    refreshDialogIfVisible() {
+        try {
+            if (!this.selectedObject) return;
+            const dialog = document.getElementById('object-dialog');
+            if (!dialog) return;
+            const content = dialog.querySelector('#dialog-content') || dialog.querySelector('.object-data');
+            if (!content) return;
+            const fresh = (this.celestialData && this.celestialData.bodies) ? this.celestialData.bodies[this.selectedObject.name] : null;
+            if (fresh) {
+                this.selectedObject = fresh;
+            }
+            const info = this.buildObjectInfoLines(this.selectedObject);
+            content.innerHTML = info.join('\n');
+            this.render();
+        } catch (error) {
+            console.error('Error refreshing object dialog:', error);
+        }
+    }
+
     showObjectDialog(obj) {
         console.log('Showing dialog for:', obj.name, obj);
         
@@ -1290,39 +1348,7 @@ export class SkyRenderer {
             }
             
             // Dialog-Inhalt erstellen
-            const displayName = this.getLocalizedDisplayName(obj.name);
-            const info = [
-                `${obj.symbol || ''} ${displayName}`,
-                `${t('altitude')}: ${obj.altitude.toFixed(1)}°`,
-                `${t('azimuth')}: ${obj.azimuth.toFixed(1)}°`,
-                `${t('distance')}: ${obj.distance.toFixed(3)} ${t('au')}`
-            ];
-    
-            // Zeige Auf- und Untergangszeiten an, wenn verfügbar
-            if (obj.rise_time) {
-                const label = this.buildTimeLabel(obj.rise_time);
-                info.push(`${t('rise_time')}: ${label}`);
-            }
-            
-            if (obj.transit_time) {
-                const label = this.buildTimeLabel(obj.transit_time);
-                info.push(`${t('transit_time')}: ${label}`);
-            }
-    
-            if (obj.set_time) {
-                const label = this.buildTimeLabel(obj.set_time);
-                info.push(`${t('set_time')}: ${label}`);
-            }
-            
-            if (obj.phase !== undefined) {
-                const phaseName = obj.phase_name ? t(obj.phase_name) : '';
-                info.push(`${t('phase')}: ${(obj.phase * 100).toFixed(1)}% ${phaseName}`);
-            }
-            
-            if (obj.magnitude !== undefined) {
-                info.push(`${t('magnitude')}: ${obj.magnitude.toFixed(1)}`);
-            }
-    
+            const info = this.buildObjectInfoLines(obj);
             // Erstelle den Dialog
             const dialog = document.createElement('div');
             dialog.id = 'object-dialog';
@@ -1433,38 +1459,7 @@ export class SkyRenderer {
                 
                 // Erstelle Informationstext
                 const displayName = this.getLocalizedDisplayName(selectedObject.name);
-                const info = [
-                    `${selectedObject.symbol || ''} ${displayName}`,
-                    `${t('altitude')}: ${selectedObject.altitude.toFixed(1)}°`,
-                    `${t('azimuth')}: ${selectedObject.azimuth.toFixed(1)}°`,
-                    `${t('distance')}: ${selectedObject.distance.toFixed(3)} ${t('au')}`
-                ];
-                
-                // Zeige Auf- und Untergangszeiten an, wenn verfügbar
-                if (selectedObject.rise_time) {
-                    const label = this.buildTimeLabel(selectedObject.rise_time);
-                    info.push(`${t('rise_time')}: ${label}`);
-                }
-                
-                if (selectedObject.transit_time) {
-                    const label = this.buildTimeLabel(selectedObject.transit_time);
-                    info.push(`${t('transit_time')}: ${label}`);
-                }
-        
-                if (selectedObject.set_time) {
-                    const label = this.buildTimeLabel(selectedObject.set_time);
-                    info.push(`${t('set_time')}: ${label}`);
-                }
-                
-                if (selectedObject.phase !== undefined) {
-                    const phaseName = selectedObject.phase_name ? t(selectedObject.phase_name) : '';
-                    info.push(`${t('phase')}: ${(selectedObject.phase * 100).toFixed(1)}% ${phaseName}`);
-                }
-                
-                if (selectedObject.magnitude !== undefined) {
-                    info.push(`${t('magnitude')}: ${selectedObject.magnitude.toFixed(1)}`);
-                }
-                
+                const info = this.buildObjectInfoLines(selectedObject);
                 // Aktualisiere den Datenbereich
                 dataContainer.innerHTML = info.join('\n');
                 
@@ -1529,6 +1524,10 @@ export class SkyRenderer {
             // Füge die Asteroiden zu den Himmelsdaten hinzu
             if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
                 this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
+                if (this.selectedObject && this.selectedObject.name && data.bodies[this.selectedObject.name]) {
+                    this.selectedObject = data.bodies[this.selectedObject.name];
+                    this.refreshDialogIfVisible();
+                }
             }
         } catch (error) {
             console.error('Error loading asteroids:', error);
@@ -1561,6 +1560,10 @@ export class SkyRenderer {
             // Füge die Kometen zu den Himmelsdaten hinzu
             if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
                 this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
+                if (this.selectedObject && this.selectedObject.name && data.bodies[this.selectedObject.name]) {
+                    this.selectedObject = data.bodies[this.selectedObject.name];
+                    this.refreshDialogIfVisible();
+                }
             }
         } catch (error) {
             console.error('Error loading comets:', error);
@@ -1611,8 +1614,12 @@ export class SkyRenderer {
                 // Abbrechen, wenn veraltetes Update
                 if (!this.isActiveUpdate(token)) return;
                 this.celestialData = data;
+                if (this.selectedObject && this.selectedObject.name && data.bodies && data.bodies[this.selectedObject.name]) {
+                    this.selectedObject = data.bodies[this.selectedObject.name];
+                }
                 // Rendere sofort die Himmelskörper (Planeten etc.), um First Paint zu beschleunigen
                 this.render();
+                this.refreshDialogIfVisible();
                 // Verberge den allgemeinen Ladeindikator bereits nach dem ersten Paint
                 // (Asteroiden/Kometen werden ggf. separat nachgeladen oder im Hintergrund vorbereitet)
                 this.hideLoading();
@@ -1652,6 +1659,7 @@ export class SkyRenderer {
                 await Promise.all(tasks);
                 if (this.isActiveUpdate(token)) {
                     this.render();
+                    this.refreshDialogIfVisible();
                 }
             }
             
