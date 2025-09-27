@@ -639,7 +639,16 @@ def main() -> None:
     if bright_asteroids.ASTEROID_USE_SQLITE:
         try:
             db_stats = get_database_stats()
-            print(f"  SQLite database: {db_stats['asteroids_count']} asteroids, {db_stats['positions_count']} cached positions")
+            print(
+                "  SQLite database: "
+                f"{db_stats.get('asteroids_count', 0)} asteroids, "
+                f"{db_stats.get('comets_count', 0)} comets"
+            )
+            print(
+                "                   "
+                f"{db_stats.get('positions_count', 0)} asteroid positions, "
+                f"{db_stats.get('comet_positions_count', 0)} comet positions"
+            )
             if db_stats.get('db_size_mb'):
                 print(f"  Database size: {db_stats['db_size_mb']:.1f} MB")
             if db_stats.get('db_connections'):
