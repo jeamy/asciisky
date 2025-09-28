@@ -4,11 +4,12 @@ from skyfield.api import wgs84, Loader
 from skyfield.magnitudelib import planetary_magnitude
 
 from timezone_utils import get_tzinfo
+from data_paths import DATA_DIR, DE421_PATH
 
 # Load Skyfield data
-LOADER = Loader('.')
+LOADER = Loader(str(DATA_DIR))
 ts = LOADER.timescale()
-eph = LOADER('de421.bsp')
+eph = LOADER(str(DE421_PATH))
 
 # Celestial bodies and their symbols
 CELESTIAL_BODIES = {

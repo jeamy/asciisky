@@ -22,7 +22,6 @@ from functools import lru_cache
 
 import pandas as pd
 import numpy as np
-from skyfield.api import Loader, wgs84
 from skyfield.magnitudelib import planetary_magnitude
 
 from cache_utils import build_cache_path, atomic_write_pickle, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc, CACHE_ROOT
@@ -30,19 +29,22 @@ from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
 from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions, migrate_from_pickle_cache
+from pathlib import Path
+from data_paths import COMET_ELEMENTS_PATH
+from api.computation import wgs84
 
 def should_update_comet_file() -> bool:
     """Prueft, ob die Kometen-Elemente-Datei woechentlich aktualisiert werden sollte."""
-    if not os.path.exists(COMETS_FILE):
+    if not COMETS_FILE.exists():
         return True
-    
+
     # Prüfe Alter der Datei
-    file_age = time.time() - os.path.getmtime(COMETS_FILE)
+    file_age = time.time() - COMETS_FILE.stat().st_mtime
     # Aktualisiere wöchentlich (7 Tage = 604800 Sekunden)
     return file_age > 604800
 
 # Configuration
-COMETS_FILE = "cache/COMET_ELEMENTS.txt"
+COMETS_FILE = Path(COMET_ELEMENTS_PATH)
 COMET_CACHE_TTL_SECONDS = 1 * 3600  # 1 hour
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
@@ -353,9 +355,9 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                 with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
                     content = rf.read()
                 if content:
-                    os.makedirs('cache', exist_ok=True)
+                    COMETS_FILE.parent.mkdir(parents=True, exist_ok=True)
                     try:
-                        with open(COMETS_FILE, 'wb') as wf:
+                        with COMETS_FILE.open('wb') as wf:
                             wf.write(content)
                         logger.debug(f"Updated comet file: {COMETS_FILE}")
                         
@@ -369,8 +371,8 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                 logger.error(f"Error downloading MPC comet elements: {ne}")
         
         # Load from local file
-        if os.path.exists(COMETS_FILE):
-            with open(COMETS_FILE, 'rb') as f:
+        if COMETS_FILE.exists():
+            with COMETS_FILE.open('rb') as f:
                 df = mpc.load_comets_dataframe(f)
         else:
             logger.error("No comet data file available")

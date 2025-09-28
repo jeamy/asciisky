@@ -5,7 +5,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Query
-from skyfield.api import load, Star
+from skyfield.api import Star
 from skyfield.data import hipparcos, stellarium
 from skyfield.positionlib import Apparent
 import numpy as np
@@ -13,9 +13,11 @@ from datetime import datetime, timezone
 
 from api.helpers import get_location_params, get_cache_data, store_cache_data
 from cache_utils import build_cache_path, time_bucket_utc
+from data_paths import DATA_DIR, CONSTELLATIONSHIP_PATH
+from api.computation import LOADER, ts as GLOBAL_TS, eph as GLOBAL_EPH
 
 # Constants
-STELLARIUM_CONSTELLATION_PATH = 'constellationship.fab'
+STELLARIUM_CONSTELLATION_PATH = str(CONSTELLATIONSHIP_PATH)
 
 # Liste der anzuzeigenden Sternbilder (Tierkreis + zusätzliche bekannte Sternbilder)
 CONSTELLATION_NAMES = [
@@ -53,33 +55,22 @@ STELLARIUM_CODE_TO_NAME = {
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Global Skyfield objects
-ts = None
-eph = None
+# Shared Skyfield objects from api.computation
 hip_data = None
 
 def init_skyfield():
-    """Initialize Skyfield objects"""
-    global ts, eph, hip_data
-    
-    if ts is not None:
+    """Initialize Hipparcos data using shared Skyfield loader."""
+    global hip_data
+
+    if hip_data is not None:
         return  # Already initialized
-    
+
     try:
-        ts = load.timescale()
-        eph = load('de421.bsp')
-        
-        # Load Hipparcos catalog
-        try:
-            with load.open(hipparcos.URL) as f:
-                hip_data = hipparcos.load_dataframe(f)
-        except Exception:
-            hip_data = None
-            
+        with LOADER.open(hipparcos.URL) as f:
+            hip_data = hipparcos.load_dataframe(f)
     except Exception as e:
-        logger.error(f"Failed to initialize Skyfield: {e}")
-        ts = None
-        eph = None
+        hip_data = None
+        logger.error(f"Failed to load Hipparcos catalog: {e}")
 
 def get_star_position(hip_id: int, observer_location, time) -> Optional[Tuple[float, float, float]]:
     """Get star position (altitude, azimuth, magnitude) for given Hipparcos ID"""
@@ -128,14 +119,9 @@ async def get_zodiac_constellations(
 ):
     """Get zodiac constellation data with calculated star positions"""
     
-    # Initialize Skyfield if needed
-    if ts is None:
-        init_skyfield()
-        
-    if ts is None:
-        raise HTTPException(status_code=500, detail="Skyfield initialization failed")
-    
     try:
+        init_skyfield()
+
         # Parse time parameter
         if time:
             try:
@@ -156,8 +142,8 @@ async def get_zodiac_constellations(
                 return cached_result
             
         # Calculate constellation data using Skyfield
-        skyfield_time = ts.from_datetime(dt_utc)
-        earth = eph['earth']
+        skyfield_time = GLOBAL_TS.from_datetime(dt_utc)
+        earth = GLOBAL_EPH['earth']
         from skyfield.toposlib import wgs84
         observer_location = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
         

@@ -1,7 +1,9 @@
 """
 Module for calculating positions of bright minor planets (asteroids)
 """
-from skyfield.api import Topos, load
+from pathlib import Path
+
+from skyfield.api import Topos, Loader
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2
 import pandas as pd
 from skyfield import almanac
@@ -23,11 +25,12 @@ from db_utils import (
     store_asteroid_dataframe, store_asteroid_positions,
     get_asteroid_positions, migrate_from_pickle_cache
 )
+from data_paths import DATA_DIR, DE421_PATH, MPCORB_PATH
 
 # Konstanten für Cache-Dateien
 ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
 BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
-MPCORB_FILE = 'cache/MPCORB.DAT.gz'
+MPCORB_FILE = Path(MPCORB_PATH)
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
 # Magnitude thresholds (restored defaults)
@@ -108,11 +111,11 @@ def download_mpcorb_file():
     try:
         print(f"Downloading MPCORB.DAT.gz from {MPCORB_URL}...")
         # Stelle sicher, dass das Verzeichnis existiert
-        os.makedirs(os.path.dirname(MPCORB_FILE), exist_ok=True)
+        MPCORB_FILE.parent.mkdir(parents=True, exist_ok=True)
         
         # Datei herunterladen mit Fortschrittsanzeige
         print("Starting download...")
-        with urllib.request.urlopen(MPCORB_URL, timeout=300) as response, open(MPCORB_FILE, 'wb') as out_file:
+        with urllib.request.urlopen(MPCORB_URL, timeout=300) as response, MPCORB_FILE.open('wb') as out_file:
             file_size = int(response.info().get('Content-Length', 0))
             print(f"File size: {file_size / (1024*1024):.1f} MB")
             
@@ -133,8 +136,8 @@ def download_mpcorb_file():
         print(f"Download complete. File saved to {MPCORB_FILE}")
         
         # Überprüfe, ob die Datei korrekt heruntergeladen wurde
-        if os.path.exists(MPCORB_FILE) and os.path.getsize(MPCORB_FILE) > 0:
-            print(f"File size: {os.path.getsize(MPCORB_FILE) / (1024*1024):.1f} MB")
+        if MPCORB_FILE.exists() and MPCORB_FILE.stat().st_size > 0:
+            print(f"File size: {MPCORB_FILE.stat().st_size / (1024*1024):.1f} MB")
             return True
         else:
             print("Download failed: File is empty or does not exist")
@@ -148,11 +151,11 @@ def should_update_mpcorb_file():
     """
     Überprüft ob MPCORB-Datei aktualisiert werden sollte (täglich)
     """
-    if not os.path.exists(MPCORB_FILE):
+    if not MPCORB_FILE.exists():
         return True
     
     # Prüfe Alter der Datei
-    file_age = time.time() - os.path.getmtime(MPCORB_FILE)
+    file_age = time.time() - MPCORB_FILE.stat().st_mtime
     # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
     return file_age > 86400
 
@@ -240,7 +243,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 print("MPCORB file needs daily update, downloading...")
                 if not download_mpcorb_file():
                     # Falls Download fehlschlägt, verwende alte Datei falls vorhanden
-                    if not os.path.exists(MPCORB_FILE):
+                    if not MPCORB_FILE.exists():
                         return []
             try:
                 print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
@@ -457,15 +460,15 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
 
 def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz):
     """Process asteroids from SQLite database rows and compute positions."""
-    from skyfield.api import load
     from skyfield.data import mpc
     from skyfield.toposlib import Topos
     from skyfield import almanac
     import pickle
     
-    # Initialize Skyfield objects
-    ts = load.timescale()
-    eph = load('de421.bsp')
+    # Initialize Skyfield objects using shared data directory
+    loader = Loader(str(DATA_DIR))
+    ts = loader.timescale()
+    eph = loader(str(DE421_PATH))
     sun = eph['sun']
     
     dt_utc = current_dt or datetime.now(timezone.utc)
