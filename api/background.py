@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi import FastAPI
+from typing import Dict, Any
 
 from cache_utils import build_cache_path, atomic_write_pickle, normalize_location, location_key, time_bucket_utc
 from api.computation import compute_celestial_snapshot, LOADER, ts, eph
@@ -21,6 +22,11 @@ CELESTIAL_CACHE_BUCKET_HOURS = 1
 CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
 BG_TASK_COOLDOWN_SECONDS = int(os.environ.get('ASCII_SKY_BG_TASK_COOLDOWN_MINUTES', '5')) * 60
 MAX_WINDOW_WORKERS = int(os.environ.get('ASCII_SKY_MAX_WINDOW_WORKERS', '1'))
+
+# Memory leak prevention: limit dict sizes
+MAX_TASK_HISTORY = 100  # Keep only last 100 tasks
+MAX_LOCATION_CHECKS = 50  # Keep only last 50 location checks
+TASK_CLEANUP_INTERVAL = 300  # Cleanup every 5 minutes
 
 def _hour_floor(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -172,6 +178,100 @@ def _ensure_comets_cache(lat: float, lon: float, elevation: float, dt_utc: datet
         traceback.print_exc()
         return False
 
+def _cleanup_old_task_entries(app: FastAPI) -> None:
+    """Remove old completed tasks from in-memory dicts to prevent unbounded growth."""
+    try:
+        now = datetime.now(timezone.utc)
+        
+        # Cleanup precompute_tasks dict
+        if hasattr(app, 'precompute_tasks'):
+            tasks_to_remove = []
+            for task_id, task_data in app.precompute_tasks.items():
+                # Remove completed tasks older than 1 hour
+                if task_data.get('status') in ('completed', 'error', 'failed'):
+                    end_time_str = task_data.get('end_time')
+                    if end_time_str:
+                        try:
+                            end_time = datetime.fromisoformat(end_time_str)
+                            if end_time.tzinfo is None:
+                                end_time = end_time.replace(tzinfo=timezone.utc)
+                            if (now - end_time).total_seconds() > 3600:
+                                tasks_to_remove.append(task_id)
+                        except Exception:
+                            pass
+            
+            for task_id in tasks_to_remove:
+                app.precompute_tasks.pop(task_id, None)
+            
+            # Enforce hard limit
+            if len(app.precompute_tasks) > MAX_TASK_HISTORY:
+                sorted_tasks = sorted(
+                    app.precompute_tasks.items(),
+                    key=lambda x: x[1].get('start_time', ''),
+                    reverse=True
+                )
+                app.precompute_tasks = dict(sorted_tasks[:MAX_TASK_HISTORY])
+        
+        # Cleanup last_precompute_check dict
+        if hasattr(app, 'last_precompute_check'):
+            checks_to_remove = []
+            for loc_key, check_time in app.last_precompute_check.items():
+                if (now - check_time).total_seconds() > BG_TASK_COOLDOWN_SECONDS * 2:
+                    checks_to_remove.append(loc_key)
+            
+            for loc_key in checks_to_remove:
+                app.last_precompute_check.pop(loc_key, None)
+            
+            # Enforce hard limit
+            if len(app.last_precompute_check) > MAX_LOCATION_CHECKS:
+                sorted_checks = sorted(
+                    app.last_precompute_check.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                app.last_precompute_check = dict(sorted_checks[:MAX_LOCATION_CHECKS])
+        
+        # Cleanup active_window_tasks_by_loc
+        if hasattr(app, 'active_window_tasks_by_loc'):
+            locs_to_remove = []
+            for loc_key, task_info in app.active_window_tasks_by_loc.items():
+                started_str = task_info.get('started_at') or task_info.get('reserved_at')
+                if started_str:
+                    try:
+                        started = datetime.fromisoformat(started_str)
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        # Remove if older than 2 hours
+                        if (now - started).total_seconds() > 7200:
+                            locs_to_remove.append(loc_key)
+                    except Exception:
+                        pass
+            
+            for loc_key in locs_to_remove:
+                app.active_window_tasks_by_loc.pop(loc_key, None)
+        
+        # Cleanup active_range_tasks_by_loc
+        if hasattr(app, 'active_range_tasks_by_loc'):
+            locs_to_remove = []
+            for loc_key, task_info in app.active_range_tasks_by_loc.items():
+                started_str = task_info.get('started_at') or task_info.get('reserved_at')
+                if started_str:
+                    try:
+                        started = datetime.fromisoformat(started_str)
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        # Remove if older than 2 hours
+                        if (now - started).total_seconds() > 7200:
+                            locs_to_remove.append(loc_key)
+                    except Exception:
+                        pass
+            
+            for loc_key in locs_to_remove:
+                app.active_range_tasks_by_loc.pop(loc_key, None)
+                
+    except Exception as e:
+        print(f"[bg] Error during task cleanup: {e}")
+
 async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
     """Kick off background precompute for a 48h window relative to dt_utc."""
     try:
@@ -187,6 +287,14 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
             app.window_worker_reservations = 0
         if not hasattr(app, 'active_window_tasks_by_loc'):
             app.active_window_tasks_by_loc = {}
+        if not hasattr(app, 'last_cleanup_time'):
+            app.last_cleanup_time = datetime.now(timezone.utc)
+
+        # Periodic cleanup to prevent memory leaks
+        now = datetime.now(timezone.utc)
+        if (now - app.last_cleanup_time).total_seconds() > TASK_CLEANUP_INTERVAL:
+            _cleanup_old_task_entries(app)
+            app.last_cleanup_time = now
 
         # Koordinaten normalisieren und Schlüssel bilden
         from cache_utils import normalize_location
@@ -291,6 +399,14 @@ async def trigger_background_precompute_range(app: FastAPI, lat: float, lon: flo
             app.window_worker_reservations = 0
         if not hasattr(app, 'active_range_tasks_by_loc'):
             app.active_range_tasks_by_loc = {}
+        if not hasattr(app, 'last_cleanup_time'):
+            app.last_cleanup_time = datetime.now(timezone.utc)
+
+        # Periodic cleanup
+        now_check = datetime.now(timezone.utc)
+        if (now_check - app.last_cleanup_time).total_seconds() > TASK_CLEANUP_INTERVAL:
+            _cleanup_old_task_entries(app)
+            app.last_cleanup_time = now_check
 
         if start_dt_utc.tzinfo is None: start_dt_utc = start_dt_utc.replace(tzinfo=timezone.utc)
         if end_dt_utc.tzinfo is None: end_dt_utc = end_dt_utc.replace(tzinfo=timezone.utc)

@@ -383,6 +383,9 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
     # Group hours into batches for more efficient processing
     hour_batches = [hours[i:i + batch_size] for i in range(0, len(hours), batch_size)]
     
+    # Track objects for memory management
+    processed_hours = 0
+    
     try:
         for batch_idx, hour_batch in enumerate(hour_batches):
             for kind in kinds:
@@ -409,15 +412,27 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
                             for dt in hours_to_process:
                                 if ensure_celestial(lat, lon, elevation, dt):
                                     created += 1
+                                processed_hours += 1
+                                # GC every 10 hours to prevent memory buildup
+                                if processed_hours % 10 == 0:
+                                    gc.collect()
                         elif kind == "asteroids":
                             # For asteroids/comets, we still process individually due to their caching logic
                             for dt in hours_to_process:
                                 if ensure_asteroids(lat, lon, elevation, dt):
                                     created += 1
+                                processed_hours += 1
+                                # GC every 10 hours
+                                if processed_hours % 10 == 0:
+                                    gc.collect()
                         elif kind == "comets":
                             for dt in hours_to_process:
                                 if ensure_comets(lat, lon, elevation, dt):
                                     created += 1
+                                processed_hours += 1
+                                # GC every 10 hours
+                                if processed_hours % 10 == 0:
+                                    gc.collect()
                     except Exception:
                         print(f"[{kind}] batch error for {label} (batch {batch_idx + 1})")
                         traceback.print_exc()
@@ -459,6 +474,13 @@ def precompute_sweep_prioritized(kinds: List[str], horizon_hours: int, base_work
     total_checked = 0
 
     print(f"Precompute sweep start: {len(locations)} locations, {len(high_priority_hours)}+{len(low_priority_hours)} hours, kinds={kinds}")
+    
+    # Close any stale connections before starting
+    from db_utils import close_all_connections
+    try:
+        close_all_connections()
+    except Exception as e:
+        print(f"Warning: Could not close stale connections: {e}")
 
     try:
         # Process high priority hours first (current + next 6h)
@@ -481,8 +503,13 @@ def precompute_sweep_prioritized(kinds: List[str], horizon_hours: int, base_work
                         print(f"[ERROR] Failed to process high priority for location {label}")
                         traceback.print_exc()
             
-            # Force garbage collection after high priority batch
+            # Force garbage collection and close thread connections after high priority batch
             gc.collect()
+            try:
+                from db_utils import close_all_connections
+                close_all_connections()
+            except Exception as e:
+                print(f"Warning: Could not close connections after high priority: {e}")
 
         # Process low priority hours with potentially fewer workers
         if low_priority_hours:
@@ -505,15 +532,23 @@ def precompute_sweep_prioritized(kinds: List[str], horizon_hours: int, base_work
                         print(f"[ERROR] Failed to process low priority for location {label}")
                         traceback.print_exc()
             
-            # Force garbage collection after low priority batch
+            # Force garbage collection and close connections after low priority batch
             gc.collect()
+            try:
+                from db_utils import close_all_connections
+                close_all_connections()
+            except Exception as e:
+                print(f"Warning: Could not close connections after low priority: {e}")
     except Exception as e:
         print(f"Error in precompute sweep: {e}")
         traceback.print_exc()
     finally:
-        # Clean up any remaining database connections
-        from db_utils import close_db_connection
-        close_db_connection()
+        # Clean up any remaining database connections from all threads
+        from db_utils import close_all_connections
+        try:
+            close_all_connections()
+        except Exception as e:
+            print(f"Warning: Final connection cleanup failed: {e}")
 
     print(f"Precompute sweep complete: created={total_created}, checked={total_checked}")
     return total_created, total_checked
@@ -708,9 +743,12 @@ def main() -> None:
     # Then loop hourly
     while True:
         try:
-            # Close database connections before sleeping
-            from db_utils import close_db_connection
-            close_db_connection()
+            # Close all database connections before sleeping
+            from db_utils import close_all_connections
+            try:
+                close_all_connections()
+            except Exception as e:
+                print(f"Warning: Could not close connections before sleep: {e}")
             
             sleep_s = seconds_until_next_hour()
             print(f"Sleeping {sleep_s}s until next hour...")
@@ -727,13 +765,21 @@ def main() -> None:
                 
         except KeyboardInterrupt:
             print("Worker interrupted; exiting.")
-            # Final cleanup
-            from db_utils import close_db_connection
-            close_db_connection()
+            # Final cleanup - close all connections from all threads
+            from db_utils import close_all_connections
+            try:
+                close_all_connections()
+            except Exception as e:
+                print(f"Warning: Final cleanup failed: {e}")
             break
         except Exception:
             traceback.print_exc()
-            # On errors, wait a minute before retry to avoid tight loop
+            # On errors, close connections and wait before retry
+            try:
+                from db_utils import close_all_connections
+                close_all_connections()
+            except Exception:
+                pass
             time.sleep(60)
 
 

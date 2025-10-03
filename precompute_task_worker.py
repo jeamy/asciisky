@@ -148,6 +148,8 @@ def cleanup_task_files(task_id, task_file):
 
 def process_precompute_task(task_file):
     """Process a precompute task from task file"""
+    import gc
+    
     try:
         # Load task data
         with open(task_file, 'r') as f:
@@ -262,6 +264,10 @@ def process_precompute_task(task_file):
             if hour_had_cache:
                 hours_skipped += 1
             
+            # GC every 20 hours to prevent memory buildup
+            if hours_completed % 20 == 0:
+                gc.collect()
+            
             # Update progress
             percent_complete = round((hours_completed / delta_hours) * 100, 1)
             update_task_status(task_id, {
@@ -300,6 +306,14 @@ def process_precompute_task(task_file):
         # Clean up task files even on error (after status update)
         cleanup_task_files(task_id, task_file)
         print(f"[worker] Cleaned up files for failed task {task_id}")
+    finally:
+        # Final cleanup: close database connections and force GC
+        try:
+            from db_utils import close_db_connection
+            close_db_connection()
+            gc.collect()
+        except Exception as cleanup_err:
+            print(f"[worker] Cleanup warning: {cleanup_err}")
 
 def main():
     if len(sys.argv) != 2:

@@ -21,6 +21,7 @@ SQLITE_ENABLE_WAL = os.environ.get('SQLITE_ENABLE_WAL', 'false').lower() == 'tru
 _thread_local = threading.local()
 _connection_counter = 0
 _connection_lock = threading.Lock()
+_active_connections = {}  # Track connections by thread ID for cleanup
 
 def get_db_connection() -> sqlite3.Connection:
     """Get thread-local database connection with proper configuration."""
@@ -47,9 +48,11 @@ def get_db_connection() -> sqlite3.Connection:
                 pass
         _thread_local.connection = conn
         
-        # Track connection count for debugging
+        # Track connection count and register for cleanup
+        thread_id = threading.get_ident()
         with _connection_lock:
             _connection_counter += 1
+            _active_connections[thread_id] = conn
         
         # Initialize schema if needed
         init_database(conn)
@@ -307,8 +310,12 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
     """, (str(location_key), str(time_bucket), str(cutoff_time)))
     
     # Collect all asteroid positions for this location/time
+    # Use fetchone() in loop to avoid loading all BLOBs at once
     all_positions = []
-    for row in cursor.fetchall():
+    while True:
+        row = cursor.fetchone()
+        if not row:
+            break
         if row and row['position_data']:
             positions = pickle.loads(row['position_data'])
             if isinstance(positions, list):
@@ -623,9 +630,41 @@ def migrate_from_pickle_cache() -> Dict[str, int]:
 
 def close_db_connection():
     """Close the thread-local database connection if it exists."""
+    global _connection_counter
+    
     if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
         try:
             _thread_local.connection.close()
             _thread_local.connection = None
+            
+            # Decrement counter and remove from tracking
+            thread_id = threading.get_ident()
+            with _connection_lock:
+                _connection_counter = max(0, _connection_counter - 1)
+                _active_connections.pop(thread_id, None)
         except Exception as e:
             print(f"Error closing database connection: {e}")
+
+
+def close_all_connections():
+    """Close all active database connections across all threads."""
+    global _connection_counter
+    
+    with _connection_lock:
+        connections_to_close = list(_active_connections.values())
+        thread_ids = list(_active_connections.keys())
+    
+    closed_count = 0
+    for conn in connections_to_close:
+        try:
+            conn.close()
+            closed_count += 1
+        except Exception as e:
+            print(f"Error closing connection: {e}")
+    
+    with _connection_lock:
+        for tid in thread_ids:
+            _active_connections.pop(tid, None)
+        _connection_counter = max(0, _connection_counter - closed_count)
+    
+    print(f"Closed {closed_count} database connections")
