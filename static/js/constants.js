@@ -26,7 +26,7 @@ export const ASTRO_CONSTANTS = {
 // Celestial Object Symbols - must match symbols in main.py
 export const OBJECT_SYMBOLS = {
     'sun': '☀️',
-    'moon': '🌙',
+    'moon': '🌙',  // Default moon symbol (fallback)
     'mercury': '☿',
     'venus': '♀',
     'mars': '♂',
@@ -36,6 +36,18 @@ export const OBJECT_SYMBOLS = {
     'neptune': '♆',
     'asteroid': '⚸',  // Unicode U+26B8 (Asteroid)
     'comet': '☄️'  // Unicode U+2604 (Komet)
+};
+
+// Moon Phase Symbols - visual representation of different moon phases
+export const MOON_PHASE_SYMBOLS = {
+    'new_moon': '🌑',           // Neumond
+    'waxing_crescent': '🌒',    // Zunehmende Sichel
+    'first_quarter': '🌓',      // Erstes Viertel
+    'waxing_gibbous': '🌔',     // Zunehmender Mond
+    'full_moon': '🌕',          // Vollmond
+    'waning_gibbous': '🌖',     // Abnehmender Mond
+    'last_quarter': '🌗',       // Letztes Viertel
+    'waning_crescent': '🌘'     // Abnehmende Sichel
 };
 
 // Display Configuration

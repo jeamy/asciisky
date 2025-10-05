@@ -1,4 +1,4 @@
-import { API_ENDPOINTS, CONFIG, ASCII_ART, ASTRO_CONSTANTS } from './constants.js';
+import { API_ENDPOINTS, CONFIG, ASCII_ART, ASTRO_CONSTANTS, MOON_PHASE_SYMBOLS } from './constants.js';
 import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
 import { ZodiacRenderer } from './zodiacRenderer.js';
@@ -409,11 +409,9 @@ export class SkyRenderer {
     }
 
     async addObjectCountDisplay() {
-        // Entferne vorhandenes Count-Display
-        const existingCount = document.getElementById('object-count-display');
-        if (existingCount) {
-            existingCount.remove();
-        }
+        // Entferne alle vorhandenen Count-Displays (auch Duplikate)
+        const existingCounts = document.querySelectorAll('#object-count-display, .object-count-display');
+        existingCounts.forEach(count => count.remove());
 
         // Zähle sichtbare Asteroiden und Kometen
         let asteroidCount = 0;
@@ -692,8 +690,10 @@ export class SkyRenderer {
                 // Wenn bereits ein Objekt an dieser Position ist, prüfe Priorität
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
                 const isAsteroid = obj.type === 'asteroid' || backendSymbol === '⚸';
-                // WICHTIG: Mondsymbol entspricht dem in OBJECT_SYMBOLS ('🌙'), nicht '☽'
-                const existingIsImportant = existingContent === '🌙' || existingContent === '♄' || existingContent === '♆' || existingContent === '♅' || existingContent === '♃' || existingContent === '♂' || existingContent === '♀' || existingContent === '☿' || existingContent === ASCII_ART.SELECTED_OBJECT;
+                // Prüfe ob existierendes Symbol ein wichtiges Objekt ist (Planeten oder Mondphasen)
+                const moonPhaseSymbols = Object.values(MOON_PHASE_SYMBOLS);
+                const existingIsMoon = moonPhaseSymbols.includes(existingContent);
+                const existingIsImportant = existingIsMoon || existingContent === '♄' || existingContent === '♆' || existingContent === '♅' || existingContent === '♃' || existingContent === '♂' || existingContent === '♀' || existingContent === '☿' || existingContent === ASCII_ART.SELECTED_OBJECT;
                 const existingIsAsteroid = existingContent === '⚸';
 
                 if (isAsteroid) {
@@ -712,8 +712,12 @@ export class SkyRenderer {
                 // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
                 
+                // Spezialbehandlung für Mond: Wähle Symbol basierend auf Phase
+                if (obj.name && obj.name.toLowerCase() === 'moon' && obj.phase_name && MOON_PHASE_SYMBOLS[obj.phase_name]) {
+                    symbol = MOON_PHASE_SYMBOLS[obj.phase_name];
+                }
                 // Prüfe zuerst auf Backend-Symbol, dann auf Typ, dann auf Namen
-                if (backendSymbol) {
+                else if (backendSymbol) {
                     symbol = backendSymbol;
                 } else if (obj.type && CONFIG.OBJECT_SYMBOLS[obj.type.toLowerCase()]) {
                     // Verwende Symbol basierend auf dem Typ (asteroid oder comet)
@@ -732,7 +736,8 @@ export class SkyRenderer {
             if (isSelected) {
                 // Formatiere die Höhe mit der konfigurierten Genauigkeit
                 const altitudeStr = obj.altitude.toFixed(CONFIG.ALTITUDE_PRECISION);
-                const label = `${obj.name} (${altitudeStr}°)`;
+                const displayName = this.getLocalizedDisplayName(obj.name);
+                const label = `${displayName} (${altitudeStr}°)`;
                 const startCol = Math.max(0, col - Math.floor(label.length / 2));
                 
                 // Stelle sicher, dass das Label nicht außerhalb des sichtbaren Bereichs liegt
@@ -776,7 +781,10 @@ export class SkyRenderer {
             // 4) Mehrfache Whitespaces bereinigen
             s = s.replace(/\s+/g, ' ').trim();
 
-            return t(s) || s;
+            // 5) Versuche Übersetzung mit Original-Schreibweise und Kleinbuchstaben
+            //    Das Backend sendet Planetennamen in Kleinbuchstaben (mercury, venus, etc.)
+            const translated = t(s) || t(s.toLowerCase());
+            return translated !== s && translated !== s.toLowerCase() ? translated : s;
         } catch (_) {
             return String(name);
         }
