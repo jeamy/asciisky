@@ -49,7 +49,7 @@ COMET_CACHE_TTL_SECONDS = 1 * 3600  # 1 hour
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
 MAX_COMETS_DEFAULT = 1000
-MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '99.0'))
+MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
@@ -719,9 +719,12 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 # Debug logging for bright comets
                 if apparent_magnitude <= 12.0:
                     logger.debug(f"Bright comet found: {designation} mag={apparent_magnitude:.1f} (M1={M1}, r={r:.2f}, Δ={delta:.2f})")
-                # Note: Do NOT filter by magnitude - show all comets like planets/asteroids
             except Exception:
                 pass
+
+            # Filter by apparent magnitude
+            if apparent_magnitude is not None and apparent_magnitude > MAX_APPARENT_MAGNITUDE:
+                continue
 
             # Apparent position only for passing comets
             apparent = astrometric.apparent()
