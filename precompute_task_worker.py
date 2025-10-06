@@ -19,55 +19,11 @@ import bright_asteroids
 import comets
 from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle, CACHE_ROOT, normalize_location, location_key, time_bucket_utc
 
-# Import database utilities if available
-try:
-    from db_utils import get_celestial_snapshot, store_celestial_snapshot
-    DB_AVAILABLE = True
-except ImportError:
-    DB_AVAILABLE = False
+# No celestial caching needed - computed in real-time
 
 def _hour_floor(dt):
     """Round datetime down to the nearest hour"""
     return dt.replace(minute=0, second=0, microsecond=0)
-
-def ensure_celestial_cache(lat, lon, elevation, dt_utc):
-    """Ensure celestial cache exists for given location and time"""
-    try:
-        # Import the computation module
-        from api.computation import compute_celestial_snapshot, ts, eph
-        
-        # Check if cache already exists
-        cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=1)
-        if os.path.exists(cache_file):
-            print(f"[worker] Celestial cache exists for {lat}, {lon} at {dt_utc}")
-            return True
-            
-        # Generate celestial snapshot
-        print(f"[worker] Generating celestial cache for {lat}, {lon} at {dt_utc}")
-        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
-        
-        # Store in cache
-        atomic_write_pickle(cache_file, snapshot)
-        print(f"[worker] Stored celestial cache: {cache_file}")
-        
-        # Also store in database if available
-        if DB_AVAILABLE:
-            try:
-                from cache_utils import normalize_location, location_key, time_bucket_utc
-                lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                time_bucket = time_bucket_utc(dt_utc, 1)  # 1 hour buckets
-                store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
-                print(f"[worker] Stored celestial snapshot in database")
-            except Exception as e:
-                print(f"[worker] Failed to store celestial snapshot in database: {e}")
-        
-        return True
-    except Exception as e:
-        print(f"[worker] Error generating celestial cache: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
 
 def _ensure_asteroids_cache(lat, lon, elevation, dt_utc):
     """Ensure asteroid cache exists for given location and time"""
@@ -234,14 +190,7 @@ def process_precompute_task(task_file):
             for k in kinds:
                 kind_had_cache = False
 
-                if k == 'celestial':
-                    cache_existed = ensure_celestial_cache(lat, lon, elevation, process_dt)
-                    if cache_existed:
-                        kind_had_cache = True
-                        print(f"[worker] celestial cache exists for {process_dt.isoformat()}")
-                    else:
-                        print(f"[worker] generated celestial cache for {process_dt.isoformat()}")
-                elif k == 'asteroids':
+                if k == 'asteroids':
                     cache_existed = _ensure_asteroids_cache(lat, lon, elevation, process_dt)
                     if cache_existed:
                         kind_had_cache = True

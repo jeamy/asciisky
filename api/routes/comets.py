@@ -65,7 +65,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 if isinstance(comet, dict) and "name" in comet:
                     result["bodies"][f"comet_{i}_{comet['name']}"] = comet
 
-            asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}

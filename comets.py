@@ -49,7 +49,7 @@ COMET_CACHE_TTL_SECONDS = 1 * 3600  # 1 hour
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
 MAX_COMETS_DEFAULT = 1000
-MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '16.0'))
+MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '99.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
@@ -719,9 +719,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 # Debug logging for bright comets
                 if apparent_magnitude <= 12.0:
                     logger.debug(f"Bright comet found: {designation} mag={apparent_magnitude:.1f} (M1={M1}, r={r:.2f}, Δ={delta:.2f})")
-                # Skip if too faint
-                if apparent_magnitude > MAX_APPARENT_MAGNITUDE:
-                    continue
+                # Note: Do NOT filter by magnitude - show all comets like planets/asteroids
             except Exception:
                 pass
 
@@ -734,42 +732,45 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             rise_time, set_time, transit_time = None, None, None
             if events_computed < COMET_EVENTS_MAX:
                 try:
-                    start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                    end_time = ts.utc(start_time.utc_datetime() + timedelta(hours=24))
+                    # Use local midnight as reference point, not UTC midnight
+                    local_dt = dt_utc.astimezone(tz)
+                    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                    # Convert back to UTC for Skyfield
+                    utc_midnight = local_midnight.astimezone(timezone.utc)
+                    start_time = ts.from_datetime(utc_midnight)
+                    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
+                    
                     rise_set_func = almanac.risings_and_settings(eph, target, location)
                     times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
+                    # Find rise/set events for the current local day
+                    today_local = local_dt.date()
                     for ti, event in zip(times, events):
-                        if event == 1 and rise_time is None:
-                            rise_time = ti.utc_datetime()
-                        elif event == 0 and set_time is None:
-                            set_time = ti.utc_datetime()
+                        event_local = ti.utc_datetime().replace(tzinfo=timezone.utc).astimezone(tz)
+                        if event_local.date() == today_local:
+                            if event == 1 and rise_time is None:
+                                rise_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                            elif event == 0 and set_time is None:
+                                set_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
 
                     # Transit time (choose highest altitude for local day)
                     f = almanac.meridian_transits(eph, target, location)
                     t_times, t_events = almanac.find_discrete(start_time, end_time, f)
                     chosen_local_dt = None
                     if len(t_times):
-                        now_local = dt_utc.astimezone(tz)
-                        today_local = now_local.date()
                         candidates = []
                         for ti, ev in zip(t_times, t_events):
                             utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                            try:
-                                alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                            except Exception:
-                                alt_deg = float('-inf')
-                            candidates.append((utc_dt, alt_deg, int(ev)))
-                        # Kandidaten auf heutigen lokalen Tag beschränken
-                        today_candidates = []
-                        for utc_dt, alt_deg, ev in candidates:
-                            local_dt = utc_dt.astimezone(tz)
-                            if local_dt.date() == today_local:
-                                today_candidates.append((utc_dt, alt_deg, ev))
-                        pool = today_candidates if today_candidates else candidates
-                        if pool:
-                            pool.sort(key=lambda x: (-x[1], x[0]))
-                            chosen_local_dt = pool[0][0]
+                            event_local = utc_dt.astimezone(tz)
+                            if event_local.date() == today_local:
+                                try:
+                                    alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                                except Exception:
+                                    alt_deg = float('-inf')
+                                candidates.append((utc_dt, alt_deg, int(ev)))
+                        if candidates:
+                            candidates.sort(key=lambda x: (-x[1], x[0]))
+                            chosen_local_dt = candidates[0][0]
                     transit_time = chosen_local_dt
                     events_computed += 1
                 except Exception as e:

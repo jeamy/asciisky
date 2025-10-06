@@ -1641,20 +1641,17 @@ export class SkyRenderer {
             const locKey = (avail && avail.location && avail.location.loc_key) ? avail.location.loc_key : undefined;
 
             const tasks = [];
-            if (availableAsteroids) {
-                // Load bright asteroids via ASTEROIDS endpoint (points to /bright_asteroids)
-                tasks.push(this.loadAsteroids(token));
-            }
-            if (availableComets) {
-                tasks.push(this.loadComets(token));
-            }
+            // ALWAYS load asteroids and comets, regardless of cache status
+            // They should be visible at all times like planets
+            tasks.push(this.loadAsteroids(token));
+            tasks.push(this.loadComets(token));
             
             // Load zodiac constellations if enabled
             if (this.zodiacRenderer) {
                 tasks.push(this.loadZodiacData(token, this.location, timeISO));
             }
 
-            // Fehlt etwas? Dann Hintergrundberechnung anstoßen (dedupliziert)
+            // If cache is missing, trigger background precompute for future
             const missing = [];
             if (!availableAsteroids) missing.push('asteroids');
             if (!availableComets) missing.push('comets');

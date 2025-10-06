@@ -12,14 +12,11 @@ from fastapi import FastAPI
 from typing import Dict, Any
 
 from cache_utils import build_cache_path, atomic_write_pickle, normalize_location, location_key, time_bucket_utc
-from api.computation import compute_celestial_snapshot, LOADER, ts, eph
+from api.computation import LOADER, ts, eph
 import bright_asteroids
 import psutil
 import comets
 
-CELESTIAL_USE_SQLITE = os.getenv('CELESTIAL_USE_SQLITE', 'true').lower() == 'true'
-CELESTIAL_CACHE_BUCKET_HOURS = 1
-CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
 BG_TASK_COOLDOWN_SECONDS = int(os.environ.get('ASCII_SKY_BG_TASK_COOLDOWN_MINUTES', '5')) * 60
 MAX_WINDOW_WORKERS = int(os.environ.get('ASCII_SKY_MAX_WINDOW_WORKERS', '1'))
 
@@ -100,37 +97,7 @@ def _count_running_window_workers() -> int:
     except Exception:
         return 0
 
-def ensure_celestial_cache(lat: float, lon: float, elevation: float, dt_utc: datetime):
-    """Ensure celestial cache exists for given location/time."""
-    try:
-        if CELESTIAL_USE_SQLITE:
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
-
-            try:
-                from db_utils import get_celestial_snapshot
-                cached_snapshot = get_celestial_snapshot(loc_key, time_bucket, CELESTIAL_CACHE_TTL_SECONDS)
-                if cached_snapshot:
-                    return
-            except Exception as e:
-                print(f"[bg] SQLite celestial cache check failed: {e}")
-
-        cache_file = build_cache_path('celestial', lat, lon, elevation, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
-        if not os.path.exists(cache_file):
-            snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
-
-            if CELESTIAL_USE_SQLITE:
-                try:
-                    from db_utils import store_celestial_snapshot
-                    store_celestial_snapshot(loc_key, time_bucket, lat, lon, elevation, snapshot)
-                except Exception as e:
-                    print(f"[bg] Failed to store celestial snapshot in SQLite: {e}")
-
-            atomic_write_pickle(cache_file, snapshot)
-    except Exception:
-        print(f"[bg] celestial ensure failed for {lat},{lon},{elevation} @ {dt_utc.isoformat()}")
-        traceback.print_exc()
+# Celestial objects are now computed in real-time, no caching needed
 
 def _ensure_asteroids_cache(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure asteroid cache exists. Returns True if cache was already present, False if generated."""

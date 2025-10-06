@@ -27,7 +27,7 @@ async def precompute_range(request: Request, body: PrecomputeRangeRequest):
         start_dt = parse_time_param(body.start_date)
         end_dt = parse_time_param(body.end_date)
 
-        result = await trigger_background_precompute_range(request.app, lat, lon, elevation, start_dt, end_dt, kinds=['celestial', 'asteroids', 'comets'])
+        result = await trigger_background_precompute_range(request.app, lat, lon, elevation, start_dt, end_dt, kinds=['asteroids', 'comets'])
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={'error': str(e)})
@@ -57,7 +57,8 @@ async def get_cache_status(request: Request, loc_key: Optional[str] = None, lat:
     """Report status of the precomputed cache system."""
     try:
         time = request.query_params.get('time')
-        kinds = [k.strip() for k in os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").split(",") if k.strip()]
+        # Only show asteroids and comets - celestial is computed in real-time
+        kinds = ['asteroids', 'comets']
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
 
         dt_utc = parse_time_param(time)
@@ -183,35 +184,12 @@ async def get_cache_availability(request: Request, lat: Optional[float] = None, 
         lat_v, lon_v, elev_v = location["latitude"], location["longitude"], location["elevation"]
         lat_n, lon_n, elev_n = normalize_location(lat_v, lon_v, elev_v)
         key = location_key(lat_n, lon_n, elev_n)
-
         # Determine current bucket
         time_param = request.query_params.get('time')
         from api.helpers import parse_time_param
         dt_utc = parse_time_param(time_param)
 
-        # Celestial constants (aligned with routes)
-        CELESTIAL_CACHE_BUCKET_HOURS = 1
-        CELESTIAL_CACHE_TTL_SECONDS = 49 * 3600
-
-        available = {"celestial": False, "asteroids": False, "comets": False}
-
-        # Celestial availability
-        try:
-            use_sqlite = os.getenv('CELESTIAL_USE_SQLITE', 'true').lower() == 'true'
-            bucket = time_bucket_utc(dt_utc, CELESTIAL_CACHE_BUCKET_HOURS)
-            if use_sqlite:
-                try:
-                    from db_utils import get_celestial_snapshot
-                    if get_celestial_snapshot(key, bucket, CELESTIAL_CACHE_TTL_SECONDS):
-                        available["celestial"] = True
-                except Exception:
-                    pass
-            if not available["celestial"]:
-                path = build_cache_path('celestial', lat_v, lon_v, elev_v, dt=dt_utc, bucket_hours=CELESTIAL_CACHE_BUCKET_HOURS)
-                if read_pickle_if_fresh(path, CELESTIAL_CACHE_TTL_SECONDS) is not None:
-                    available["celestial"] = True
-        except Exception:
-            pass
+        available = {"asteroids": False, "comets": False}
 
         # Asteroids availability
         try:
@@ -276,7 +254,7 @@ async def precompute_window(request: Request):
         elif isinstance(kinds_raw, str):
             kinds = [k.strip() for k in kinds_raw.split(',') if k.strip()]
         else:
-            kinds = [k.strip() for k in os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").split(',') if k.strip()]
+            kinds = [k.strip() for k in os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "asteroids,comets").split(',') if k.strip()]
 
         # Parse time param (defaults to now if None)
         dt_utc = parse_time_param(time_str)

@@ -62,7 +62,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 if isinstance(asteroid, dict) and "name" in asteroid:
                     result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
 
-            asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+            asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}

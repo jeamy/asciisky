@@ -1,7 +1,7 @@
 """
 AsciiSky Precompute Worker
 - Maintains per-hour cached snapshots for the next N hours (default 48 or env override)
-- Kinds: celestial, asteroids, comets
+- Kinds: asteroids, comets
 - Sources locations from:
   * settings.get_location() (persisted user location)
   * optional env ASCII_SKY_PRECOMPUTE_LOCATIONS (JSON array or CSV "lat,lon,elev;...")
@@ -14,7 +14,7 @@ AsciiSky Precompute Worker
 Environment variables:
 - ASCII_SKY_PRECOMPUTE_HOURS: horizon in hours (default 48)
 - ASCII_SKY_PRECOMPUTE_KINDS: comma-separated list of kinds to precompute
-  (default: "celestial,asteroids,comets")
+  (default: "asteroids,comets")
 - ASCII_SKY_PRECOMPUTE_LOCATIONS: JSON array of objects with latitude/longitude/elevation
   or CSV string "lat,lon,elev;lat,lon,elev"
 - ASCII_SKY_PRECOMPUTE_WORKERS: number of parallel workers for location processing (default 3)
@@ -169,7 +169,7 @@ def get_target_locations() -> List[Dict[str, Any]]:
 
     # 3) Cached locations from disk (cache/<kind>/*)
     try:
-        for kind in ("celestial", "asteroids", "comets"):
+        for kind in ("asteroids", "comets"):
             base_dir = os.path.join(CACHE_ROOT, kind)
             if not os.path.isdir(base_dir):
                 continue
@@ -275,23 +275,6 @@ def get_adaptive_worker_count(base_workers: int) -> int:
         return min(base_workers, max_workers)
 
 
-def ensure_celestial(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
-    """Ensure a celestial snapshot exists for this hour. Returns True if created."""
-    path = build_cache_path("celestial", lat, lon, elevation, dt=dt_utc, bucket_hours=1)
-    if os.path.exists(path):
-        return False
-    try:
-        from api.computation import compute_celestial_snapshot
-        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
-        atomic_write_pickle(path, snapshot)
-        print(f"[celestial] wrote {path}")
-        return True
-    except Exception:
-        print(f"[celestial] error for {lat},{lon},{elevation} at {dt_utc.isoformat()}")
-        traceback.print_exc()
-        return False
-
-
 def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime) -> bool:
     """Ensure an asteroid list cache exists for this hour. Returns True if created."""
     from cache_utils import time_bucket_utc
@@ -392,9 +375,7 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
                 # Check which hours in this batch need processing
                 hours_to_process = []
                 for dt in hour_batch:
-                    if kind == "celestial":
-                        path = build_cache_path("celestial", lat, lon, elevation, dt=dt, bucket_hours=1)
-                    elif kind == "asteroids":
+                    if kind == "asteroids":
                         path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
                     elif kind == "comets":
                         path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
@@ -408,15 +389,7 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
                 # Process all missing hours for this kind in batch
                 if hours_to_process:
                     try:
-                        if kind == "celestial":
-                            for dt in hours_to_process:
-                                if ensure_celestial(lat, lon, elevation, dt):
-                                    created += 1
-                                processed_hours += 1
-                                # GC every 10 hours to prevent memory buildup
-                                if processed_hours % 10 == 0:
-                                    gc.collect()
-                        elif kind == "asteroids":
+                        if kind == "asteroids":
                             # For asteroids/comets, we still process individually due to their caching logic
                             for dt in hours_to_process:
                                 if ensure_asteroids(lat, lon, elevation, dt):
@@ -590,7 +563,7 @@ def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
     now = _now_utc()
     cutoff = now - timedelta(days=int(retention_days))
     try:
-        for kind in ("celestial", "asteroids", "comets"):
+        for kind in ("asteroids", "comets"):
             base_dir = os.path.join(CACHE_ROOT, kind)
             if not os.path.isdir(base_dir):
                 continue
@@ -641,7 +614,7 @@ def seconds_until_next_hour(now: Optional[datetime] = None) -> int:
 
 
 def main() -> None:
-    kinds_env = os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "celestial,asteroids,comets").strip()
+    kinds_env = os.environ.get("ASCII_SKY_PRECOMPUTE_KINDS", "asteroids,comets").strip()
     kinds = [k.strip() for k in kinds_env.split(",") if k.strip()]
     try:
         horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "144"))

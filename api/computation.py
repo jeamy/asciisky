@@ -85,21 +85,32 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
             try:
                 f = almanac.risings_and_settings(eph, body, location)
-                start_time = ts.utc(dt_utc.replace(hour=0, minute=0, second=0, microsecond=0))
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+                # Use local midnight as reference point, not UTC midnight
+                local_dt = dt_utc.astimezone(tz)
+                local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Convert back to UTC for Skyfield
+                utc_midnight = local_midnight.astimezone(timezone.utc)
+                start_time = ts.from_datetime(utc_midnight)
+                end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
                 times, events = almanac.find_discrete(start_time, end_time, f)
+                
+                # Find rise/set events for the current local day
                 rise_time, set_time = None, None
+                today_local = local_dt.date()
+                
                 for ti, event in zip(times, events):
-                    local_time_str = ti.utc_datetime().astimezone(tz).strftime('%H:%M')
-                    if event == 1:
-                        rise_time = local_time_str
-                    else:
-                        set_time = local_time_str
+                    event_local = ti.utc_datetime().astimezone(tz)
+                    if event_local.date() == today_local:
+                        local_time_str = event_local.strftime('%H:%M')
+                        if event == 1 and rise_time is None:
+                            rise_time = local_time_str
+                        elif event == 0 and set_time is None:
+                            set_time = local_time_str
 
                 transit_time = None
                 if rise_time and set_time:
-                    rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=dt_utc.year, month=dt_utc.month, day=dt_utc.day, tzinfo=tz)
-                    set_dt = datetime.strptime(set_time, '%H:%M').replace(year=dt_utc.year, month=dt_utc.month, day=dt_utc.day, tzinfo=tz)
+                    rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=local_dt.year, month=local_dt.month, day=local_dt.day, tzinfo=tz)
+                    set_dt = datetime.strptime(set_time, '%H:%M').replace(year=local_dt.year, month=local_dt.month, day=local_dt.day, tzinfo=tz)
                     if set_dt < rise_dt:
                         set_dt += timedelta(days=1)
                     transit_dt = rise_dt + (set_dt - rise_dt) / 2
