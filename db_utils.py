@@ -14,8 +14,8 @@ import threading
 # Database configuration
 DB_PATH = "cache/asciisky.db"
 DB_VERSION = 2
-SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get('SQLITE_BUSY_TIMEOUT_MS', '5000'))  # 5 seconds default
-SQLITE_ENABLE_WAL = os.environ.get('SQLITE_ENABLE_WAL', 'false').lower() == 'true'
+SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get('SQLITE_BUSY_TIMEOUT_MS', '30000'))  # 30 seconds default
+SQLITE_ENABLE_WAL = os.environ.get('SQLITE_ENABLE_WAL', 'true').lower() == 'true'  # Enable WAL by default
 
 # Thread-local storage for database connections
 _thread_local = threading.local()
@@ -60,16 +60,27 @@ def get_db_connection() -> sqlite3.Connection:
     return _thread_local.connection
 
 @contextmanager
-def db_transaction():
-    """Context manager for database transactions with automatic rollback on error."""
+def db_transaction(max_retries=3):
+    """Context manager for database transactions with automatic rollback on error and retry on lock."""
     conn = get_db_connection()
-    try:
-        conn.execute("BEGIN")
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+    retries = 0
+    while retries < max_retries:
+        try:
+            conn.execute("BEGIN IMMEDIATE")  # Acquire write lock immediately
+            yield conn
+            conn.commit()
+            return
+        except sqlite3.OperationalError as e:
+            conn.rollback()
+            if 'database is locked' in str(e) and retries < max_retries - 1:
+                retries += 1
+                import time
+                time.sleep(0.1 * retries)  # Exponential backoff
+                continue
+            raise
+        except Exception:
+            conn.rollback()
+            raise
 
 def init_database(conn: sqlite3.Connection):
     """Initialize database schema if not exists."""
@@ -245,6 +256,12 @@ def store_asteroid_dataframe(df) -> int:
                 ))
                 stored_count += 1
                 
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e):
+                    # Skip silently on lock - will be retried later
+                    continue
+                print(f"Error storing asteroid {row.get('designation', 'unknown')}: {e}")
+                continue
             except Exception as e:
                 print(f"Error storing asteroid {row.get('designation', 'unknown')}: {e}")
                 continue
@@ -393,6 +410,12 @@ def store_comet_dataframe(df) -> int:
                 ))
                 stored_count += 1
                 
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e):
+                    # Skip silently on lock - will be retried later
+                    continue
+                print(f"Error storing comet {row.get('designation', 'unknown')}: {e}")
+                continue
             except Exception as e:
                 print(f"Error storing comet {row.get('designation', 'unknown')}: {e}")
                 continue
