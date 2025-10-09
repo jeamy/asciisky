@@ -54,15 +54,12 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                         result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
                 return result
 
-            # Compute (this will also store to SQLite/pickle internally)
-            location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-            bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt=dt_utc))
-            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-            for i, asteroid in enumerate(bright_asteroid_list):
-                if isinstance(asteroid, dict) and "name" in asteroid:
-                    result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
-
+            # No cache available - trigger background computation and return empty result
+            # Don't wait for computation (max 3 seconds would still be too long)
             asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
+            
+            # Return empty result immediately - data will be available on next update
+            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}

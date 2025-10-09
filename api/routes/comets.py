@@ -58,14 +58,12 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                         result["bodies"][f"comet_{i}_{comet['name']}"] = comet
                 return result
 
-            location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-            comet_list = await asyncio.to_thread(lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, use_cache=True, current_dt=dt_utc))
-            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-            for i, comet in enumerate(comet_list[:max_comets]):
-                if isinstance(comet, dict) and "name" in comet:
-                    result["bodies"][f"comet_{i}_{comet['name']}"] = comet
-
+            # No cache available - trigger background computation and return empty result
+            # Don't wait for computation (max 3 seconds would still be too long)
             asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
+            
+            # Return empty result immediately - data will be available on next update
+            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
