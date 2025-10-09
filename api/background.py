@@ -81,18 +81,36 @@ def _has_recent_window_task_for_loc(loc_key_str: str, max_age_seconds: int = BG_
 
 
 def _count_running_window_workers() -> int:
-    """Return number of running precompute_task_worker.py processes.
-    Uses psutil to scan current process list inside the container.
+    """Return number of running precompute_task_worker.py processes in the worker container.
+    Counts running task_status files that are recent.
     """
     try:
+        import glob
         count = 0
-        for proc in psutil.process_iter(attrs=['pid', 'name', 'cmdline']):
+        now = datetime.now(timezone.utc)
+        max_age_seconds = 600  # 10 minutes
+        
+        for status_path in glob.glob(os.path.join('cache', 'task_status_window_*.json')):
             try:
-                cmd = proc.info.get('cmdline') or []
-                if any('precompute_task_worker.py' in part for part in cmd):
-                    count += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                with open(status_path, 'r') as sf:
+                    sdata = json.load(sf)
+                status = sdata.get('status', 'unknown')
+                updated_str = sdata.get('updated_at', '')
+                
+                # Count tasks that are starting or running
+                if status in ('starting', 'running'):
+                    # Check if recently updated (within last 10 minutes)
+                    if updated_str:
+                        try:
+                            updated_dt = datetime.fromisoformat(updated_str.replace('Z', '+00:00'))
+                            age_seconds = (now - updated_dt).total_seconds()
+                            if age_seconds < max_age_seconds:
+                                count += 1
+                        except Exception:
+                            pass
+            except Exception:
                 continue
+        
         return count
     except Exception:
         return 0
