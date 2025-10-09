@@ -132,7 +132,7 @@ export function updateVisibleObjectsList(celestialData) {
   if (visibleObjects.comets.length > 0) {
     html += '<div class="vo-spacer"></div>';
     html += visibleObjects.comets.map(obj => 
-      `<div class="vo-item" data-type="comet" data-name="${obj.bodyKey || obj.name}">${obj.name}, m ${obj.magnitude.toFixed(1)}</div>`
+      `<div class="vo-item" data-type="comet" data-name="${obj.bodyKey || obj.name}">${obj.name}, ${obj.magnitude.toFixed(1)}</div>`
     ).join('');
   }
 
