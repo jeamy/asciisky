@@ -348,9 +348,6 @@ export class LocationDialog {
             }).then(result => {
                 if (result) {
                     console.log('Automatic precompute started:', result);
-                    
-                    // Starte Live-Updates für Cache-Status
-                    this.startLiveCacheUpdates(location);
                 }
             }).catch(error => {
                 console.error('Error triggering automatic precompute:', error);
@@ -359,42 +356,5 @@ export class LocationDialog {
         } catch (error) {
             console.error('Error triggering automatic precompute:', error);
         }
-    }
-    
-    // Starte Live-Updates für Cache-Status während Berechnung
-    startLiveCacheUpdates(location) {
-        // Aktualisiere Cache-Status alle 3 Sekunden während Berechnung läuft
-        const updateInterval = setInterval(async () => {
-            try {
-                // Importiere updateCacheStatusForLocation dynamisch
-                const { updateCacheStatusForLocation } = await import('./cacheStatusPanel.js');
-                
-                // Aktualisiere Cache-Status
-                await updateCacheStatusForLocation(
-                    location.lat, 
-                    location.lon, 
-                    location.elevation, 
-                    location.name
-                );
-                
-                // Prüfe ob noch eine aktive Precompute-Task läuft
-                const activeTaskId = localStorage.getItem('activePrecomputeTask');
-                if (!activeTaskId) {
-                    // Keine aktive Task mehr - stoppe Updates
-                    clearInterval(updateInterval);
-                    console.log('Live cache updates stopped - no active task');
-                }
-            } catch (error) {
-                console.error('Error during live cache update:', error);
-                // Bei Fehlern nach 30 Sekunden stoppen
-                setTimeout(() => clearInterval(updateInterval), 30000);
-            }
-        }, 3000); // Alle 3 Sekunden aktualisieren
-        
-        // Automatisch nach 5 Minuten stoppen als Fallback
-        setTimeout(() => {
-            clearInterval(updateInterval);
-            console.log('Live cache updates stopped - timeout reached');
-        }, 300000); // 5 Minuten
     }
 }

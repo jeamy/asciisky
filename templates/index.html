@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./static/css/timeInputDialog.css">
     <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
     <link rel="stylesheet" href="./static/css/constellations.css">
+    <link rel="stylesheet" href="./static/css/visibleObjects.css">
 </head>
 <body>
 <header>
@@ -55,7 +56,10 @@
 </div>
     
 <div class="main-layout">
-    <aside id="cache-status-panel" class="cache-status-panel" aria-live="polite"></aside>
+    <div class="left-panels">
+        <aside id="visible-objects-panel" class="visible-objects-panel" aria-live="polite"></aside>
+        <aside id="cache-status-panel" class="cache-status-panel" aria-live="polite"></aside>
+    </div>
     <div id="sky-container" class="sky-container">
         <!-- Sky will be rendered here -->
     </div>
@@ -70,6 +74,7 @@
     import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
     import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
+    import { initVisibleObjectsList, updateVisibleObjectsList } from './static/js/visibleObjectsList.js';
     
     let renderer;
     let locationDialog;
@@ -98,6 +103,11 @@
         
         // 3b) Cache-Status-Panel initialisieren
         initCacheStatusPanel();
+        
+        // 3c) Visible Objects Panel initialisieren (nach Renderer-Erstellung)
+        setTimeout(() => {
+            initVisibleObjectsList('visible-objects-panel', renderer);
+        }, 100);
         
         // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
         setTimeout(() => {

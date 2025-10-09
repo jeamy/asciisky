@@ -1628,6 +1628,13 @@ export class SkyRenderer {
                 // Rendere sofort die Himmelskörper (Planeten etc.), um First Paint zu beschleunigen
                 this.render();
                 this.refreshDialogIfVisible();
+                // Aktualisiere die Visible Objects Liste sofort mit Planeten
+                try {
+                    const { updateVisibleObjectsList } = await import('./visibleObjectsList.js');
+                    updateVisibleObjectsList(this.celestialData);
+                } catch (e) {
+                    console.error('Error updating visible objects list (first paint):', e);
+                }
                 // Verberge den allgemeinen Ladeindikator bereits nach dem ersten Paint
                 // (Asteroiden/Kometen werden ggf. separat nachgeladen oder im Hintergrund vorbereitet)
                 this.hideLoading();
@@ -1666,6 +1673,14 @@ export class SkyRenderer {
                     this.render();
                     this.refreshDialogIfVisible();
                 }
+            }
+            
+            // Aktualisiere die Visible Objects Liste
+            try {
+                const { updateVisibleObjectsList } = await import('./visibleObjectsList.js');
+                updateVisibleObjectsList(this.celestialData);
+            } catch (e) {
+                console.error('Error updating visible objects list:', e);
             }
             
             // Aktualisiere die Anzeige

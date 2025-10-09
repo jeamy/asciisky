@@ -192,6 +192,8 @@ export const i18n = {
         'visible_objects': 'Sichtbare Objekte',
         'asteroids_up_to_mag': 'Asteroiden bis Mag',
         'comets_up_to_mag': 'Kometen bis Mag',
+        'no_data': 'Keine Daten verfügbar',
+        'no_visible_objects': 'Keine Objekte über dem Horizont',
         
         // Constellation controls
         'constellations': 'Sternbilder',
@@ -401,6 +403,8 @@ export const i18n = {
         'visible_objects': 'Visible Objects',
         'asteroids_up_to_mag': 'Asteroids up to Mag',
         'comets_up_to_mag': 'Comets up to Mag',
+        'no_data': 'No data available',
+        'no_visible_objects': 'No objects above horizon',
         
         // Constellation controls
         'constellations': 'Constellations',

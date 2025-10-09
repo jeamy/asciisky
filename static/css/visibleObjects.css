@@ -1,0 +1,57 @@
+/* Visible Objects Panel styles - same as cache status panel */
+
+.visible-objects-panel {
+  width: 280px;
+  min-width: 240px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px 12px 10px 12px;
+  color: var(--primary-color);
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+  font-size: 0.8rem;
+  margin-bottom: 0;
+}
+
+.visible-objects-panel .vo-header {
+  font-weight: 700;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+.visible-objects-panel .vo-section {
+  margin-bottom: 12px;
+}
+
+.visible-objects-panel .vo-subtle {
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+.visible-objects-panel .vo-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+  line-height: 1.2;
+}
+
+.visible-objects-panel .vo-item:hover {
+  background: rgba(0, 255, 0, 0.1);
+}
+
+.visible-objects-panel .vo-spacer {
+  height: 8px;
+}
+
+@media (max-width: 768px) {
+  .visible-objects-panel {
+    width: 100%;
+    max-height: none;
+    margin-bottom: 15px;
+  }
+}
