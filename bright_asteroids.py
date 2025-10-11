@@ -214,117 +214,104 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     asteroid_rows = []
     df = None
     
+    # Always load and cache the DataFrame (needed for new computations)
+    # Check in-memory cache first
+    global _asteroid_df_cache, _asteroid_df_timestamp
+    if _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
+        age = (datetime.now() - _asteroid_df_timestamp).total_seconds()
+        if age < ASTEROID_DF_CACHE_TTL_SECONDS:
+            print(f"Using in-memory asteroid DataFrame cache (age: {age/3600:.1f}h)")
+            df = _asteroid_df_cache
+        else:
+            print(f"In-memory cache expired (age: {age/3600:.1f}h)")
+            _asteroid_df_cache = None
+            _asteroid_df_timestamp = None
+    
+    # Check disk cache if no valid in-memory cache
+    if _asteroid_df_cache is None and os.path.exists(ASTEROID_DF_CACHE_FILE):
+        print(f"Loading asteroid DataFrame from disk cache: {ASTEROID_DF_CACHE_FILE}")
+        try:
+            with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
+                payload = pickle.load(f)
+            
+            # Handle both old format (direct DataFrame) and new format (dict with timestamp)
+            if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
+                age = (datetime.now() - payload['timestamp']).total_seconds()
+                if age < ASTEROID_DF_CACHE_TTL_SECONDS:
+                    print(f"Using cached asteroid DataFrame (age: {age/3600:.1f}h)")
+                    df = payload['data']
+                    _asteroid_df_cache = df
+                    _asteroid_df_timestamp = payload['timestamp']
+                else:
+                    print(f"Disk cache expired (age: {age/3600:.1f}h)")
+                    df = None
+            elif isinstance(payload, pd.DataFrame):
+                # Old format - use it but mark for refresh
+                print("Found old-format cache (no timestamp), will refresh")
+                df = None
+            else:
+                df = None
+        except Exception as e:
+            print(f"Error reading asteroid DataFrame cache: {e}")
+            df = None
+    
+    if _asteroid_df_cache is None:
+        # Überprüfe ob tägliches Update nötig ist
+        if should_update_mpcorb_file():
+            print("MPCORB file needs daily update, downloading...")
+            if not download_mpcorb_file():
+                # Falls Download fehlschlägt, verwende alte Datei falls vorhanden
+                if not MPCORB_FILE.exists():
+                    return []
+        try:
+            print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
+            with gzip.open(MPCORB_FILE, 'rb') as f:
+                df = mpc.load_mpcorb_dataframe(f)
+            
+            df = df.iloc[:MAX_ASTEROIDS]
+        
+            # Convert types
+            numeric_cols = [
+                'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
+                'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
+                'mean_daily_motion_degrees', 'semimajor_axis_au'
+            ]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
+
+            # Save with timestamp (new format like comets)
+            _asteroid_df_cache = df
+            _asteroid_df_timestamp = datetime.now()
+            with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
+                pickle.dump({'timestamp': _asteroid_df_timestamp, 'data': df}, f)
+            print(f"Saved {len(df)} asteroids to DataFrame cache with timestamp.")
+            
+            # Also store in SQLite database for future use
+            if ASTEROID_USE_SQLITE:
+                try:
+                    count = store_asteroid_dataframe(df)
+                    print(f"Stored {count} asteroids in SQLite database")
+                except Exception as e:
+                    print(f"Error storing in SQLite: {e}")
+                    
+        except Exception as e:
+            print(f"Error processing MPCORB data: {e}")
+            return []
+
+    # --- SQLite Loading (if enabled) ---
     if ASTEROID_USE_SQLITE:
-        # SQLite backend: get asteroids from database
         try:
             asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
             print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
-            
-            # If no data in DB, try to migrate from pickle cache
-            if not asteroid_rows:
-                print("No asteroids in database, attempting migration from pickle cache...")
-                migration_stats = migrate_from_pickle_cache()
-                print(f"Migration completed: {migration_stats}")
-                
-                # Retry loading from database
-                asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-                print(f"After migration: {len(asteroid_rows)} asteroids available")
-            
         except Exception as e:
             print(f"Error loading from SQLite database: {e}")
-            print("Falling back to pickle cache for this request...")
             asteroid_rows = []
-    
-    if not ASTEROID_USE_SQLITE or not asteroid_rows:
-        # Legacy pickle backend: load DataFrame
-        # Check in-memory cache first
-        global _asteroid_df_cache, _asteroid_df_timestamp
-        if _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
-            age = (datetime.now() - _asteroid_df_timestamp).total_seconds()
-            if age < ASTEROID_DF_CACHE_TTL_SECONDS:
-                print(f"Using in-memory asteroid DataFrame cache (age: {age/3600:.1f}h)")
-                df = _asteroid_df_cache
-            else:
-                print(f"In-memory cache expired (age: {age/3600:.1f}h)")
-                _asteroid_df_cache = None
-                _asteroid_df_timestamp = None
-        
-        # Check disk cache if no valid in-memory cache
-        if _asteroid_df_cache is None and os.path.exists(ASTEROID_DF_CACHE_FILE):
-            print(f"Loading asteroid DataFrame from disk cache: {ASTEROID_DF_CACHE_FILE}")
-            try:
-                with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
-                    payload = pickle.load(f)
-                
-                # Handle both old format (direct DataFrame) and new format (dict with timestamp)
-                if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
-                    age = (datetime.now() - payload['timestamp']).total_seconds()
-                    if age < ASTEROID_DF_CACHE_TTL_SECONDS:
-                        print(f"Using cached asteroid DataFrame (age: {age/3600:.1f}h)")
-                        df = payload['data']
-                        _asteroid_df_cache = df
-                        _asteroid_df_timestamp = payload['timestamp']
-                    else:
-                        print(f"Disk cache expired (age: {age/3600:.1f}h)")
-                        df = None
-                elif isinstance(payload, pd.DataFrame):
-                    # Old format - use it but mark for refresh
-                    print("Found old-format cache (no timestamp), will refresh")
-                    df = None
-                else:
-                    df = None
-            except Exception as e:
-                print(f"Error reading asteroid DataFrame cache: {e}")
-                df = None
-        
-        if _asteroid_df_cache is None:
-            # Überprüfe ob tägliches Update nötig ist
-            if should_update_mpcorb_file():
-                print("MPCORB file needs daily update, downloading...")
-                if not download_mpcorb_file():
-                    # Falls Download fehlschlägt, verwende alte Datei falls vorhanden
-                    if not MPCORB_FILE.exists():
-                        return []
-            try:
-                print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
-                with gzip.open(MPCORB_FILE, 'rb') as f:
-                    df = mpc.load_mpcorb_dataframe(f)
-                
-                df = df.iloc[:MAX_ASTEROIDS]
-            
-                # Convert types
-                numeric_cols = [
-                    'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
-                    'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
-                    'mean_daily_motion_degrees', 'semimajor_axis_au'
-                ]
-                for col in numeric_cols:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-                df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-
-                # Save with timestamp (new format like comets)
-                _asteroid_df_cache = df
-                _asteroid_df_timestamp = datetime.now()
-                with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
-                    pickle.dump({'timestamp': _asteroid_df_timestamp, 'data': df}, f)
-                print(f"Saved {len(df)} asteroids to DataFrame cache with timestamp.")
-                
-                # Also store in SQLite database for future use
-                if ASTEROID_USE_SQLITE:
-                    try:
-                        count = store_asteroid_dataframe(df)
-                        print(f"Stored {count} asteroids in SQLite database")
-                    except Exception as e:
-                        print(f"Error storing in SQLite: {e}")
-                        
-            except Exception as e:
-                print(f"Error processing MPCORB data: {e}")
-                return []
 
     # Process asteroids based on backend type
-    if ASTEROID_USE_SQLITE and 'asteroid_rows' in locals() and asteroid_rows:
+    if ASTEROID_USE_SQLITE and asteroid_rows:
         # SQLite backend: process database rows
         asteroid_list = process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz)
         

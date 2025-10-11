@@ -375,15 +375,35 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
                 # Check which hours in this batch need processing
                 hours_to_process = []
                 for dt in hour_batch:
+                    checked += 1
+                    needs_processing = False
+                    
                     if kind == "asteroids":
-                        path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                        # Check SQLite first, then pickle
+                        if bright_asteroids.ASTEROID_USE_SQLITE:
+                            from cache_utils import time_bucket_utc
+                            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                            time_bucket = time_bucket_utc(dt, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                            needs_processing = not has_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
+                        else:
+                            path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+                            needs_processing = not os.path.exists(path)
                     elif kind == "comets":
-                        path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                        # Check SQLite first, then pickle
+                        if comets.COMET_USE_SQLITE:
+                            from cache_utils import time_bucket_utc
+                            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                            time_bucket = time_bucket_utc(dt, comets.COMET_CACHE_BUCKET_HOURS)
+                            needs_processing = not has_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
+                        else:
+                            path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
+                            needs_processing = not os.path.exists(path)
                     else:
                         continue
-                        
-                    checked += 1
-                    if not os.path.exists(path):
+                    
+                    if needs_processing:
                         hours_to_process.append(dt)
                 
                 # Process all missing hours for this kind in batch

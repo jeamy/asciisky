@@ -266,7 +266,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
 
     # In-memory cache
     if use_cache and _comet_df_cache is not None and _comet_df_timestamp is not None:
-        if (_now() - _comet_df_timestamp).total_seconds() < CACHE_VALIDITY_SECONDS:
+        if (_now() - _comet_df_timestamp).total_seconds() < COMET_DF_CACHE_TTL_SECONDS:
             logger.debug("Using cached comet dataframe (memory)")
             try:
                 cols = list(_comet_df_cache.columns)

@@ -11,8 +11,7 @@ from skyfield.positionlib import Apparent
 import numpy as np
 from datetime import datetime, timezone
 
-from api.helpers import get_location_params, get_cache_data, store_cache_data
-from cache_utils import build_cache_path, time_bucket_utc
+from api.helpers import get_location_params
 from data_paths import DATA_DIR, CONSTELLATIONSHIP_PATH
 from api.computation import LOADER, ts as GLOBAL_TS, eph as GLOBAL_EPH
 
@@ -134,12 +133,8 @@ async def get_zodiac_constellations(
         else:
             dt_utc = datetime.now(timezone.utc)
         
-        # Check cache first (unless bypassed)
-        cache_path = build_cache_path(str(lat), str(lon), str(elevation), time_bucket_utc(dt_utc))
-        if not nocache:
-            cached_result = get_cache_data(cache_path, 'zodiac')
-            if cached_result:
-                return cached_result
+        # Zodiac calculations are fast, no caching needed
+        # (Previously used pickle cache which created unnecessary directories)
             
         # Calculate constellation data using Skyfield
         skyfield_time = GLOBAL_TS.from_datetime(dt_utc)
@@ -197,8 +192,7 @@ async def get_zodiac_constellations(
             'count': len(constellations)
         }
         
-        # Store in cache
-        store_cache_data(result, cache_path)
+        # No caching needed for zodiac (fast calculation)
         return result
         
     except Exception as e:
