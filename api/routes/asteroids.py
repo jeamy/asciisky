@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
 from api.computation import LOADER, ts, eph
 from api.background import trigger_background_precompute_window
+from api.cache_interpolation import load_asteroids_with_interpolation
 import bright_asteroids
 import settings
 import asyncio
@@ -25,34 +26,25 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         dt_utc = parse_time_param(time)
 
         if time is not None:
-            # SQL-first: try SQLite positions for this location/time bucket
+            # Try loading with interpolation between cached buckets
             try:
-                if getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False):
-                    lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                    time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-                    sqlite_positions = get_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
-                    if isinstance(sqlite_positions, list) and sqlite_positions:
-                        result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                        for i, asteroid in enumerate(sqlite_positions):
-                            if isinstance(asteroid, dict) and "name" in asteroid:
-                                result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
-                        return result
-            except Exception:
-                pass
-
-            # Fallback: Pickle cache (respect TTL only) unless disabled
-            asteroid_list = None
-            if not getattr(bright_asteroids, 'DISABLE_PICKLE', False):
-                cache_file = build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-                asteroid_list = read_pickle_if_fresh(cache_file, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
-
-            if isinstance(asteroid_list, list):
-                result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                for i, asteroid in enumerate(asteroid_list):
-                    if isinstance(asteroid, dict) and "name" in asteroid:
-                        result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
-                return result
+                asteroid_list = load_asteroids_with_interpolation(
+                    lat, lon, elevation, dt_utc,
+                    bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
+                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
+                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False),
+                    disable_pickle=getattr(bright_asteroids, 'DISABLE_PICKLE', False)
+                )
+                
+                if isinstance(asteroid_list, list) and asteroid_list:
+                    result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
+                    for i, asteroid in enumerate(asteroid_list):
+                        if isinstance(asteroid, dict) and "name" in asteroid:
+                            result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
+                    return result
+            except Exception as e:
+                # Log error but continue to fallback
+                print(f"Interpolation failed: {e}")
 
             # No cache available - trigger background computation and return empty result
             # Don't wait for computation (max 3 seconds would still be too long)

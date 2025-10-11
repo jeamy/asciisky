@@ -65,6 +65,11 @@ DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
 # Ensure cache directory exists
 os.makedirs("cache", exist_ok=True)
 
+# In-memory cache for asteroid DataFrame
+_asteroid_df_cache = None
+_asteroid_df_timestamp = None
+ASTEROID_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches positions cache TTL)
+
 def format_time(dt, tz=None):
     """
     Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM'.
@@ -232,12 +237,47 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     
     if not ASTEROID_USE_SQLITE or not asteroid_rows:
         # Legacy pickle backend: load DataFrame
-        force_reload = False 
-        if not force_reload and os.path.exists(ASTEROID_DF_CACHE_FILE):
-            print(f"Loading asteroid DataFrame from cache: {ASTEROID_DF_CACHE_FILE}")
-            with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
-                df = pickle.load(f)
-        else:
+        # Check in-memory cache first
+        global _asteroid_df_cache, _asteroid_df_timestamp
+        if _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
+            age = (datetime.now() - _asteroid_df_timestamp).total_seconds()
+            if age < ASTEROID_DF_CACHE_TTL_SECONDS:
+                print(f"Using in-memory asteroid DataFrame cache (age: {age/3600:.1f}h)")
+                df = _asteroid_df_cache
+            else:
+                print(f"In-memory cache expired (age: {age/3600:.1f}h)")
+                _asteroid_df_cache = None
+                _asteroid_df_timestamp = None
+        
+        # Check disk cache if no valid in-memory cache
+        if _asteroid_df_cache is None and os.path.exists(ASTEROID_DF_CACHE_FILE):
+            print(f"Loading asteroid DataFrame from disk cache: {ASTEROID_DF_CACHE_FILE}")
+            try:
+                with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
+                    payload = pickle.load(f)
+                
+                # Handle both old format (direct DataFrame) and new format (dict with timestamp)
+                if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
+                    age = (datetime.now() - payload['timestamp']).total_seconds()
+                    if age < ASTEROID_DF_CACHE_TTL_SECONDS:
+                        print(f"Using cached asteroid DataFrame (age: {age/3600:.1f}h)")
+                        df = payload['data']
+                        _asteroid_df_cache = df
+                        _asteroid_df_timestamp = payload['timestamp']
+                    else:
+                        print(f"Disk cache expired (age: {age/3600:.1f}h)")
+                        df = None
+                elif isinstance(payload, pd.DataFrame):
+                    # Old format - use it but mark for refresh
+                    print("Found old-format cache (no timestamp), will refresh")
+                    df = None
+                else:
+                    df = None
+            except Exception as e:
+                print(f"Error reading asteroid DataFrame cache: {e}")
+                df = None
+        
+        if _asteroid_df_cache is None:
             # Überprüfe ob tägliches Update nötig ist
             if should_update_mpcorb_file():
                 print("MPCORB file needs daily update, downloading...")
@@ -264,9 +304,12 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 
                 df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
 
+                # Save with timestamp (new format like comets)
+                _asteroid_df_cache = df
+                _asteroid_df_timestamp = datetime.now()
                 with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
-                    pickle.dump(df, f)
-                print(f"Saved {len(df)} asteroids to DataFrame cache.")
+                    pickle.dump({'timestamp': _asteroid_df_timestamp, 'data': df}, f)
+                print(f"Saved {len(df)} asteroids to DataFrame cache with timestamp.")
                 
                 # Also store in SQLite database for future use
                 if ASTEROID_USE_SQLITE:

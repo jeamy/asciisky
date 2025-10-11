@@ -34,18 +34,18 @@ from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
 
 def should_update_comet_file() -> bool:
-    """Prueft, ob die Kometen-Elemente-Datei woechentlich aktualisiert werden sollte."""
+    """Prueft, ob die Kometen-Elemente-Datei taeglich aktualisiert werden sollte."""
     if not COMETS_FILE.exists():
         return True
 
     # Prüfe Alter der Datei
     file_age = time.time() - COMETS_FILE.stat().st_mtime
-    # Aktualisiere wöchentlich (7 Tage = 604800 Sekunden)
-    return file_age > 604800
+    # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
+    return file_age > 86400
 
 # Configuration
 COMETS_FILE = Path(COMET_ELEMENTS_PATH)
-COMET_CACHE_TTL_SECONDS = 1 * 3600  # 1 hour
+COMET_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches asteroid TTL for 48h precompute window)
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
 MAX_COMETS_DEFAULT = 1000
@@ -58,7 +58,6 @@ DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
 
 
 COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
-CACHE_VALIDITY_SECONDS = 12 * 3600  # 12h
 # Final comet list cache (mirror bright_asteroids behavior)
 BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'
 # Photometric filters (align with bright_asteroids thresholds)
@@ -301,7 +300,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
             with open(COMET_DF_CACHE_FILE, 'rb') as f:
                 payload = pickle.load(f)
             if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
-                if (_now() - payload['timestamp']).total_seconds() < CACHE_VALIDITY_SECONDS:
+                if (_now() - payload['timestamp']).total_seconds() < COMET_DF_CACHE_TTL_SECONDS:
                     logger.debug("Using cached comet dataframe (pickle)")
                     # Sanitize cached dataframe as formats can change upstream
                     cached = payload['data']

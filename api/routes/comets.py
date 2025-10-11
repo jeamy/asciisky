@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param
 from api.computation import LOADER, ts, eph
 from api.background import trigger_background_precompute_window
+from api.cache_interpolation import load_comets_with_interpolation
 import comets
 import settings
 import os
@@ -29,34 +30,25 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         dt_utc = parse_time_param(time)
 
         if time is not None:
-            # SQL-first: try SQLite cached positions for this location/time
+            # Try loading with interpolation between cached buckets
             try:
-                if getattr(comets, 'COMET_USE_SQLITE', False):
-                    lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                    time_bucket = time_bucket_utc(dt_utc, comets.COMET_CACHE_BUCKET_HOURS)
-                    sqlite_positions = get_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
-                    if isinstance(sqlite_positions, list) and sqlite_positions:
-                        result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                        for i, comet in enumerate(sqlite_positions[:max_comets]):
-                            if isinstance(comet, dict) and "name" in comet:
-                                result["bodies"][f"comet_{i}_{comet['name']}"] = comet
-                        return result
-            except Exception:
-                pass
-
-            # Fallback: Pickle cache (respect DISABLE_PICKLE and TTL)
-            comet_list = None
-            if not getattr(comets, 'DISABLE_PICKLE', False):
-                cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-                comet_list = read_pickle_if_fresh(cache_file, comets.COMET_CACHE_TTL_SECONDS)
-
-            if isinstance(comet_list, list):
-                result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                for i, comet in enumerate(comet_list[:max_comets]):
-                    if isinstance(comet, dict) and "name" in comet:
-                        result["bodies"][f"comet_{i}_{comet['name']}"] = comet
-                return result
+                comet_list = load_comets_with_interpolation(
+                    lat, lon, elevation, dt_utc,
+                    bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
+                    ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
+                    use_sqlite=getattr(comets, 'COMET_USE_SQLITE', False),
+                    disable_pickle=getattr(comets, 'DISABLE_PICKLE', False)
+                )
+                
+                if isinstance(comet_list, list) and comet_list:
+                    result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
+                    for i, comet in enumerate(comet_list[:max_comets]):
+                        if isinstance(comet, dict) and "name" in comet:
+                            result["bodies"][f"comet_{i}_{comet['name']}"] = comet
+                    return result
+            except Exception as e:
+                # Log error but continue to fallback
+                print(f"Comet interpolation failed: {e}")
 
             # No cache available - trigger background computation and return empty result
             # Don't wait for computation (max 3 seconds would still be too long)
