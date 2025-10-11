@@ -10,9 +10,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      # Horizon für vom Webprozess getriggerte Fenster-Tasks (kürzer halten)
-      - ASCII_SKY_PRECOMPUTE_HOURS=144
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
+      # Horizon für vom Webprozess getriggerte Fenster-Tasks (30 Tage)
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
       - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
       # Duplikate und Last begrenzen (siehe api/background.py)
       - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=1
@@ -38,8 +38,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - ASCII_SKY_PRECOMPUTE_HOURS=144
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
       - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
       - ASCII_SKY_PRECOMPUTE_WORKERS=4
       - ASCII_SKY_ADAPTIVE_WORKERS=0
@@ -63,8 +63,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - ASCII_SKY_PRECOMPUTE_HOURS=144
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
       - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
       - ASCII_SKY_PRECOMPUTE_WORKERS=4
       - ASCII_SKY_ADAPTIVE_WORKERS=0
