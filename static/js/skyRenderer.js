@@ -1581,11 +1581,44 @@ export class SkyRenderer {
     startAutoUpdate() {
         this.update();
         this.updateInterval = setInterval(() => this.update(), CONFIG.UPDATE_INTERVAL_MS);
+        this._fastPollCount = 0; // Track fast polling attempts
     }
 
     stopAutoUpdate() {
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
+        }
+        if (this._fastPollInterval) {
+            clearInterval(this._fastPollInterval);
+            this._fastPollInterval = null;
+        }
+    }
+    
+    // Start fast polling when data is missing (e.g., no cache)
+    startFastPolling() {
+        if (this._fastPollInterval) return; // Already polling
+        
+        this._fastPollCount = 0;
+        console.log('Starting fast polling (data missing, waiting for background computation)...');
+        
+        this._fastPollInterval = setInterval(() => {
+            this._fastPollCount++;
+            console.log(`Fast poll attempt ${this._fastPollCount}/10...`);
+            this.update();
+            
+            // Stop after 10 attempts (30 seconds) or when data arrives
+            if (this._fastPollCount >= 10) {
+                console.log('Fast polling timeout, switching to normal interval');
+                this.stopFastPolling();
+            }
+        }, 3000); // Poll every 3 seconds
+    }
+    
+    stopFastPolling() {
+        if (this._fastPollInterval) {
+            clearInterval(this._fastPollInterval);
+            this._fastPollInterval = null;
+            this._fastPollCount = 0;
         }
     }
     
@@ -1663,7 +1696,13 @@ export class SkyRenderer {
             if (!availableAsteroids) missing.push('asteroids');
             if (!availableComets) missing.push('comets');
             if (missing.length > 0) {
+                console.log(`Cache missing for: ${missing.join(', ')} - triggering background computation`);
                 this.triggerPrecomputeWindowIfNeeded(this.location, timeISO, missing, locKey);
+                // Start fast polling to check for data every 3 seconds
+                this.startFastPolling();
+            } else {
+                // Data is available, stop fast polling if active
+                this.stopFastPolling();
             }
 
             // Warte optional auf geladene Zusatzdaten und rendere erneut

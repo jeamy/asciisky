@@ -736,25 +736,24 @@ def main() -> None:
     # Then loop hourly
     while True:
         try:
-            # Close all database connections before sleeping
-            from db_utils import close_all_connections
-            try:
-                close_all_connections()
-            except Exception as e:
-                print(f"Warning: Could not close connections before sleep: {e}")
-            
             sleep_s = seconds_until_next_hour()
             print(f"Sleeping {sleep_s}s until next hour...")
             time.sleep(sleep_s)
             
-            # Run sweep
             precompute_sweep_prioritized(kinds, horizon_hours, max_workers, adaptive_workers)
             gc.collect()
             
-            # Run prune if enabled
+            # Run prune if enabled (before closing connections!)
             if retention_days and retention_days > 0:
                 prune_old_snapshots(retention_days)
                 gc.collect()
+            
+            # Close all database connections after work is done
+            from db_utils import close_all_connections
+            try:
+                close_all_connections()
+            except Exception as e:
+                print(f"Warning: Could not close connections: {e}")
                 
         except KeyboardInterrupt:
             print("Worker interrupted; exiting.")

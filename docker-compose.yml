@@ -15,7 +15,7 @@ services:
       - ASCII_SKY_MAX_PRECOMPUTE_HOURS=336
       - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
       # Duplikate und Last begrenzen (siehe api/background.py)
-      - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=15
+      - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=1
       - ASCII_SKY_MAX_WINDOW_WORKERS=4
       # Session Secret (für Prod sinnvoll ändern)
       - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757

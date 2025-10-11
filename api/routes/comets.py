@@ -50,11 +50,14 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 # Log error but continue to fallback
                 print(f"Comet interpolation failed: {e}")
 
-            # No cache available - trigger background computation and return empty result
-            # Don't wait for computation (max 3 seconds would still be too long)
+            # No cache available - trigger background computation immediately
+            # Return empty result to avoid blocking (data will appear within seconds via fast polling)
+            print(f"No cache for comets at {dt_utc.isoformat()}, triggering background computation...")
+            
+            # Trigger immediate background computation for this specific time
             asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
             
-            # Return empty result immediately - data will be available on next update
+            # Return empty result immediately - frontend will poll every 3 seconds
             result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             return result
 
