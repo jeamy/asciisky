@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
 from api.computation import LOADER, ts, eph
-from api.background import trigger_background_precompute_window
+from api.background import trigger_background_precompute_spot
 from api.cache_interpolation import load_asteroids_with_interpolation
 import bright_asteroids
 import settings
@@ -46,14 +46,14 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 # Log error but continue to fallback
                 print(f"Interpolation failed: {e}")
 
-            # No cache available - trigger background computation immediately
-            # Return empty result to avoid blocking (data will appear within seconds via fast polling)
-            print(f"No cache for asteroids at {dt_utc.isoformat()}, triggering background computation...")
+            # No cache available - trigger spot computation (±12h around requested time)
+            # This is much faster than full 30-day window
+            print(f"No cache for asteroids at {dt_utc.isoformat()}, triggering spot computation (±12h)...")
             
-            # Trigger immediate background computation for this specific time
-            asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets']))
+            # Trigger spot precompute for ±12 hours around requested time
+            asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
             
-            # Return empty result immediately - frontend will poll every 3 seconds
+            # Return empty result immediately - data will appear on next poll (60s)
             result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             return result
 
@@ -65,7 +65,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
         
         # Trigger background precompute for future hours even without time parameter
-        asyncio.create_task(trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['celestial','asteroids','comets']))
+        asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
         
         return result
     except Exception as e:

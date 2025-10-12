@@ -257,8 +257,95 @@ def _cleanup_old_task_entries(app: FastAPI) -> None:
     except Exception as e:
         print(f"[bg] Error during task cleanup: {e}")
 
+async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str], hours_radius: int = 12) -> None:
+    """Kick off background precompute for a small window around dt_utc (±hours_radius).
+    This is for on-demand user requests and is much faster than full window precompute."""
+    try:
+        # Init shared attributes
+        if not hasattr(app, 'precompute_tasks'):
+            app.precompute_tasks = {}
+        if not hasattr(app, 'last_precompute_check'):
+            app.last_precompute_check = {}
+        if not hasattr(app, 'bg_task_lock'):
+            import asyncio as _asyncio
+            app.bg_task_lock = _asyncio.Lock()
+        if not hasattr(app, 'window_worker_reservations'):
+            app.window_worker_reservations = 0
+        if not hasattr(app, 'active_window_tasks_by_loc'):
+            app.active_window_tasks_by_loc = {}
+
+        # Koordinaten normalisieren und Schlüssel bilden
+        from cache_utils import normalize_location
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
+
+        # For spot requests: shorter cooldown (30 seconds) to allow quick retries
+        async with app.bg_task_lock:
+            now = datetime.now(timezone.utc)
+            last_check_time = app.last_precompute_check.get(f"spot_{loc_key}")
+            if last_check_time and (now - last_check_time).total_seconds() < 30:
+                print(f"[bg] Skipping duplicate spot task for {loc_key}, last started {(now - last_check_time).total_seconds():.1f}s ago")
+                return
+            
+            # Check capacity
+            running = _count_running_window_workers()
+            reserved = int(app.window_worker_reservations or 0)
+            if (running + reserved) >= MAX_WINDOW_WORKERS:
+                print(f"[bg] At capacity: {running + reserved}/{MAX_WINDOW_WORKERS}; skipping spot task for {loc_key}")
+                return
+            
+            app.window_worker_reservations += 1
+            app.last_precompute_check[f"spot_{loc_key}"] = now
+
+        # Compute small window around requested time
+        base = _hour_floor(dt_utc)
+        
+        task_id = f"spot_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        task_data = {
+            'task_id': task_id, 'lat': lat, 'lon': lon, 'elevation': elevation,
+            'start_dt_utc': (base - timedelta(hours=hours_radius)).isoformat(),
+            'end_dt_utc': (base + timedelta(hours=hours_radius)).isoformat(),
+            'kinds': kinds
+        }
+
+        task_file = f"cache/task_{task_id}.json"
+        os.makedirs(os.path.dirname(task_file), exist_ok=True)
+        with open(task_file, 'w') as f:
+            json.dump(task_data, f)
+
+        try:
+            # Run task worker in the worker container
+            docker_cmd = [
+                'docker', 'exec', '-d', 'asciisky-worker-1',
+                'python', 'precompute_task_worker.py', task_file
+            ]
+            process = subprocess.Popen(docker_cmd, cwd=os.getcwd())
+            print(f"Started spot precompute worker for {loc_key} at {dt_utc.isoformat()} (±{hours_radius}h, PID: {process.pid})")
+
+            if not hasattr(app, 'precompute_tasks'):
+                app.precompute_tasks = {}
+            app.precompute_tasks[task_id] = {
+                'id': task_id,
+                'status': 'starting',
+                'start_time': datetime.now(timezone.utc).isoformat(),
+                'worker_process': True,
+                'worker_pid': process.pid
+            }
+            
+            async with app.bg_task_lock:
+                app.window_worker_reservations = max(0, app.window_worker_reservations - 1)
+        except Exception as e:
+            print(f"[bg] Failed to start spot precompute worker: {e}")
+            async with app.bg_task_lock:
+                app.window_worker_reservations = max(0, app.window_worker_reservations - 1)
+    except Exception as e:
+        print(f"[bg] Error in trigger_background_precompute_spot: {e}")
+        traceback.print_exc()
+
+
 async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
-    """Kick off background precompute for a 48h window relative to dt_utc."""
+    """Kick off background precompute for a large window (30 days) relative to dt_utc.
+    This is for the hourly worker and provides long-term cache coverage."""
     try:
         # Init shared attributes
         if not hasattr(app, 'precompute_tasks'):
@@ -313,11 +400,12 @@ async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: fl
             app.active_window_tasks_by_loc[loc_key] = {"status": "reserved", "reserved_at": now.isoformat()}
             app.last_precompute_check[loc_key] = now
 
-        horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "48"))
+        # For full window precompute: use configured horizon (30 days)
+        horizon_hours = int(os.environ.get("ASCII_SKY_PRECOMPUTE_HOURS", "720"))
         now_utc = datetime.now(timezone.utc)
         base = _hour_floor(dt_utc)
         forward = base >= _hour_floor(now_utc)
-
+        
         task_id = f"window_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         task_data = {
             'task_id': task_id, 'lat': lat, 'lon': lon, 'elevation': elevation,
