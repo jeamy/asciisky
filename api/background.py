@@ -279,12 +279,16 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
 
-        # For spot requests: shorter cooldown (30 seconds) to allow quick retries
+        # For spot requests: use time-specific key to avoid blocking different time requests
+        # Also use shorter cooldown (30 seconds) to allow quick retries
+        time_hour = _hour_floor(dt_utc).isoformat()
+        spot_key = f"spot_{loc_key}_{time_hour}"
+        
         async with app.bg_task_lock:
             now = datetime.now(timezone.utc)
-            last_check_time = app.last_precompute_check.get(f"spot_{loc_key}")
+            last_check_time = app.last_precompute_check.get(spot_key)
             if last_check_time and (now - last_check_time).total_seconds() < 30:
-                print(f"[bg] Skipping duplicate spot task for {loc_key}, last started {(now - last_check_time).total_seconds():.1f}s ago")
+                print(f"[bg] Skipping duplicate spot task for {loc_key} at {time_hour}, last started {(now - last_check_time).total_seconds():.1f}s ago")
                 return
             
             # Check capacity
@@ -295,7 +299,7 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
                 return
             
             app.window_worker_reservations += 1
-            app.last_precompute_check[f"spot_{loc_key}"] = now
+            app.last_precompute_check[spot_key] = now
 
         # Compute small window around requested time
         base = _hour_floor(dt_utc)
