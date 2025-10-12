@@ -700,14 +700,24 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             except Exception:
                 center_code = 10
             target = (sun + orbit) if center_code != 0 else orbit
+            
+            # OPTIMIZATION: Add quick pre-filter using M1 (absolute magnitude)
+            # Skip comets that are clearly too faint
+            M1 = float(row2.get('M1', 99))
+            rough_apparent_mag = M1 + 10.0  # Rough estimate (typical at ~2 AU)
+            if rough_apparent_mag > MAX_APPARENT_MAGNITUDE + 3.0:  # +3 mag safety margin
+                continue
 
             # Compute geometry and estimate magnitude BEFORE heavy rise/set/transit
             astrometric = observer.at(t).observe(target)
             apparent_magnitude = None
             try:
-                r = sun.at(t).observe(target).distance().au
-                delta = astrometric.distance().au
-                M1 = float(row2.get('M1'))
+                # Calculate heliocentric distance efficiently
+                # For heliocentric orbits: target = sun + orbit
+                comet_helio = target.at(t)
+                r = comet_helio.distance().au  # Distance from Sun
+                
+                delta = astrometric.distance().au  # Distance from Earth (already computed)
                 n_raw = row2.get('k1')
                 n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
                 apparent_magnitude = (
@@ -725,7 +735,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             if apparent_magnitude is not None and apparent_magnitude > MAX_APPARENT_MAGNITUDE:
                 continue
 
-            # Apparent position only for passing comets
+            # Apparent position only for passing comets (reuse astrometric!)
             apparent = astrometric.apparent()
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()

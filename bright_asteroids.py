@@ -519,27 +519,38 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             # Create Skyfield orbit object
             orbit = mpc.mpcorb_orbit(orbit_row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
             
-            # Calculate apparent magnitude
-            astrometric = observer.at(t).observe(sun + orbit)
+            # QUICK PRE-FILTER: Rough magnitude estimate to skip obviously faint objects
+            # Use H + 5 as rough estimate (typical V for asteroids at ~2 AU)
+            # This avoids expensive .observe() for objects that are clearly too faint
+            rough_apparent_mag = row['magnitude_h'] + 5.0
+            if rough_apparent_mag > max_magnitude + 2.0:  # +2 mag safety margin
+                continue
+            
+            # Determine target (heliocentric or barycentric)
+            center_code = int(getattr(orbit, 'center', 10))
+            target = (sun + orbit) if center_code != 0 else orbit
+            
+            # Calculate position ONCE (not twice!)
+            astrometric = observer.at(t).observe(target)
+            
+            # Extract distances for magnitude calculation
             r = astrometric.distance().au  # Distance from Sun
             delta = astrometric.radec()[2].au  # Distance from Earth
             phase_angle = math.degrees(math.acos(
                 max(-1, min(1, (r**2 + delta**2 - 1) / (2 * r * delta)))
             ))
             
+            # Calculate apparent magnitude
             apparent_mag = asteroid_apparent_magnitude(
                 H=row['magnitude_h'], G=row['magnitude_g'] or 0.15, 
                 r=r, delta=delta, phase_angle_deg=phase_angle
             )
             
-            # Skip if too faint
+            # Skip if too faint (filter AFTER position but saves rise/set calc)
             if apparent_mag > max_magnitude:
                 continue
                 
-            # Calculate position
-            center_code = int(getattr(orbit, 'center', 10))
-            target = (sun + orbit) if center_code != 0 else orbit
-            astrometric = observer.at(t).observe(target)
+            # Reuse astrometric for position (already computed above!)
             apparent = astrometric.apparent()
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()
