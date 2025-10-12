@@ -301,14 +301,15 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
             app.window_worker_reservations += 1
             app.last_precompute_check[spot_key] = now
 
-        # Compute small window around requested time
+        # Compute ONLY the requested hour (not ±12h) to get data fast
+        # This takes ~3 minutes instead of 66 minutes
         base = _hour_floor(dt_utc)
         
         task_id = f"spot_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         task_data = {
             'task_id': task_id, 'lat': lat, 'lon': lon, 'elevation': elevation,
-            'start_dt_utc': (base - timedelta(hours=hours_radius)).isoformat(),
-            'end_dt_utc': (base + timedelta(hours=hours_radius)).isoformat(),
+            'start_dt_utc': base.isoformat(),
+            'end_dt_utc': base.isoformat(),  # Only single hour
             'kinds': kinds
         }
 
@@ -324,7 +325,7 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
                 'python', 'precompute_task_worker.py', task_file
             ]
             process = subprocess.Popen(docker_cmd, cwd=os.getcwd())
-            print(f"Started spot precompute worker for {loc_key} at {dt_utc.isoformat()} (±{hours_radius}h, PID: {process.pid})")
+            print(f"Started spot precompute worker for {loc_key} at {dt_utc.isoformat()} (single hour, PID: {process.pid})")
 
             if not hasattr(app, 'precompute_tasks'):
                 app.precompute_tasks = {}
@@ -338,6 +339,14 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
             
             async with app.bg_task_lock:
                 app.window_worker_reservations = max(0, app.window_worker_reservations - 1)
+            
+            # Also trigger expansion task for ±hours_radius (if capacity allows)
+            # This will fill in the surrounding hours after the center hour is done
+            if hours_radius > 0:
+                asyncio.create_task(
+                    _trigger_expansion_task(app, lat, lon, elevation, dt_utc, kinds, hours_radius)
+                )
+                
         except Exception as e:
             print(f"[bg] Failed to start spot precompute worker: {e}")
             async with app.bg_task_lock:
@@ -345,6 +354,49 @@ async def trigger_background_precompute_spot(app: FastAPI, lat: float, lon: floa
     except Exception as e:
         print(f"[bg] Error in trigger_background_precompute_spot: {e}")
         traceback.print_exc()
+
+
+async def _trigger_expansion_task(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str], hours_radius: int) -> None:
+    """Trigger expansion task to fill ±hours_radius around the already-computed center hour.
+    This runs with lower priority and respects MAX_WINDOW_WORKERS limit."""
+    try:
+        # Wait a bit to let the spot task start
+        await asyncio.sleep(5)
+        
+        # Check if we have capacity
+        running = _count_running_window_workers()
+        if running >= MAX_WINDOW_WORKERS:
+            print(f"[bg] Skipping expansion task - at capacity ({running}/{MAX_WINDOW_WORKERS})")
+            return
+        
+        from cache_utils import normalize_location
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = f"{lat_norm:.4f},{lon_norm:.4f},{elev_norm:.1f}"
+        base = _hour_floor(dt_utc)
+        
+        task_id = f"expand_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        task_data = {
+            'task_id': task_id, 'lat': lat, 'lon': lon, 'elevation': elevation,
+            'start_dt_utc': (base - timedelta(hours=hours_radius)).isoformat(),
+            'end_dt_utc': (base + timedelta(hours=hours_radius)).isoformat(),
+            'kinds': kinds
+        }
+        
+        task_file = f"cache/task_{task_id}.json"
+        os.makedirs(os.path.dirname(task_file), exist_ok=True)
+        with open(task_file, 'w') as f:
+            json.dump(task_data, f)
+        
+        # Run expansion task in worker container
+        docker_cmd = [
+            'docker', 'exec', '-d', 'asciisky-worker-1',
+            'python', 'precompute_task_worker.py', task_file
+        ]
+        process = subprocess.Popen(docker_cmd, cwd=os.getcwd())
+        print(f"Started expansion task for {loc_key} (±{hours_radius}h around {dt_utc.isoformat()}, PID: {process.pid})")
+        
+    except Exception as e:
+        print(f"[bg] Error in expansion task: {e}")
 
 
 async def trigger_background_precompute_window(app: FastAPI, lat: float, lon: float, elevation: float, dt_utc: datetime, kinds: list[str]) -> None:
