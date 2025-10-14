@@ -155,6 +155,9 @@ def download_mpcorb_file():
 def should_update_mpcorb_file():
     """
     Überprüft ob MPCORB-Datei aktualisiert werden sollte (täglich)
+    
+    NOTE: Daily updates are now handled by nightly_data_updater.py at 2:00 AM.
+    This function is kept for manual/utility purposes only.
     """
     if not MPCORB_FILE.exists():
         return True
@@ -209,60 +212,34 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
                     return legacy
 
-    # --- DataFrame Loading --- 
-    # Initialize variables
+    # --- SQLite Loading (DB-first approach like comets) ---
     asteroid_rows = []
-    df = None
     
-    # Always load and cache the DataFrame (needed for new computations)
-    # Check in-memory cache first
-    global _asteroid_df_cache, _asteroid_df_timestamp
-    if _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
-        age = (datetime.now() - _asteroid_df_timestamp).total_seconds()
-        if age < ASTEROID_DF_CACHE_TTL_SECONDS:
-            print(f"Using in-memory asteroid DataFrame cache (age: {age/3600:.1f}h)")
-            df = _asteroid_df_cache
-        else:
-            print(f"In-memory cache expired (age: {age/3600:.1f}h)")
-            _asteroid_df_cache = None
-            _asteroid_df_timestamp = None
-    
-    # Check disk cache if no valid in-memory cache
-    if _asteroid_df_cache is None and os.path.exists(ASTEROID_DF_CACHE_FILE):
-        print(f"Loading asteroid DataFrame from disk cache: {ASTEROID_DF_CACHE_FILE}")
+    if ASTEROID_USE_SQLITE:
         try:
-            with open(ASTEROID_DF_CACHE_FILE, 'rb') as f:
-                payload = pickle.load(f)
-            
-            # Handle both old format (direct DataFrame) and new format (dict with timestamp)
-            if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
-                age = (datetime.now() - payload['timestamp']).total_seconds()
-                if age < ASTEROID_DF_CACHE_TTL_SECONDS:
-                    print(f"Using cached asteroid DataFrame (age: {age/3600:.1f}h)")
-                    df = payload['data']
-                    _asteroid_df_cache = df
-                    _asteroid_df_timestamp = payload['timestamp']
-                else:
-                    print(f"Disk cache expired (age: {age/3600:.1f}h)")
-                    df = None
-            elif isinstance(payload, pd.DataFrame):
-                # Old format - use it but mark for refresh
-                print("Found old-format cache (no timestamp), will refresh")
-                df = None
+            # Try loading from database FIRST
+            asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+            if asteroid_rows and len(asteroid_rows) > 0:
+                print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
             else:
-                df = None
+                print("No asteroids in database, will load from file")
+                asteroid_rows = []
         except Exception as e:
-            print(f"Error reading asteroid DataFrame cache: {e}")
-            df = None
+            print(f"Error loading from SQLite database: {e}, falling back to file")
+            asteroid_rows = []
     
-    if _asteroid_df_cache is None:
-        # Überprüfe ob tägliches Update nötig ist
-        if should_update_mpcorb_file():
-            print("MPCORB file needs daily update, downloading...")
+    # --- Fallback to File Loading (only if DB is empty or disabled) ---
+    if not asteroid_rows:
+        print("Loading asteroids from file (DB empty or disabled)")
+        df = None
+        
+        # Check if file exists, download if missing (e.g., first start)
+        if not MPCORB_FILE.exists():
+            print("MPCORB file not found, downloading for initial setup...")
             if not download_mpcorb_file():
-                # Falls Download fehlschlägt, verwende alte Datei falls vorhanden
-                if not MPCORB_FILE.exists():
-                    return []
+                print("ERROR: Could not download MPCORB file. Cannot proceed without data.")
+                return []
+        
         try:
             print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
             with gzip.open(MPCORB_FILE, 'rb') as f:
@@ -282,33 +259,23 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             
             df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
 
-            # Save with timestamp (new format like comets)
-            _asteroid_df_cache = df
-            _asteroid_df_timestamp = datetime.now()
-            with open(ASTEROID_DF_CACHE_FILE, 'wb') as f:
-                pickle.dump({'timestamp': _asteroid_df_timestamp, 'data': df}, f)
-            print(f"Saved {len(df)} asteroids to DataFrame cache with timestamp.")
-            
-            # Also store in SQLite database for future use
+            # Store in SQLite database for next time
             if ASTEROID_USE_SQLITE:
                 try:
                     count = store_asteroid_dataframe(df)
                     print(f"Stored {count} asteroids in SQLite database")
+                    
+                    # Now load from DB for processing
+                    asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+                    print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
                 except Exception as e:
-                    print(f"Error storing in SQLite: {e}")
+                    print(f"Error storing/loading in SQLite: {e}")
+                    # Fallback: process from DataFrame directly (legacy mode)
+                    asteroid_rows = []
                     
         except Exception as e:
             print(f"Error processing MPCORB data: {e}")
             return []
-
-    # --- SQLite Loading (if enabled) ---
-    if ASTEROID_USE_SQLITE:
-        try:
-            asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-            print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
-        except Exception as e:
-            print(f"Error loading from SQLite database: {e}")
-            asteroid_rows = []
 
     # Process asteroids based on backend type
     if ASTEROID_USE_SQLITE and asteroid_rows:

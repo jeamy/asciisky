@@ -93,3 +93,15 @@ services:
       - ASCII_SKY_TASK_CLEANUP_HOURS=6
       - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
     restart: unless-stopped
+
+  data_updater:
+    image: asciisky-worker
+    build: .
+    command: ["python", "nightly_data_updater.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_UPDATE_HOUR=4
+    restart: unless-stopped

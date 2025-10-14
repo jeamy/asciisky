@@ -34,7 +34,11 @@ from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
 
 def should_update_comet_file() -> bool:
-    """Prueft, ob die Kometen-Elemente-Datei taeglich aktualisiert werden sollte."""
+    """Prueft, ob die Kometen-Elemente-Datei taeglich aktualisiert werden sollte.
+    
+    NOTE: Daily updates are now handled by nightly_data_updater.py at 2:00 AM.
+    This function is kept for manual/utility purposes only.
+    """
     if not COMETS_FILE.exists():
         return True
 
@@ -49,7 +53,7 @@ COMET_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches asteroid TTL for 48h pr
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
 MAX_COMETS_DEFAULT = 1000
-MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '16.0'))
+MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
@@ -347,9 +351,10 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
 
     # Fetch fresh (prefer local MPC file cache if available)
     try:
-        # Check if daily update is needed
-        if should_update_comet_file():
-            logger.debug("Comet file needs weekly update, downloading...")
+        # Download only if file doesn't exist (first start)
+        # Daily updates are handled by nightly_data_updater.py
+        if not COMETS_FILE.exists():
+            logger.info("Comet file not found, downloading for initial setup...")
             try:
                 with urllib.request.urlopen(mpc.COMET_URL, timeout=30) as rf:
                     content = rf.read()
@@ -358,12 +363,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                     try:
                         with COMETS_FILE.open('wb') as wf:
                             wf.write(content)
-                        logger.debug(f"Updated comet file: {COMETS_FILE}")
-                        
-                        # Clear comet caches when new data is downloaded
-                        _clear_comet_caches()
-                        logger.debug("Cleared comet caches after data update")
-                        
+                        logger.info(f"Downloaded comet file: {COMETS_FILE}")
                     except Exception as we:
                         logger.warning(f"Failed to write {COMETS_FILE}: {we}")
             except Exception as ne:
@@ -536,13 +536,13 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             from db_utils import load_comets_dataframe_from_db
             df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
             if df is not None and not df.empty:
-                logger.debug(f"Loaded {len(df)} comets from SQLite database")
+                print(f"Loaded {len(df)} comets from SQLite database")
         except Exception as e:
-            logger.debug(f"Failed to load from SQLite, falling back to file: {e}")
+            print(f"Failed to load from SQLite, falling back to file: {e}")
     
     # Fallback: Load from file if DB is empty or disabled
     if df is None or df.empty:
-        logger.debug("Loading comets from file (DB empty or disabled)")
+        print("Loading comets from file (DB empty or disabled)")
         df = load_comet_dataframe()
         
         # Store in SQLite for next time

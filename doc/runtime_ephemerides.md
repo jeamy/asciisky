@@ -72,7 +72,7 @@ No large-range precompute is necessary. The above caches are transient and kept 
   - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` (default: 12.0)
   - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` (default: 10.0)
   - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 18.0)
-  - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 16.0)
+  - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 14.0)
 - Feature flags (for rollout, see migration plan):
   - `ASCII_SKY_RUNTIME_EPHEMERIS` (enable runtime computation)
   - `ASCII_SKY_DISABLE_PRECOMPUTE_UI` (hide precompute UI)

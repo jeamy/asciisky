@@ -30,6 +30,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - SQLite database backend for efficient data storage and retrieval
+- Automatic nightly updates of asteroid and comet orbital data (2:00 AM)
+- DB-first loading strategy for optimal performance (10x faster than file parsing)
 
 ## Prerequisites
 
@@ -47,19 +49,33 @@ A web application that displays the current positions of celestial bodies (Sun, 
    ```
 4. Open your browser and navigate to `http://localhost:8000`
 
-### First Run and Caching
+### Docker Services
 
-- The first startup can take longer because the app downloads and parses MPC orbital data and creates caches.
+The application runs multiple services:
+
+- **`web`** - FastAPI web server (port 8000)
+- **`worker`** - Precompute worker for cache generation
+- **`data_updater`** - Nightly data update service (runs at 2:00 AM)
+- **`task_cleanup`** - Background task file cleanup service
+
+All services restart automatically unless stopped.
+
+### First Run and Data Management
+
+- **First Startup**: The app automatically downloads and stores MPC orbital data in SQLite database
+- **Daily Updates**: The `data_updater` service automatically downloads fresh data at 2:00 AM local time
+- **Performance**: After initial setup, all data loads from database (10x faster than file parsing)
 
 - Cache Precomputation
   - Precomputed data is stored in SQLite database and location-specific cache files for fast retrieval
 
-- SQLite Database Cache
-  - Primary cache backend for all astronomical data
-  - Stored in `cache/asciisky.db`
-  - Provides efficient storage and retrieval of asteroid/comet orbital data
-  - Caches computed positions for specific locations and time buckets
-  - See `doc/sqlite.md` for detailed schema and implementation
+- SQLite Database (Primary Backend)
+  - **DB-first approach**: All asteroid and comet data loaded from database
+  - Stored in `celestial_cache.db`
+  - Contains ~2200 asteroids and ~1200 comets with orbital elements
+  - Pre-computed positions cached per location and time bucket
+  - Automatic nightly updates via `data_updater` service
+  - See `doc/sqlite.md` and `doc/data-management.md` for details
 
 - Pickle Cache (Fallback)
   - Asteroids
@@ -77,8 +93,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
     - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` (default: 12.0)
     - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` (default: 10.0)
   - Comets:
-    - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 18.0)
-    - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 16.0)
+    - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 20.0)
+    - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 14.0)
   - Current values are exposed via the `/api/config` endpoint
 
 ### Without Docker
@@ -98,7 +114,9 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 - `main.py` - FastAPI application with celestial object calculation logic
 - `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
+- `comets.py` - Comet pipeline using MPC data with M1/k1 magnitude model
 - `db_utils.py` - SQLite database utilities for efficient data storage and retrieval
+- `nightly_data_updater.py` - Automatic daily updates of asteroid and comet data (2:00 AM)
 - `settings.py` - User/location settings; persists to `user_settings.json`
 - `de421.bsp` - JPL ephemeris used by Skyfield
 - `templates/` - HTML templates
@@ -123,6 +141,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - `planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
   - `cache.md` - Technical documentation of the cache system architecture
   - `sqlite.md` - SQLite database schema and implementation details
+  - `data-management.md` - Data loading strategy, nightly updates, and troubleshooting
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Docker Compose configuration
 - `requirements.txt` - Python dependencies
@@ -188,11 +207,14 @@ The application can be configured using the following environment variables in `
 - `ASCII_SKY_ADAPTIVE_WORKERS` - Enable adaptive worker count based on CPU cores (default: 1)
 - `ASCII_SKY_WORKER_RUN_ONCE` - Run worker once and exit (default: not set, only for worker_once service)
 
+### Data Update Configuration
+- `ASCII_SKY_UPDATE_HOUR` - Hour of day for automatic data updates (default: 2, meaning 2:00 AM)
+
 ### Magnitude Limits Configuration
 - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for asteroid prefiltering (default: 12.0)
 - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` - Maximum apparent magnitude for asteroid display (default: 10.0)
-- `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for comet prefiltering (default: 18.0)
-- `ASCII_SKY_COMET_MAX_APPARENT_MAG` - Maximum apparent magnitude for comet display (default: 16.0)
+- `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for comet prefiltering (default: 20.0)
+- `ASCII_SKY_COMET_MAX_APPARENT_MAG` - Maximum apparent magnitude for comet display (default: 14.0)
 
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)
@@ -211,6 +233,7 @@ The application can be configured using the following environment variables in `
 - [Runtime Ephemerides](doc/runtime_ephemerides.md) - On-demand position computation strategy
 - [SQLite Database](doc/sqlite.md) - Database schema and caching strategy
 - [Cache Management](doc/cache.md) - Caching layers and performance considerations
+- [Data Management](doc/data-management.md) - DB-first loading, nightly updates, and troubleshooting
 
 ### Migration & Maintenance
 - [Runtime Migration Plan](doc/migration_plan_runtime_ephemerides.md) - Transitioning to on-the-fly computation
