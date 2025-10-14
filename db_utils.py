@@ -389,6 +389,9 @@ def store_comet_dataframe(df) -> int:
                 def safe_str(val):
                     return str(val) if not pd.isna(val) else ''
                 
+                # designation is the index, not a column!
+                designation = str(index) if index else ''
+                
                 conn.execute("""
                     INSERT OR REPLACE INTO comets (
                         designation, name, magnitude_h, magnitude_g,
@@ -396,16 +399,16 @@ def store_comet_dataframe(df) -> int:
                         argument_perihelion, longitude_node, inclination, orbit_data
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    safe_str(row.get('designation', '')),
+                    designation,
                     safe_str(row.get('name', '')),
-                    safe_float(row.get('magnitude_H')),
-                    safe_float(row.get('magnitude_G')),
+                    safe_float(row.get('M1')),  # Comet absolute magnitude (not 'magnitude_H')
+                    safe_float(row.get('k1')),  # Comet activity parameter (not 'magnitude_G')
                     safe_str(row.get('epoch_packed', '')),
-                    safe_float(row.get('perihelion_distance_au')),
-                    safe_float(row.get('eccentricity')),
-                    safe_float(row.get('argument_of_perihelion_degrees')),
-                    safe_float(row.get('longitude_of_ascending_node_degrees')),
-                    safe_float(row.get('inclination_degrees')),
+                    safe_float(row.get('perihelion_distance_au', row.get('q'))),  # Try both names
+                    safe_float(row.get('eccentricity', row.get('e'))),  # Try both names
+                    safe_float(row.get('argument_of_perihelion_degrees', row.get('w', row.get('peri')))),  # Try all aliases
+                    safe_float(row.get('longitude_of_ascending_node_degrees', row.get('om', row.get('node')))),  # Try all aliases
+                    safe_float(row.get('inclination_degrees', row.get('i', row.get('incl')))),  # Try all aliases
                     orbit_data
                 ))
                 stored_count += 1
@@ -426,15 +429,59 @@ def get_comets_by_magnitude(max_h_magnitude: float, limit: int = 1000) -> List[s
     """Retrieve comets filtered by H magnitude, ordered by brightness."""
     conn = get_db_connection()
     cursor = conn.execute("""
-        SELECT * FROM comets 
-        WHERE magnitude_h <= ? AND magnitude_h IS NOT NULL
+        SELECT * FROM comets
+        WHERE magnitude_h <= ?
         ORDER BY magnitude_h ASC
         LIMIT ?
     """, (max_h_magnitude, limit))
     
-    result = cursor.fetchall()
+    rows = cursor.fetchall()
     cursor.close()
-    return result
+    return rows
+
+def load_comets_dataframe_from_db(max_h_magnitude: float = 18.0) -> 'pd.DataFrame':
+    """Load comets from SQLite database and return as DataFrame.
+    Returns DataFrame with designation as index, ready for processing."""
+    import pandas as pd
+    import pickle
+    
+    conn = get_db_connection()
+    cursor = conn.execute("""
+        SELECT designation, orbit_data FROM comets
+        WHERE magnitude_h <= ?
+        ORDER BY magnitude_h ASC
+    """, (max_h_magnitude,))
+    
+    rows = cursor.fetchall()
+    cursor.close()
+    
+    if not rows:
+        return pd.DataFrame()
+    
+    # Deserialize orbit_data for each comet and build DataFrame
+    comet_data = []
+    for row in rows:
+        try:
+            designation = row['designation']
+            orbit_row = pickle.loads(row['orbit_data'])
+            # orbit_row is a pandas Series, convert to dict
+            comet_dict = orbit_row.to_dict() if hasattr(orbit_row, 'to_dict') else dict(orbit_row)
+            comet_dict['designation'] = designation
+            comet_data.append(comet_dict)
+        except Exception as e:
+            print(f"Error loading comet {row.get('designation', 'unknown')}: {e}")
+            continue
+    
+    if not comet_data:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(comet_data)
+    
+    # Set designation as index (same format as load_comet_dataframe)
+    if 'designation' in df.columns:
+        df = df.set_index('designation', drop=True)
+    
+    return df
 
 def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                          observer_lat: float, observer_lon: float, observer_elevation: float,

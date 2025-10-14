@@ -49,7 +49,7 @@ COMET_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches asteroid TTL for 48h pr
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
 MAX_COMETS_DEFAULT = 1000
-MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
+MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '16.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
@@ -529,19 +529,33 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         except Exception as e:
             logger.debug(f"Error reading comet caches: {e}")
 
-    # Load comet dataframe and store in SQLite if enabled
-    df = load_comet_dataframe()
-    if df is None or df.empty:
-        return []
-    
-    # Store comet data in SQLite for future use
+    # Load comet dataframe - PREFER SQLite database over file
+    df = None
     if COMET_USE_SQLITE:
         try:
-            from db_utils import store_comet_dataframe
-            stored_count = store_comet_dataframe(df)
-            logger.debug(f"Stored {stored_count} comets in SQLite database")
+            from db_utils import load_comets_dataframe_from_db
+            df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
+            if df is not None and not df.empty:
+                logger.debug(f"Loaded {len(df)} comets from SQLite database")
         except Exception as e:
-            logger.debug(f"Failed to store comets in SQLite: {e}")
+            logger.debug(f"Failed to load from SQLite, falling back to file: {e}")
+    
+    # Fallback: Load from file if DB is empty or disabled
+    if df is None or df.empty:
+        logger.debug("Loading comets from file (DB empty or disabled)")
+        df = load_comet_dataframe()
+        
+        # Store in SQLite for next time
+        if COMET_USE_SQLITE and df is not None and not df.empty:
+            try:
+                from db_utils import store_comet_dataframe
+                stored_count = store_comet_dataframe(df)
+                logger.debug(f"Stored {stored_count} comets in SQLite database")
+            except Exception as e:
+                logger.debug(f"Failed to store comets in SQLite: {e}")
+    
+    if df is None or df.empty:
+        return []
 
     # Prefilter by photometric parameters to reduce heavy computations
     try:
@@ -701,13 +715,9 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 center_code = 10
             target = (sun + orbit) if center_code != 0 else orbit
             
-            # OPTIMIZATION: Add quick pre-filter using M1 (absolute magnitude)
-            # Skip comets that are clearly too faint
-            M1 = float(row2.get('M1', 99))
-            rough_apparent_mag = M1 + 10.0  # Rough estimate (typical at ~2 AU)
-            if rough_apparent_mag > MAX_APPARENT_MAGNITUDE + 3.0:  # +3 mag safety margin
-                continue
-
+            # NOTE: No pre-filter for comets - magnitude varies too much with distance
+            # and activity. Comet count is low enough that we can compute all.
+            
             # Compute geometry and estimate magnitude BEFORE heavy rise/set/transit
             astrometric = observer.at(t).observe(target)
             apparent_magnitude = None
@@ -718,10 +728,11 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 r = comet_helio.distance().au  # Distance from Sun
                 
                 delta = astrometric.distance().au  # Distance from Earth (already computed)
+                M1 = float(row2.get('M1'))
                 n_raw = row2.get('k1')
                 n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
                 apparent_magnitude = (
-                    float(M1)
+                    M1
                     + 5.0 * math.log10(max(delta, 1e-12))
                     + 2.5 * float(n) * math.log10(max(r, 1e-12))
                 )
@@ -732,7 +743,8 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
                 pass
 
             # Filter by apparent magnitude
-            if apparent_magnitude is not None and apparent_magnitude > MAX_APPARENT_MAGNITUDE:
+            # Skip if magnitude calculation failed OR if too faint
+            if apparent_magnitude is None or apparent_magnitude > MAX_APPARENT_MAGNITUDE:
                 continue
 
             # Apparent position only for passing comets (reuse astrometric!)
