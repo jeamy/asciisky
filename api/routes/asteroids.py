@@ -38,9 +38,10 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 
                 if isinstance(asteroid_list, list) and asteroid_list:
                     result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                    for i, asteroid in enumerate(asteroid_list):
+                    for asteroid in asteroid_list:
                         if isinstance(asteroid, dict) and "name" in asteroid:
-                            result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
+                            # Use name as key without index to avoid duplicate keys when order changes
+                            result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
                     return result
             except Exception as e:
                 # Log error but continue to fallback
@@ -60,9 +61,10 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, current_dt=dt_utc))
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-        for i, asteroid in enumerate(bright_asteroid_list):
+        for asteroid in bright_asteroid_list:
             if isinstance(asteroid, dict) and "name" in asteroid:
-                result["bodies"][f"bright_asteroid_{i}_{asteroid['name']}"] = asteroid
+                # Use name as key without index to avoid duplicate keys when order changes
+                result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
         
         # Trigger background precompute for future hours even without time parameter
         asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))

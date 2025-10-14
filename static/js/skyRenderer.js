@@ -1598,6 +1598,13 @@ export class SkyRenderer {
     // Methode zum Aktualisieren der Himmelsdaten
     async update() {
         try {
+            // Verhindere mehrfache parallele Updates
+            if (this._updateRunning) {
+                console.log('Update already in progress, skipping...');
+                return;
+            }
+            this._updateRunning = true;
+            
             console.log('Updating sky data...');
             // Zeige allgemeinen Ladeindikator früh, um langsame Starts (z.B. MPCORB-Download) zu signalisieren
             this.showLoading('loading');
@@ -1647,6 +1654,19 @@ export class SkyRenderer {
             const timeISO = (avail && avail.time) ? avail.time : (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO());
             const locKey = (avail && avail.location && avail.location.loc_key) ? avail.location.loc_key : undefined;
 
+            // Entferne alte Asteroiden/Kometen-Einträge BEVOR neue geladen werden
+            // (verhindert Duplikate bei parallel laufenden Updates)
+            if (this.celestialData && this.celestialData.bodies) {
+                const cleanBodies = {};
+                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
+                    // Behalte nur Planeten, Sonne, Mond - entferne Asteroiden und Kometen
+                    if (!key.startsWith('bright_asteroid_') && !key.startsWith('comet_')) {
+                        cleanBodies[key] = value;
+                    }
+                }
+                this.celestialData.bodies = cleanBodies;
+            }
+
             const tasks = [];
             // ALWAYS load asteroids and comets, regardless of cache status
             // They should be visible at all times like planets
@@ -1693,6 +1713,8 @@ export class SkyRenderer {
         } finally {
             // Verstecke den Ladeindikator am Ende des gesamten Update-Zyklus
             this.hideLoading();
+            // Erlaube neue Updates
+            this._updateRunning = false;
         }
     }
     
