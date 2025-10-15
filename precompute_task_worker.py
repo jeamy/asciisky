@@ -34,9 +34,10 @@ def _ensure_asteroids_cache(lat, lon, elevation, dt_utc):
         # Create location dict as expected by load_bright_asteroids
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
 
+        # Use max magnitude 20.0 for precompute (cache all objects, filter in API)
         result = bright_asteroids.load_bright_asteroids(
             LOADER, ts, eph, location,
-            max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
+            max_magnitude=20.0,  # Cache with max value, filtering happens in API routes
             use_cache=True, current_dt=dt_utc
         )
         return result is not None

@@ -49,9 +49,9 @@ def should_update_comet_file() -> bool:
 
 # Configuration
 COMETS_FILE = Path(COMET_ELEMENTS_PATH)
-COMET_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches asteroid TTL for 48h precompute window)
+COMET_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days (longer than 30-day precompute window)
 COMET_CACHE_BUCKET_HOURS = 1
-COMET_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours
+COMET_DF_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 MAX_COMETS_DEFAULT = 1000
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
@@ -61,9 +61,9 @@ COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
 DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
 
 
-COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'
-# Final comet list cache (mirror bright_asteroids behavior)
-BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'
+# Legacy cache files - no longer used, kept for reference only
+# COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'  # Removed: DataFrame now stored in SQLite only
+# BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'  # Removed: Positions stored per-location/time
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
 
@@ -87,19 +87,8 @@ def _clear_comet_caches():
     import glob
     import shutil
     
-    cache_files_to_clear = [
-        COMET_DF_CACHE_FILE,  # DataFrame cache
-        BRIGHT_COMET_CACHE_FILE,  # Legacy bright comet cache
-    ]
-    
-    # Clear individual cache files
-    for cache_file in cache_files_to_clear:
-        if os.path.exists(cache_file):
-            try:
-                os.remove(cache_file)
-                logger.debug(f"Removed cache file: {cache_file}")
-            except Exception as e:
-                logger.warning(f"Failed to remove cache file {cache_file}: {e}")
+    # Legacy pickle caches no longer used - only clear per-location caches and SQLite
+    logger.debug("Clearing comet caches (per-location directories and SQLite)")
     
     # Clear per-location comet cache directories
     comet_cache_pattern = os.path.join(CACHE_ROOT, 'comets', '*')
@@ -115,6 +104,13 @@ def _clear_comet_caches():
     global _comet_df_cache, _comet_df_timestamp
     _comet_df_cache = None
     _comet_df_timestamp = None
+
+def clear_in_memory_cache():
+    """Clear in-memory DataFrame cache - called when filters change"""
+    global _comet_df_cache, _comet_df_timestamp
+    _comet_df_cache = None
+    _comet_df_timestamp = None
+    logger.info("Cleared comet in-memory DataFrame cache")
 
 
 def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
@@ -298,57 +294,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
             except Exception as de:
                 logger.debug(f"Comet DF memory debug failed: {de}")
 
-    # Disk cache
-    if use_cache and os.path.exists(COMET_DF_CACHE_FILE):
-        try:
-            with open(COMET_DF_CACHE_FILE, 'rb') as f:
-                payload = pickle.load(f)
-            if isinstance(payload, dict) and 'timestamp' in payload and 'data' in payload:
-                if (_now() - payload['timestamp']).total_seconds() < COMET_DF_CACHE_TTL_SECONDS:
-                    logger.debug("Using cached comet dataframe (pickle)")
-                    # Sanitize cached dataframe as formats can change upstream
-                    cached = payload['data']
-                    try:
-                        cached = _standardize_comet_df(cached)
-                    except Exception as se:
-                        logger.warning(f"Standardizing cached comet DF failed: {se}")
-                    # Validate sanitized cache; if invalid, skip returning and fetch fresh
-                    is_valid = False
-                    try:
-                        is_valid = (
-                            cached is not None and not cached.empty and
-                            ('e' in cached.columns and 'q' in cached.columns) and
-                            int(cached['e'].notna().sum()) > 0 and int(cached['q'].notna().sum()) > 0
-                        )
-                    except Exception:
-                        is_valid = False
-
-                    if is_valid:
-                        _comet_df_cache = cached
-                        _comet_df_timestamp = payload['timestamp']
-                        # Re-save sanitized cache silently
-                        try:
-                            with open(COMET_DF_CACHE_FILE, 'wb') as wf:
-                                pickle.dump({'timestamp': _comet_df_timestamp, 'data': _comet_df_cache}, wf)
-                        except Exception:
-                            pass
-                        # Debug summary for disk cache
-                        try:
-                            cols = list(_comet_df_cache.columns)
-                            logger.debug(f"Comet DF (disk cache) columns: {cols}")
-                            for c in ['e','q','i','incl','om','w','node','peri','epoch_tt','Tp']:
-                                if c in _comet_df_cache.columns:
-                                    s = _comet_df_cache[c]
-                                    logger.debug(f"disk col {c}: dtype={s.dtype}, nonnull={int(s.notna().sum())}")
-                            logger.debug(f"Comet DF (disk cache) size: {len(_comet_df_cache)} rows")
-                        except Exception as de:
-                            logger.debug(f"Comet DF disk debug failed: {de}")
-                        return _comet_df_cache
-                    else:
-                        logger.debug("Disk comet cache invalid (empty or no valid e/q). Will refetch.")
-        except Exception as e:
-            logger.warning(f"Error reading comet dataframe cache: {e}")
-
+    # DataFrame pickle cache removed - now using SQLite only (consistent with asteroids)
     # Fetch fresh (prefer local MPC file cache if available)
     try:
         # Download only if file doesn't exist (first start)
@@ -394,10 +340,9 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
 
         _comet_df_cache = comets
         _comet_df_timestamp = _now()
-        with open(COMET_DF_CACHE_FILE, 'wb') as f:
-            pickle.dump({'timestamp': _comet_df_timestamp, 'data': _comet_df_cache}, f)
-
-        logger.debug(f"Loaded {len(comets)} comets from MPC and cached.")
+        
+        # DataFrame pickle cache removed - now using SQLite only (consistent with asteroids)
+        logger.debug(f"Loaded {len(comets)} comets from MPC (stored in SQLite).")
         return _comet_df_cache
     except Exception as e:
         logger.error(f"Error loading comet data: {e}")
@@ -744,7 +689,8 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
             # Filter by apparent magnitude
             # Skip if magnitude calculation failed OR if too faint
-            if apparent_magnitude is None or apparent_magnitude > MAX_APPARENT_MAGNITUDE:
+            # Use 20.0 as maximum to cache all comets up to mag 20, filtering happens in API route
+            if apparent_magnitude is None or apparent_magnitude > 20.0:
                 continue
 
             # Apparent position only for passing comets (reuse astrometric!)

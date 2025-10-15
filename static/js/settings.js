@@ -251,9 +251,11 @@ export class SettingsManager {
         return this.settings;
     }
     
-    // Entferne veraltete Einstellungen wie Magnitude-Filter
+    // Entferne veraltete Einstellungen
     cleanupSettings() {
-        // Entferne Magnitude-Werte, falls vorhanden
+        // Magnitude-Filter werden jetzt im Backend (user_settings.json) gespeichert
+        // und nicht mehr im Frontend localStorage
+        // Entferne alte Magnitude-Werte aus localStorage, falls vorhanden
         if (this.settings.asteroidMaxMagnitude !== undefined) {
             delete this.settings.asteroidMaxMagnitude;
         }

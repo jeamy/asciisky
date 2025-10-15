@@ -9,6 +9,14 @@ from datetime import datetime
 # Pfad zur Einstellungsdatei
 SETTINGS_FILE = "user_settings.json"
 
+# Default-Einstellungen aus ENV-Variablen
+def get_default_magnitude_filters():
+    """Liest die Default-Magnitude-Werte aus den ENV-Variablen"""
+    return {
+        "asteroidMaxMagnitude": float(os.getenv("ASCII_SKY_ASTEROID_MAX_APPARENT_MAG", "10.0")),
+        "cometMaxMagnitude": float(os.getenv("ASCII_SKY_COMET_MAX_APPARENT_MAG", "14.0"))
+    }
+
 # Default-Einstellungen
 DEFAULT_SETTINGS = {
     "location": {
@@ -17,6 +25,7 @@ DEFAULT_SETTINGS = {
         "elevation": 171.0,
         "name": "Wien"
     },
+    "filters": get_default_magnitude_filters(),
     "last_updated": datetime.now().isoformat()
 }
 
@@ -31,6 +40,9 @@ def load_settings():
         if os.path.exists(SETTINGS_FILE):
             with open(SETTINGS_FILE, 'r') as f:
                 settings = json.load(f)
+                # Stelle sicher, dass filters existiert
+                if "filters" not in settings:
+                    settings["filters"] = get_default_magnitude_filters()
                 print(f"Settings loaded: {settings}")
         else:
             settings = DEFAULT_SETTINGS.copy()
@@ -57,7 +69,35 @@ def save_settings():
     except Exception as e:
         print(f"Error saving settings: {str(e)}")
 
-# Die Magnitude-Filter-Funktionen wurden entfernt
+def get_magnitude_filters():
+    """Gibt die gespeicherten Magnitude-Filter zurück"""
+    global settings
+    
+    if settings is None:
+        load_settings()
+    
+    # Fallback auf Default-Werte aus ENV
+    default_filters = get_default_magnitude_filters()
+    return settings.get("filters", default_filters)
+
+def set_magnitude_filters(asteroid_max=None, comet_max=None):
+    """Speichert die Magnitude-Filter"""
+    global settings
+    
+    if settings is None:
+        load_settings()
+    
+    if "filters" not in settings:
+        settings["filters"] = get_default_magnitude_filters()
+    
+    if asteroid_max is not None:
+        settings["filters"]["asteroidMaxMagnitude"] = float(asteroid_max)
+    
+    if comet_max is not None:
+        settings["filters"]["cometMaxMagnitude"] = float(comet_max)
+    
+    save_settings()
+    return settings["filters"]
 
 def get_location():
     """Gibt die gespeicherten Standortdaten zurück"""

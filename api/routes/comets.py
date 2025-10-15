@@ -15,7 +15,7 @@ import asyncio
 router = APIRouter()
 
 @router.get("/comets")
-async def get_comets(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None):
+async def get_comets(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None, max_magnitude: float = None):
     """Get comets with real MPC data and rise/set/transit times."""
     try:
         location_settings = settings.get_location()
@@ -26,6 +26,11 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
 
         if save_location and lat is not None and lon is not None and elevation is not None:
             settings.set_location(lat, lon, elevation, location_name)
+
+        # Magnitude-Filter aus user_settings oder Parameter verwenden
+        if max_magnitude is None:
+            filters = settings.get_magnitude_filters()
+            max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
 
@@ -42,9 +47,15 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 
                 if isinstance(comet_list, list) and comet_list:
                     result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                    for i, comet in enumerate(comet_list[:max_comets]):
+                    count = 0
+                    for comet in comet_list:
                         if isinstance(comet, dict) and "name" in comet:
-                            result["bodies"][f"comet_{i}_{comet['name']}"] = comet
+                            # Magnitude-Filter anwenden
+                            if comet.get("magnitude", 99) <= max_magnitude:
+                                result["bodies"][f"comet_{count}_{comet['name']}"] = comet
+                                count += 1
+                                if count >= max_comets:
+                                    break
                     return result
             except Exception as e:
                 # Log error but continue to fallback
@@ -64,9 +75,13 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         comet_list = await asyncio.to_thread(lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc))
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-        for i, comet in enumerate(comet_list):
+        count = 0
+        for comet in comet_list:
             if isinstance(comet, dict) and "name" in comet:
-                result["bodies"][f"comet_{i}_{comet['name']}"] = comet
+                # Magnitude-Filter anwenden
+                if comet.get("magnitude", 99) <= max_magnitude:
+                    result["bodies"][f"comet_{count}_{comet['name']}"] = comet
+                    count += 1
         
         # Trigger background precompute for future hours even without time parameter
         asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))

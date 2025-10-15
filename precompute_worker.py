@@ -298,9 +298,11 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
         # Module will write to both SQLite and pickle cache
         from api.computation import LOADER
+        
+        # Use max magnitude 20.0 for precompute (cache all objects, filter in API)
         asteroid_list = bright_asteroids.load_bright_asteroids(
             LOADER, ts, eph, location,
-            max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE,
+            max_magnitude=20.0,  # Cache with max value, filtering happens in API routes
             use_cache=True, current_dt=dt_utc
         )
         

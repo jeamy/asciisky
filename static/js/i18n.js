@@ -146,7 +146,6 @@ export const i18n = {
         'help_controls': 'Steuerung',
         'help_sky_view': 'Himmelsansicht',
         'help_object_list': 'Objektliste',
-        'help_cache_status': 'Cache-Status',
         'help_cache_precompute': 'Cache-Vorberechnung',
         'help_cache_precompute_desc': 'Mit der Cache-Vorberechnung können Sie Himmelsdaten für einen bestimmten Zeitraum im Voraus berechnen lassen. Wählen Sie Start- und Enddatum und klicken Sie auf "Berechnung starten". Der Fortschritt wird angezeigt und die Daten stehen nach Abschluss für schnelle Anzeige zur Verfügung.',
         'help_simulation': 'Zeitsimulation',
@@ -180,11 +179,12 @@ export const i18n = {
         'help_hour_plus': 'Stunde vor (+1 Stunde)',
         'help_day_plus': 'Tag vor (+24 Stunden)',
         'help_object_list_desc': 'Klick auf Objekttyp (Sonne, Mond, Planeten, etc.) markiert alle Objekte dieses Typs im Himmel.',
-        'help_cache_status_desc': 'Zeigt verfügbare vorberechnete Daten für den aktuellen Standort. "Snapshots" sind stündliche Berechnungen für schnelle Anzeige.',
         'help_simulation_desc': 'Simuliert verschiedene Zeiten, um Himmelsbewegungen zu verfolgen. Die Steuerung ermöglicht präzise Zeitnavigation:',
         'help_simulation_desc2': 'Diese Zeitnavigation ermöglicht es, Himmelsbewegungen über längere Zeiträume zu verfolgen und astronomische Ereignisse wie Auf- und Untergänge zu beobachten.',
         'help_location_change': 'Standortwechsel',
         'help_location_change_desc': 'Beim ersten Wechsel zu einem neuen Ort kann die Berechnung länger dauern, da Himmelsdaten für Asteroiden und Kometen für diese Position erstmalig berechnet und zwischengespeichert werden müssen.',
+        'help_magnitude_filters': 'Helligkeitsfilter',
+        'help_magnitude_filters_desc': 'Über den ⚙️-Button unter "Sichtbare Objekte" können Sie die Helligkeitsfilter für Asteroiden und Kometen anpassen (Magnitude 10-20). Bei Änderung der Filter werden die Daten neu berechnet, was einige Minuten dauern kann. Die Objekte werden automatisch angezeigt, sobald sie verfügbar sind.',
         'help_github': 'Quellcode',
         'help_github_desc': 'ASCII Sky ist Open Source. Der vollständige Quellcode ist auf GitHub verfügbar:',
         
@@ -194,6 +194,12 @@ export const i18n = {
         'comets_up_to_mag': 'Kometen bis Mag',
         'no_data': 'Keine Daten verfügbar',
         'no_visible_objects': 'Keine Objekte über dem Horizont',
+        
+        // Magnitude filters
+        'magnitude_filters': 'Helligkeitsfilter',
+        'magnitude_filter_info': 'Bei Änderung der Filter werden die Daten neu berechnet (einige Minuten). Die Objekte erscheinen automatisch, sobald sie verfügbar sind.',
+        'cache_invalidated_message': 'Filter geändert. Neuberechnung läuft (einige Minuten)...',
+        'error_applying_filters': 'Fehler beim Anwenden der Filter',
         
         // Constellation controls
         'constellations': 'Sternbilder',
@@ -224,6 +230,12 @@ export const i18n = {
         'Orion': 'Orion',
         'Canis Major': 'Großer Hund',
         'Perseus': 'Perseus',
+        'Auriga': 'Fuhrmann',
+        'Draco': 'Drachen',
+        'Lyra': 'Leier',
+        'Cygnus': 'Schwan',
+        'Aquila': 'Adler',
+        'Bootes': 'Bärenhüter',
     },
     
     // Englisch als Fallback
@@ -361,14 +373,12 @@ export const i18n = {
         'apply': 'Apply',
         'invalid_coordinates': 'Invalid coordinates',
         'help_object_list_desc': 'Click on object type (Sun, Moon, Planets, etc.) highlights all objects of this type in the sky.',
-        'help_cache_status_desc': 'Shows available precomputed data for the current location. "Snapshots" are hourly calculations for fast display.',
         'help_cache_precompute': 'Cache Precomputation',
         'help_cache_precompute_desc': 'Cache precomputation allows you to calculate celestial data for a specific time range in advance. Select start and end dates and click "Start Precompute". Progress will be displayed and the data will be available for quick display once completed.',
         'help_title': 'Help - ASCII Sky Tracker',
         'help_controls': 'Controls',
         'help_sky_view': 'Sky View',
         'help_object_list': 'Object List',
-        'help_cache_status': 'Cache Status',
         'help_object_click': 'Object Click',
         'help_object_click_desc': 'Shows details like position, magnitude, and rise/set times',
         'help_navigation': 'Navigation',
@@ -396,6 +406,8 @@ export const i18n = {
         'help_simulation_desc2': 'This time navigation allows you to track celestial movements over longer periods and observe astronomical events such as risings and settings.',
         'help_location_change': 'Location Changes',
         'help_location_change_desc': 'When switching to a new location for the first time, calculations may take longer as sky data for asteroids and comets for this position needs to be computed and cached initially.',
+        'help_magnitude_filters': 'Brightness Filters',
+        'help_magnitude_filters_desc': 'Use the ⚙️ button under "Visible Objects" to adjust brightness filters for asteroids and comets (magnitude 10-20). Changing filters will recalculate the data, which may take several minutes. Objects will be displayed automatically once available.',
         'help_github': 'Source Code',
         'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:',
         
@@ -405,6 +417,12 @@ export const i18n = {
         'comets_up_to_mag': 'Comets up to Mag',
         'no_data': 'No data available',
         'no_visible_objects': 'No objects above horizon',
+        
+        // Magnitude filters
+        'magnitude_filters': 'Brightness Filters',
+        'magnitude_filter_info': 'Changing filters will recalculate data (several minutes). Objects appear automatically when available.',
+        'cache_invalidated_message': 'Filters changed. Recalculating (several minutes)...',
+        'error_applying_filters': 'Error applying filters',
         
         // Constellation controls
         'constellations': 'Constellations',
@@ -434,7 +452,13 @@ export const i18n = {
         'Cassiopeia': 'Cassiopeia',
         'Orion': 'Orion',
         'Canis Major': 'Great Dog',
-        'Perseus': 'Perseus'
+        'Perseus': 'Perseus',
+        'Auriga': 'Charioteer',
+        'Draco': 'Dragon',
+        'Lyra': 'Lyre',
+        'Cygnus': 'Swan',
+        'Aquila': 'Eagle',
+        'Bootes': 'Herdsman'
     }
 };
 

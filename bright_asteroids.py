@@ -45,10 +45,10 @@ GM_SUN = 1.32712440041e20
 CACHE_VALIDITY_HOURS = 12
 
 # Module-specific cache granularity for per-location/time asteroid list
-# Use a 1-hour time bucket; TTL must cover the 48h precompute window
-# so that snapshots created up to 48h earlier remain valid.
+# Use a 1-hour time bucket; TTL must cover the 30-day precompute window
+# so that snapshots created up to 30 days earlier remain valid.
 ASTEROID_CACHE_BUCKET_HOURS = 1
-ASTEROID_CACHE_TTL_SECONDS = 49 * 3600
+ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 # Cache kind for consistency with celestial/comets naming
 ASTEROID_CACHE_KIND = 'asteroids'
 # Disable reading of legacy global cache by default to force recompute per location/time
@@ -69,6 +69,13 @@ os.makedirs("cache", exist_ok=True)
 _asteroid_df_cache = None
 _asteroid_df_timestamp = None
 ASTEROID_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches positions cache TTL)
+
+def clear_in_memory_cache():
+    """Clear in-memory DataFrame cache - called when filters change"""
+    global _asteroid_df_cache, _asteroid_df_timestamp
+    _asteroid_df_cache = None
+    _asteroid_df_timestamp = None
+    print("Cleared asteroid in-memory DataFrame cache")
 
 def format_time(dt, tz=None):
     """
@@ -357,9 +364,10 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 apparent_magnitudes.append(float('inf'))
         
         candidates_df['apparent_magnitude'] = apparent_magnitudes
-        bright_df = candidates_df[candidates_df['apparent_magnitude'] <= max_magnitude].sort_values('apparent_magnitude')
+        # Cache with mag 20.0 to include all asteroids, filtering happens in API route
+        bright_df = candidates_df[candidates_df['apparent_magnitude'] <= 20.0].sort_values('apparent_magnitude')
         top_df = bright_df.head(MAX_ASTEROIDS)
-        print(f"Found {len(top_df)} asteroids with apparent mag <= {max_magnitude}")
+        print(f"Found {len(top_df)} asteroids with apparent mag <= 20.0 (user filter: {max_magnitude})")
 
         asteroid_list = []
         events_computed = 0
@@ -489,8 +497,9 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             # QUICK PRE-FILTER: Rough magnitude estimate to skip obviously faint objects
             # Use H + 5 as rough estimate (typical V for asteroids at ~2 AU)
             # This avoids expensive .observe() for objects that are clearly too faint
+            # Cache with mag 20.0 to include all asteroids, filtering happens in API route
             rough_apparent_mag = row['magnitude_h'] + 5.0
-            if rough_apparent_mag > max_magnitude + 2.0:  # +2 mag safety margin
+            if rough_apparent_mag > 22.0:  # Cache up to mag 20 + 2 safety margin
                 continue
             
             # Determine target (heliocentric or barycentric)
@@ -514,7 +523,8 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             )
             
             # Skip if too faint (filter AFTER position but saves rise/set calc)
-            if apparent_mag > max_magnitude:
+            # Cache with mag 20.0 to include all asteroids, filtering happens in API route
+            if apparent_mag > 20.0:
                 continue
                 
             # Reuse astrometric for position (already computed above!)

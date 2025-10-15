@@ -1,0 +1,130 @@
+.magnitude-filter-dialog {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+}
+
+.magnitude-filter-content {
+    background-color: #1a1a1a;
+    border: 2px solid #00ff00;
+    border-radius: 8px;
+    padding: 20px;
+    width: 80%;
+    max-width: 800px;
+    box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+}
+
+.magnitude-filter-content h3 {
+    color: #00ff00;
+    margin: 0 0 15px 0;
+    font-size: 1.2rem;
+    text-align: center;
+}
+
+.filter-info {
+    background-color: rgba(0, 255, 0, 0.1);
+    border: 1px solid rgba(0, 255, 0, 0.3);
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 20px;
+    color: #00ff00;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.filter-group {
+    margin-bottom: 20px;
+}
+
+.filter-group label {
+    display: block;
+    color: #00ff00;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+}
+
+.filter-group input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.filter-group input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #00ff00;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+.filter-group input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #00ff00;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+.filter-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 25px;
+}
+
+.filter-btn {
+    padding: 8px 20px;
+    border: 1px solid #00ff00;
+    background-color: #1a1a1a;
+    color: #00ff00;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+
+.filter-btn:hover {
+    background-color: #00ff00;
+    color: #000;
+}
+
+.filter-cancel {
+    border-color: #888;
+    color: #888;
+}
+
+.filter-cancel:hover {
+    background-color: #888;
+    color: #000;
+}
+
+@media (max-width: 768px) {
+    .magnitude-filter-content {
+        width: 95%;
+        padding: 15px;
+    }
+    
+    .magnitude-filter-content h3 {
+        font-size: 1rem;
+    }
+    
+    .filter-group label {
+        font-size: 0.85rem;
+    }
+}

@@ -12,6 +12,10 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Distance and magnitude information for all objects
 - Bright asteroids (minor planets) with apparent magnitude filtering and rise/set/transit times
 - Comets using real MPC data with M1/k1 magnitude model, positions, and rise/set/transit times
+- **User-adjustable brightness filters** for asteroids and comets (magnitude 10-20)
+  - Accessible via ⚙️ button under "Visible Objects"
+  - Filters saved per user in `user_settings.json`
+  - Automatic cache recalculation when filters change
 - Constellation visualization with:
   - Interactive toggle to show/hide constellations
   - Constellation lines connecting major stars (using data from [constellationship.fab](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
@@ -88,14 +92,16 @@ All services restart automatically unless stopped.
   - Celestial
     - `cache/celestial/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
 
-- Thresholds (configurable via environment variables)
-  - Asteroids: 
-    - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` (default: 12.0)
-    - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` (default: 10.0)
-  - Comets:
-    - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` (default: 20.0)
-    - `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 14.0)
-  - Current values are exposed via the `/api/config` endpoint
+- Magnitude Filters
+  - **User-adjustable filters** via UI (⚙️ button under "Visible Objects")
+    - Range: magnitude 10.0 to 20.0 (adjustable in 0.5 steps)
+    - Saved per user in `user_settings.json`
+    - Cache automatically recalculated when filters change (may take several minutes)
+  - **Default values** from environment variables:
+    - Asteroids: `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` (default: 10.0)
+    - Comets: `ASCII_SKY_COMET_MAX_APPARENT_MAG` (default: 14.0)
+  - **Cache strategy**: All objects up to magnitude 20.0 are cached, filtering happens at API level
+  - Current filter values exposed via `/api/filters` endpoint
 
 ### Without Docker
 

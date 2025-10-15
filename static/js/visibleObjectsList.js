@@ -3,18 +3,26 @@ import { settingsManager } from './settings.js';
 
 let panelEl = null;
 let skyRenderer = null;
+let filterDialog = null;
 
-export function initVisibleObjectsList(elementId = 'visible-objects-panel', renderer = null) {
+export function initVisibleObjectsList(elementId = 'visible-objects-panel', renderer = null, magnitudeDialog = null) {
   const el = document.getElementById(elementId);
   if (el) {
     panelEl = el;
     // Zeige initial einen Platzhalter
     el.innerHTML = `
-      <div class="vo-header">${t('visible_objects') || 'Sichtbare Objekte'}</div>
+      <div class="vo-header">
+        ${t('visible_objects') || 'Sichtbare Objekte'}
+        <button id="magnitude-filter-btn" class="vo-filter-btn" title="${t('magnitude_filters') || 'Helligkeitsfilter'}">⚙️</button>
+      </div>
       <div class="vo-section vo-subtle">${t('loading') || 'Lade...'}</div>
     `;
   }
   if (renderer) skyRenderer = renderer;
+  if (magnitudeDialog) filterDialog = magnitudeDialog;
+  
+  // Event-Listener für Filter-Button anhängen
+  attachFilterButtonListener();
 }
 
 export function updateVisibleObjectsList(celestialData) {
@@ -23,9 +31,13 @@ export function updateVisibleObjectsList(celestialData) {
   
   if (!celestialData) {
     el.innerHTML = `
-      <div class="vo-header">${t('visible_objects') || 'Sichtbare Objekte'}</div>
+      <div class="vo-header">
+        ${t('visible_objects') || 'Sichtbare Objekte'}
+        <button id="magnitude-filter-btn" class="vo-filter-btn" title="${t('magnitude_filters') || 'Helligkeitsfilter'}">⚙️</button>
+      </div>
       <div class="vo-section vo-subtle">${t('no_data') || 'Keine Daten verfügbar'}</div>
     `;
+    attachFilterButtonListener();
     return;
   }
 
@@ -97,7 +109,10 @@ export function updateVisibleObjectsList(celestialData) {
   visibleObjects.comets.sort((a, b) => (a.magnitude || 99) - (b.magnitude || 99));
 
   // HTML generieren
-  let html = `<div class="vo-header">${t('visible_objects') || 'Sichtbare Objekte'}</div>`;
+  let html = `<div class="vo-header">
+    ${t('visible_objects') || 'Sichtbare Objekte'}
+    <button id="magnitude-filter-btn" class="vo-filter-btn" title="${t('magnitude_filters') || 'Helligkeitsfilter'}">⚙️</button>
+  </div>`;
 
   // Sonne
   if (visibleObjects.sun.length > 0) {
@@ -171,4 +186,16 @@ export function updateVisibleObjectsList(celestialData) {
       }
     });
   });
+
+  // Event-Listener für Filter-Button (muss nach jedem Update neu angehängt werden)
+  attachFilterButtonListener();
+}
+
+function attachFilterButtonListener() {
+  const filterBtn = document.getElementById('magnitude-filter-btn');
+  if (filterBtn && filterDialog) {
+    filterBtn.addEventListener('click', () => {
+      filterDialog.show();
+    });
+  }
 }

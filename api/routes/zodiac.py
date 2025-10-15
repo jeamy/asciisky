@@ -24,7 +24,8 @@ CONSTELLATION_NAMES = [
     'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
     'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces',
     # Zusätzliche bekannte Sternbilder
-    'Ursa Major', 'Ursa Minor', 'Pegasus', 'Andromeda', 'Cassiopeia', 'Orion', 'Canis Major', 'Perseus'
+    'Ursa Major', 'Ursa Minor', 'Pegasus', 'Andromeda', 'Cassiopeia', 'Orion', 'Canis Major', 'Perseus',
+    'Auriga', 'Draco', 'Lyra', 'Cygnus', 'Aquila', 'Bootes'
 ]
 
 # Deutsche Übersetzungen der Sternbildnamen
@@ -37,7 +38,9 @@ CONSTELLATION_TRANSLATIONS = {
     # Zusätzliche bekannte Sternbilder
     'Ursa Major': 'Großer Bär', 'Ursa Minor': 'Kleiner Bär', 'Pegasus': 'Pegasus',
     'Andromeda': 'Andromeda', 'Cassiopeia': 'Kassiopeia', 'Orion': 'Orion',
-    'Canis Major': 'Großer Hund', 'Perseus': 'Perseus'
+    'Canis Major': 'Großer Hund', 'Perseus': 'Perseus',
+    'Auriga': 'Fuhrmann', 'Draco': 'Drachen', 'Lyra': 'Leier',
+    'Cygnus': 'Schwan', 'Aquila': 'Adler', 'Bootes': 'Bärenhüter'
 }
 
 # Zuordnung der Stellarium-Codes zu vollständigen IAU-Namen
@@ -48,7 +51,9 @@ STELLARIUM_CODE_TO_NAME = {
     'Sgr': 'Sagittarius', 'Cap': 'Capricornus', 'Aqr': 'Aquarius', 'Psc': 'Pisces',
     # Zusätzliche bekannte Sternbilder
     'UMa': 'Ursa Major', 'UMi': 'Ursa Minor', 'Peg': 'Pegasus', 'And': 'Andromeda',
-    'Cas': 'Cassiopeia', 'Ori': 'Orion', 'CMa': 'Canis Major', 'Per': 'Perseus'
+    'Cas': 'Cassiopeia', 'Ori': 'Orion', 'CMa': 'Canis Major', 'Per': 'Perseus',
+    'Aur': 'Auriga', 'Dra': 'Draco', 'Lyr': 'Lyra',
+    'Cyg': 'Cygnus', 'Aql': 'Aquila', 'Boo': 'Bootes'
 }
 
 router = APIRouter()

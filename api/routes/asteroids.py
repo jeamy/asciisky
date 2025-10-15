@@ -15,13 +15,18 @@ from db_utils import get_asteroid_positions
 router = APIRouter()
 
 @router.get("/bright_asteroids")
-async def get_bright_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None):
+async def get_bright_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
 
         if save_location and lat is not None and lon is not None and elevation is not None:
             settings.set_location(lat, lon, elevation, location_name)
+
+        # Magnitude-Filter aus user_settings oder Parameter verwenden
+        if max_magnitude is None:
+            filters = settings.get_magnitude_filters()
+            max_magnitude = filters.get("asteroidMaxMagnitude", bright_asteroids.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
 
@@ -40,8 +45,10 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                     result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
                     for asteroid in asteroid_list:
                         if isinstance(asteroid, dict) and "name" in asteroid:
-                            # Use name as key without index to avoid duplicate keys when order changes
-                            result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
+                            # Magnitude-Filter anwenden
+                            if asteroid.get("magnitude", 99) <= max_magnitude:
+                                # Use name as key without index to avoid duplicate keys when order changes
+                                result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
                     return result
             except Exception as e:
                 # Log error but continue to fallback
@@ -59,7 +66,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             return result
 
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=bright_asteroids.MAX_APPARENT_MAGNITUDE, current_dt=dt_utc))
+        bright_asteroid_list = await asyncio.to_thread(lambda: bright_asteroids.load_bright_asteroids(LOADER, ts, eph, location_dict, max_magnitude=max_magnitude, current_dt=dt_utc))
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         for asteroid in bright_asteroid_list:
             if isinstance(asteroid, dict) and "name" in asteroid:
@@ -75,6 +82,6 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
 
 # Add back /asteroids endpoint for backward compatibility
 @router.get("/asteroids")
-async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None):
+async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Alias for /bright_asteroids endpoint for backward compatibility."""
-    return await get_bright_asteroids(request, lat, lon, elevation, location_name, save_location, time)
+    return await get_bright_asteroids(request, lat, lon, elevation, location_name, save_location, time, max_magnitude)

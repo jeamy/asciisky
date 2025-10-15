@@ -429,19 +429,21 @@ export class SkyRenderer {
             });
         }
 
-        // Hole Magnitude-Werte aus der Config-API
+        // Hole Magnitude-Werte aus der Filters-API (benutzerdefinierte Einstellungen)
         let asteroidMag = 10.0; // Fallback
-        let cometMag = 16.0;    // Fallback
+        let cometMag = 14.0;    // Fallback
         
         try {
-            const response = await fetch(`${API_ENDPOINTS.CONFIG}?nocache=1`);
+            const response = await fetch(`${API_ENDPOINTS.FILTERS_GET}?nocache=1`);
             if (response.ok) {
-                const config = await response.json();
-                asteroidMag = config.magnitude_limits?.asteroids?.max_apparent || 10.0;
-                cometMag = config.magnitude_limits?.comets?.max_apparent || 16.0;
+                const data = await response.json();
+                if (data.success && data.filters) {
+                    asteroidMag = data.filters.asteroidMaxMagnitude || 10.0;
+                    cometMag = data.filters.cometMaxMagnitude || 14.0;
+                }
             }
         } catch (error) {
-            console.warn('Could not fetch magnitude limits from config API:', error);
+            console.warn('Could not fetch magnitude filters:', error);
         }
 
         // Erstelle Count-Display
