@@ -41,32 +41,34 @@ def invalidate_cache():
         try:
             from db_utils import get_db_connection
             conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Delete all asteroid positions
-            cursor.execute("DELETE FROM asteroid_positions")
-            deleted_asteroid_positions = cursor.rowcount
-            
-            # Delete all comet positions
-            cursor.execute("DELETE FROM comet_positions")
-            deleted_comet_positions = cursor.rowcount
-            
-            # Delete asteroid dataframes (force reload with new magnitude limit)
-            cursor.execute("DELETE FROM asteroids")
-            deleted_asteroid_df = cursor.rowcount
-            
-            # Delete comet dataframes (force reload with new magnitude limit)
-            cursor.execute("DELETE FROM comets")
-            deleted_comet_df = cursor.rowcount
-            
-            conn.commit()
-            conn.close()
-            
-            print(f"Cleared SQLite cache:")
-            print(f"  - Asteroid positions: {deleted_asteroid_positions}")
-            print(f"  - Comet positions: {deleted_comet_positions}")
-            print(f"  - Asteroid dataframes: {deleted_asteroid_df}")
-            print(f"  - Comet dataframes: {deleted_comet_df}")
+            try:
+                cursor = conn.cursor()
+                
+                # Delete all asteroid positions
+                cursor.execute("DELETE FROM asteroid_positions")
+                deleted_asteroid_positions = cursor.rowcount
+                
+                # Delete all comet positions
+                cursor.execute("DELETE FROM comet_positions")
+                deleted_comet_positions = cursor.rowcount
+                
+                # Delete asteroid dataframes (force reload with new magnitude limit)
+                cursor.execute("DELETE FROM asteroids")
+                deleted_asteroid_df = cursor.rowcount
+                
+                # Delete comet dataframes (force reload with new magnitude limit)
+                cursor.execute("DELETE FROM comets")
+                deleted_comet_df = cursor.rowcount
+                
+                conn.commit()
+                
+                print(f"Cleared SQLite cache:")
+                print(f"  - Asteroid positions: {deleted_asteroid_positions}")
+                print(f"  - Comet positions: {deleted_comet_positions}")
+                print(f"  - Asteroid dataframes: {deleted_asteroid_df}")
+                print(f"  - Comet dataframes: {deleted_comet_df}")
+            finally:
+                conn.close()
         except Exception as e:
             print(f"Error clearing SQLite cache: {e}")
             
@@ -89,8 +91,10 @@ async def get_filters():
 async def set_filters(filters: MagnitudeFilters):
     """Set magnitude filter settings and invalidate cache"""
     try:
-        # Get old filters to check if they changed
+        # Get old filters BEFORE updating to check if they changed
         old_filters = settings.get_magnitude_filters()
+        old_asteroid = old_filters.get("asteroidMaxMagnitude")
+        old_comet = old_filters.get("cometMaxMagnitude")
         
         # Update filters
         updated_filters = settings.set_magnitude_filters(
@@ -98,23 +102,28 @@ async def set_filters(filters: MagnitudeFilters):
             comet_max=filters.cometMaxMagnitude
         )
         
-        # Check if filters actually changed
+        # Check if filters actually changed (compare with OLD values, not current)
         filters_changed = (
             (filters.asteroidMaxMagnitude is not None and 
-             old_filters.get("asteroidMaxMagnitude") != filters.asteroidMaxMagnitude) or
+             old_asteroid != filters.asteroidMaxMagnitude) or
             (filters.cometMaxMagnitude is not None and 
-             old_filters.get("cometMaxMagnitude") != filters.cometMaxMagnitude)
+             old_comet != filters.cometMaxMagnitude)
         )
         
-        # Invalidate cache if filters changed
+        # NOTE: Cache invalidation is NOT needed anymore!
+        # Reason: Workers cache with max_magnitude=20.0 (all objects)
+        # Filtering happens at API level based on user_settings.json
+        # Only invalidate if user DECREASES filter (to remove objects from view)
+        # But even then, no recalculation needed - just filter differently
+        
         if filters_changed:
-            print(f"Filters changed from {old_filters} to {updated_filters}, invalidating cache...")
-            invalidate_cache()
+            print(f"Filters changed from {old_filters} to {updated_filters}")
+            print(f"No cache invalidation needed - filtering happens at API level")
         
         return {
             "success": True,
             "filters": updated_filters,
-            "cache_invalidated": filters_changed
+            "cache_invalidated": False  # No cache invalidation needed - filtering at API level
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

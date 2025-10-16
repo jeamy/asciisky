@@ -70,8 +70,10 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         for asteroid in bright_asteroid_list:
             if isinstance(asteroid, dict) and "name" in asteroid:
-                # Use name as key without index to avoid duplicate keys when order changes
-                result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
+                # Magnitude-Filter anwenden (wichtig: load_bright_asteroids cached mit Mag 20, wir filtern hier)
+                if asteroid.get("magnitude", 99) <= max_magnitude:
+                    # Use name as key without index to avoid duplicate keys when order changes
+                    result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
         
         # Trigger background precompute for future hours even without time parameter
         asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
