@@ -1,8 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
-from api.computation import LOADER, ts, eph
-from api.background import trigger_background_precompute_spot
 from api.cache_interpolation import load_asteroids_with_interpolation
 import bright_asteroids
 import settings
@@ -12,31 +10,61 @@ import pickle
 import time
 import uuid
 import logging
+from datetime import datetime, timedelta
 from cache_utils import build_cache_path, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
 from db_utils import get_asteroid_positions
 
 # RabbitMQ Integration (für Migration)
 from config.feature_flags import use_rabbitmq_for
+from api.rabbitmq.task_publisher import get_task_publisher
 
 logger = logging.getLogger(__name__)
 
-# Lazy init für RabbitMQ Client
-_rabbitmq_client = None
-
-def get_rabbitmq_client():
-    """Lazy initialization von RabbitMQ Client"""
-    global _rabbitmq_client
-    if _rabbitmq_client is None and settings.RABBITMQ_ENABLED:
-        try:
-            from api.rabbitmq.rpc_client import RabbitMQRPCClient
-            _rabbitmq_client = RabbitMQRPCClient(settings.RABBITMQ_URL)
-            logger.info("RabbitMQ client initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize RabbitMQ client: {e}")
-            _rabbitmq_client = None
-    return _rabbitmq_client
-
 router = APIRouter()
+
+
+async def trigger_rabbitmq_precompute(lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12):
+    """
+    Triggert RabbitMQ Background Tasks für Precompute
+    
+    Args:
+        lat, lon, elevation: Location
+        dt_utc: Zentrale Zeit
+        kinds: Liste von Typen ('asteroids', 'comets', etc.)
+        hours_radius: Radius in Stunden um dt_utc
+    """
+    try:
+        publisher = get_task_publisher()
+        if not publisher:
+            logger.warning("TaskPublisher not available, skipping RabbitMQ precompute")
+            return
+        
+        location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
+        
+        # Erstelle Tasks für Zeitfenster (±hours_radius)
+        tasks = []
+        for hour_offset in range(-hours_radius, hours_radius + 1):
+            time_bucket = dt_utc + timedelta(hours=hour_offset)
+            time_bucket_str = time_bucket.isoformat()
+            
+            for kind in kinds:
+                # Magnitude basierend auf Kind
+                magnitude = 20.0 if kind == 'asteroids' else 14.0 if kind == 'comets' else None
+                
+                tasks.append({
+                    'kind': kind,
+                    'location': location,
+                    'time_bucket': time_bucket_str,
+                    'magnitude': magnitude,
+                    'priority': 5  # Normal priority
+                })
+        
+        # Publiziere Tasks als Batch
+        await asyncio.to_thread(publisher.publish_batch, tasks)
+        logger.info(f"Published {len(tasks)} precompute tasks to RabbitMQ")
+        
+    except Exception as e:
+        logger.error(f"Failed to trigger RabbitMQ precompute: {e}")
 
 
 async def compute_asteroids_rabbitmq(location_dict, dt_utc, max_magnitude):
@@ -136,13 +164,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 # Log error but continue to fallback
                 print(f"Interpolation failed: {e}")
 
-            # No cache available - trigger spot computation (±12h around requested time)
-            # This is much faster than full 30-day window
-            print(f"No cache for asteroids at {dt_utc.isoformat()}, triggering spot computation (±12h)...")
-            
-            # Trigger spot precompute for ±12 hours around requested time
-            asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
-            
+            # No cache available - RabbitMQ will handle this
             # Return empty result immediately - data will appear on next poll (60s)
             result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
             return result
@@ -150,30 +172,45 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
         # Feature Flag: RabbitMQ oder alte Architektur?
-        user_id = request.session.get('user_id', None)
-        use_rabbitmq = use_rabbitmq_for('asteroids', user_id)
+        user_id = request.session.get('user_id', 'anonymous')
+        use_rabbitmq_flag = use_rabbitmq_for('asteroids', user_id)
         
-        if use_rabbitmq:
-            logger.info(f"Using RabbitMQ for asteroids: lat={lat}, lon={lon}")
+        # Bei RabbitMQ: Versuche aus Cache zu lesen, triggere Background Task wenn leer
+        if use_rabbitmq_flag:
+            logger.info(f"Using RabbitMQ architecture: lat={lat}, lon={lon}")
+            
+            # Versuche aus Cache zu lesen (wie Legacy)
             try:
-                bright_asteroid_list = await compute_asteroids_rabbitmq(
-                    location_dict, dt_utc, max_magnitude
+                bright_asteroid_list = load_asteroids_with_interpolation(
+                    lat, lon, elevation, dt_utc,
+                    bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
+                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
+                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False),
+                    disable_pickle=getattr(bright_asteroids, 'DISABLE_PICKLE', False)
                 )
-            except Exception as e:
-                logger.error(f"RabbitMQ error: {e}")
-                # Fallback zur alten Architektur
-                if settings.FALLBACK_TO_OLD_ON_ERROR:
-                    logger.warning("Falling back to old architecture")
-                    bright_asteroid_list = await compute_asteroids_old(
-                        location_dict, dt_utc, max_magnitude
-                    )
+                
+                if isinstance(bright_asteroid_list, list) and bright_asteroid_list:
+                    # Cache Hit! Daten vorhanden
+                    logger.info(f"Cache hit for asteroids: {len(bright_asteroid_list)} found")
                 else:
-                    raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+                    # Cache Miss! Trigger Background Task
+                    logger.info("Cache miss - triggering RabbitMQ background task")
+                    asyncio.create_task(trigger_rabbitmq_precompute(
+                        lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
+                    ))
+                    bright_asteroid_list = []  # Leere Liste
+                    
+            except Exception as e:
+                logger.warning(f"Cache read failed: {e}")
+                # Trigger Background Task
+                asyncio.create_task(trigger_rabbitmq_precompute(
+                    lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
+                ))
+                bright_asteroid_list = []  # Leere Liste
         else:
-            logger.info(f"Using old architecture for asteroids: lat={lat}, lon={lon}")
-            bright_asteroid_list = await compute_asteroids_old(
-                location_dict, dt_utc, max_magnitude
-            )
+            # RabbitMQ deaktiviert - sollte nicht passieren
+            logger.warning(f"RabbitMQ disabled for asteroids - returning empty")
+            bright_asteroid_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         for asteroid in bright_asteroid_list:
@@ -182,10 +219,6 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                 if asteroid.get("magnitude", 99) <= max_magnitude:
                     # Use name as key without index to avoid duplicate keys when order changes
                     result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
-        
-        # Trigger background precompute for future hours even without time parameter
-        if not use_rabbitmq:  # Nur bei alter Architektur
-            asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
         
         return result
     except Exception as e:

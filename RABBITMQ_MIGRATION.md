@@ -1,43 +1,207 @@
 # RabbitMQ Migration - Quick Start Guide
 
-## Status: Phase 0, 1, 2, 3 Abgeschlossen ✅
+## Status: Phase 0, 1, 2, 3 Abgeschlossen 
 
 Die RabbitMQ-Migration ist vollständig implementiert und kann schrittweise aktiviert werden.
 
+## ⚠️ WICHTIG: Asynchrone Architektur
+
+Die RabbitMQ-Integration nutzt **NICHT** synchrones Request/Reply (RPC), sondern:
+**Asynchrones Message Processing mit Cache** - genau wie das Legacy-System!
+
+### Architektur-Übersicht:
+
+```
+┌─────────────┐
+│  Frontend   │ ──┐ Pollt alle 60s
+└─────────────┘   │
+       ↓          │
+┌─────────────┐   │
+│     API     │ ←─┘
+└─────────────┘
+  │         ↑
+  │ Cache   │ Cache
+  │ Miss    │ Hit
+  ↓         │
+┌─────────────┐
+│  RabbitMQ   │ Async Tasks
+│   Queue     │
+└─────────────┘
+       ↓
+┌─────────────┐
+│   Worker    │ Berechnet 2-3 Min
+└─────────────┘
+       ↓
+┌─────────────┐
+│  Cache/DB   │ SQLite + Pickle
+└─────────────┘
+```
+
+### Flow:
+1. **User Request** → API liest Cache
+2. **Cache Miss** → API triggert RabbitMQ Background Task + Return leer
+3. **Worker** → Empfängt Task, berechnet Daten, speichert in Cache
+4. **Frontend** → Pollt nach 60s, API liest Cache → Daten vorhanden!
+5. **Frontend** → Zeigt Daten an
+
 ## Was wurde implementiert?
 
-### ✅ Abgeschlossen
+### ✅ Abgeschlossen - 100% RabbitMQ, kein Legacy!
 
 1. **Feature Flags System** (`config/feature_flags.py`)
-   - Graduelles Rollout mit `RABBITMQ_PERCENTAGE` (0-100%)
-   - Typ-spezifische Flags für Asteroids, Comets, Celestial, Constellations
+   - Typ-spezifische Flags für Asteroids & Comets
+   - 100% RabbitMQ aktiviert
 
-2. **RabbitMQ Client** (`api/rabbitmq/rpc_client.py`)
-   - Request/Reply Pattern mit Timeout
-   - Automatischer Fallback bei Fehlern
+2. **RabbitMQ Task Publisher** (`api/rabbitmq/task_publisher.py`)
+   - Asynchrones Publishing von Background Tasks
+   - Thread-safe mit thread-local Connections
+   - Batch-Support für viele Tasks
+   - KEIN synchrones Request/Reply!
 
-3. **Alle Worker implementiert**
+3. **Worker implementiert** (nur für Asteroids & Comets)
    - `workers/asteroid_worker.py` - Asteroiden-Berechnungen
    - `workers/comet_worker.py` - Kometen-Berechnungen
-   - `workers/celestial_worker.py` - Planeten, Sonne, Mond
-   - `workers/constellation_worker.py` - Sternbilder
-   - Alle wiederverw enden bestehenden Skyfield-Code
+   - Je 2 Worker-Instanzen für Lastverteilung
+   - Speichern automatisch in Cache/DB
 
-4. **API-Integration** (`api/routes/asteroids.py`)
+4. **API-Integration** (`api/routes/asteroids.py`, `comets.py`)
+   - **Cache-First**: Liest zuerst aus Cache (SQLite + Pickle)
+   - **Background Tasks**: Triggert RabbitMQ wenn Cache leer
+   - **Leere Response**: Frontend pollt und zeigt Daten wenn verfügbar
+   - `trigger_rabbitmq_precompute()` - Sendet ±12h Tasks an Queue
    - Feature Flags integriert
-   - Automatischer Fallback zur alten Architektur
-   - (Comets, Celestial, Constellations analog implementierbar)
+   - **KEIN Fallback** - 100% RabbitMQ
 
-5. **Docker Compose** (`docker-compose.yml`)
-   - 6 RabbitMQ Worker als optionale Services (Profile)
-   - 2x Asteroid, 2x Comet, 1x Celestial, 1x Constellation
-   - Feature Flags konfigurierbar
+5. **Celestial & Zodiac** (KEIN RabbitMQ)
+   - Bleiben bei direkter Berechnung (< 1s)
+   - Kein Cache nötig
+   - Kein RabbitMQ nötig
 
-## Voraussetzungen
+6. **Docker Compose** (`docker-compose.yml`)
+   - 4 RabbitMQ Worker
+   - 2x Asteroid, 2x Comet
+   - Automatische Lastverteilung
+
+## Zwei Wege zum Testen
+
+### Option 1: Lokales Testing (EMPFOHLEN für Start) 🏠
+
+**Alles auf einem Rechner** - Einfach und schnell!
+
+Siehe **[TESTING_LOCAL.md](TESTING_LOCAL.md)** für vollständige Anleitung.
+
+**Quick Start (3 Befehle!)**
+
+```bash
+# 1. Alles starten (RabbitMQ + 4 Worker)
+docker compose up -d
+
+# 2. Queues erstellen
+./scripts/setup-rabbitmq-queues.sh
+
+# 3. Testen!
+curl "http://localhost:8000/api/bright_asteroids?lat=48.2&lon=16.3"
+```
+
+**Neue `docker-compose.yml`** enthält jetzt:
+- ✅ RabbitMQ Service (integriert)
+- ✅ 4 Worker (2x Asteroid, 2x Comet)
+- ✅ 100% RabbitMQ Traffic, kein Fallback
+- ✅ Keine Override-Files mehr nötig!
+
+**Hinweis:** Celestial & Zodiac nutzen KEIN RabbitMQ (zu schnell, < 1s)
+
+## Nützliche RabbitMQ Befehle
+
+### Queue Status prüfen
+
+```bash
+# Alle Queues mit Messages und Consumers
+docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
+
+# Detaillierte Queue-Info
+docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers durable
+
+# Nur bestimmte Queue
+docker exec asciisky-rabbitmq rabbitmqctl list_queues | grep asteroid
+```
+
+### Worker Status prüfen
+
+```bash
+# Alle Connections
+docker exec asciisky-rabbitmq rabbitmqctl list_connections name peer_host peer_port state
+
+# Alle Channels
+docker exec asciisky-rabbitmq rabbitmqctl list_channels connection name number consumer_count
+
+# Consumer pro Queue
+docker exec asciisky-rabbitmq rabbitmqctl list_consumers
+```
+
+### Messages & Bindings
+
+```bash
+# Alle Exchanges
+docker exec asciisky-rabbitmq rabbitmqctl list_exchanges name type durable
+
+# Alle Bindings
+docker exec asciisky-rabbitmq rabbitmqctl list_bindings source_name destination_name routing_key
+
+# Queue leeren (VORSICHT!)
+docker exec asciisky-rabbitmq rabbitmqctl purge_queue asteroid.compute
+```
+
+### Monitoring
+
+```bash
+# RabbitMQ Status
+docker exec asciisky-rabbitmq rabbitmqctl status
+
+# Cluster Status (bei Multi-Host)
+docker exec asciisky-rabbitmq rabbitmqctl cluster_status
+
+# Memory Usage
+docker exec asciisky-rabbitmq rabbitmqctl status | grep -A 10 memory
+```
+
+### Management UI
+
+```bash
+# Öffne im Browser:
+http://localhost:15672
+
+# Login:
+Username: admin
+Password: password
+```
+
+### Logs
+
+```bash
+# RabbitMQ Logs
+docker compose logs rabbitmq --tail=50
+
+# Worker Logs
+docker compose logs asteroid-worker-1 --tail=20
+docker compose logs comet-worker-1 --tail=20
+
+# Web Logs (API)
+docker compose logs web --tail=30 | grep -i rabbitmq
+
+# Alle Logs live
+docker compose logs -f
+```
+
+### Option 2: Multi-Host Setup (für Produktion) 🌐
+
+**RabbitMQ auf separaten Hosts** - Siehe unten.
+
+## Voraussetzungen (Multi-Host)
 
 ### RabbitMQ Cluster
 
-Bevor du die Migration aktivierst, muss ein RabbitMQ-Cluster laufen:
+Für Produktions-Setup muss ein RabbitMQ-Cluster auf separaten Hosts laufen:
 
 ```bash
 # Siehe doc/rabbitmq/003-rabbitmq-4.1-multi-host-setup.md
@@ -83,36 +247,14 @@ docker exec rabbitmq rabbitmqadmin declare binding \
   destination=comet.compute \
   routing_key=compute.comet
 
-# Celestial Compute Queue
-docker exec rabbitmq rabbitmqadmin declare queue \
-  name=celestial.compute \
-  durable=true \
-  arguments='{"x-queue-type":"quorum","x-max-priority":10}'
-
-docker exec rabbitmq rabbitmqadmin declare binding \
-  source=computation.direct \
-  destination=celestial.compute \
-  routing_key=compute.celestial
-
-# Constellation Compute Queue
-docker exec rabbitmq rabbitmqadmin declare queue \
-  name=constellation.compute \
-  durable=true \
-  arguments='{"x-queue-type":"quorum","x-max-priority":10}'
-
-docker exec rabbitmq rabbitmqadmin declare binding \
-  source=computation.direct \
-  destination=constellation.compute \
-  routing_key=compute.constellation
-
-# Results & Status Queues
+# Results & Status Queues (für Monitoring)
 docker exec rabbitmq rabbitmqadmin declare queue \
   name=computation.results \
   durable=true
 
 docker exec rabbitmq rabbitmqadmin declare queue \
   name=computation.status \
-  durable=false
+  durable=true
 ```
 
 ## Migration aktivieren

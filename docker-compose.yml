@@ -1,4 +1,25 @@
 services:
+  # ===== RabbitMQ Service =====
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: asciisky-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=password
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== Web Service =====
   web:
     image: asciisky-web
     build: .
@@ -27,69 +48,32 @@ services:
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
       - ASCII_SKY_COMET_EVENTS_MAX=50
       - ASCII_SKY_DISABLE_PICKLE=1
-      # RabbitMQ Migration Feature Flags (WICHTIG!)
-      - USE_RABBITMQ=false
-      - USE_RABBITMQ_ASTEROIDS=false
-      - USE_RABBITMQ_COMETS=false
-      - USE_RABBITMQ_CELESTIAL=false
-      - RABBITMQ_PERCENTAGE=0
-      - FALLBACK_TO_OLD_ON_ERROR=true
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
-      - RABBITMQ_TIMEOUT=30
+      # RabbitMQ - NUR neue Architektur!
+      - USE_RABBITMQ=true
+      - USE_RABBITMQ_ASTEROIDS=true
+      - USE_RABBITMQ_COMETS=true
+      - RABBITMQ_PERCENTAGE=100
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_TIMEOUT=120
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
- 
-  worker:
-    image: asciisky-worker
-    build: .
-    command: ["python", "precompute_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - ASCII_SKY_PRECOMPUTE_HOURS=720
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
-      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
-      - ASCII_SKY_PRECOMPUTE_WORKERS=4
-      - ASCII_SKY_ADAPTIVE_WORKERS=0
-      - ASCII_SKY_RETENTION_DAYS=30
-      # Magnitude limits for asteroids and comets
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
-      - ASCII_SKY_COMET_EVENTS_MAX=50
-      - ASCII_SKY_DISABLE_PICKLE=1
-    restart: unless-stopped
- 
-  worker_once:
-    image: asciisky-worker
-    build: .
-    command: ["python", "precompute_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - ASCII_SKY_PRECOMPUTE_HOURS=720
-      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
-      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
-      - ASCII_SKY_PRECOMPUTE_WORKERS=4
-      - ASCII_SKY_ADAPTIVE_WORKERS=0
-      - ASCII_SKY_RETENTION_DAYS=30
-      - ASCII_SKY_WORKER_RUN_ONCE=1
-      # Magnitude limits for asteroids and comets
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
-      - ASCII_SKY_COMET_EVENTS_MAX=50
-      - ASCII_SKY_DISABLE_PICKLE=1
-    restart: "no"
-    profiles: ["once"]
 
+  # ===== Data Updater (behält alte Logik) =====
+  data_updater:
+    image: asciisky-worker
+    build: .
+    command: ["python", "nightly_data_updater.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_UPDATE_HOUR=4
+    restart: unless-stopped
+
+  # ===== Task Cleanup (behält alte Logik) =====
   task_cleanup:
     image: asciisky-worker
     build: .
@@ -103,21 +87,7 @@ services:
       - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
     restart: unless-stopped
 
-  data_updater:
-    image: asciisky-worker
-    build: .
-    command: ["python", "nightly_data_updater.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - ASCII_SKY_UPDATE_HOUR=4
-    restart: unless-stopped
-
-  # ===== NEUE RABBITMQ WORKER (für Migration) =====
-  # Diese Services sind standardmäßig deaktiviert (profiles: ["rabbitmq"])
-  # Aktivieren mit: docker compose --profile rabbitmq up -d
+  # ===== RABBITMQ WORKER =====
   
   asteroid-worker-1:
     image: asciisky-worker
@@ -128,11 +98,13 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
       - WORKER_ID=asteroid-worker-1
       - LOG_LEVEL=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
-    profiles: ["rabbitmq"]
   
   asteroid-worker-2:
     image: asciisky-worker
@@ -143,11 +115,13 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
       - WORKER_ID=asteroid-worker-2
       - LOG_LEVEL=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
-    profiles: ["rabbitmq"]
   
   comet-worker-1:
     image: asciisky-worker
@@ -158,11 +132,13 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
       - WORKER_ID=comet-worker-1
       - LOG_LEVEL=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
-    profiles: ["rabbitmq"]
   
   comet-worker-2:
     image: asciisky-worker
@@ -173,38 +149,15 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
       - WORKER_ID=comet-worker-2
       - LOG_LEVEL=info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
-    profiles: ["rabbitmq"]
   
-  celestial-worker-1:
-    image: asciisky-worker
-    build: .
-    command: ["python", "workers/celestial_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
-      - WORKER_ID=celestial-worker-1
-      - LOG_LEVEL=info
-    restart: unless-stopped
-    profiles: ["rabbitmq"]
-  
-  constellation-worker-1:
-    image: asciisky-worker
-    build: .
-    command: ["python", "workers/constellation_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
-      - WORKER_ID=constellation-worker-1
-      - LOG_LEVEL=info
-    restart: unless-stopped
-    profiles: ["rabbitmq"]
+
+volumes:
+  rabbitmq_data:
+    driver: local

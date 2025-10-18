@@ -61,7 +61,6 @@ class CometWorker:
                 durable=True,
                 arguments={
                     'x-queue-type': 'quorum',
-                    'x-max-priority': 10,
                     'x-message-ttl': 3600000  # 1 Stunde
                 }
             )
@@ -109,11 +108,10 @@ class CometWorker:
             # Zeit parsen
             time_bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
             
-            # Kometen berechnen
+            # Kometen berechnen UND in Cache speichern
             comet_list = comets.load_comets(
-                LOADER, ts, eph, location,
-                max_magnitude=magnitude,
-                use_cache=False,
+                ts, eph, location_dict,
+                max_comets=1000,
                 current_dt=time_bucket_dt
             )
             
@@ -147,42 +145,15 @@ class CometWorker:
             logger.info(f"Processing task {task_id}")
             
             # Status: Started
-            self.publish_status(task_id, 'started', 0, properties.correlation_id)
+            self.publish_status(task_id, 'started', 0, None)
             
-            # Berechnung
+            # Berechnung - Ergebnisse werden automatisch in Cache/DB gespeichert
             results = self.compute_comets(location, time_bucket, magnitude)
             
             # Status: Completed
-            self.publish_status(task_id, 'completed', 100, properties.correlation_id)
+            self.publish_status(task_id, 'completed', 100, None)
             
-            # Result erstellen
-            location_key = f"lat+{location['latitude']}_lon+{location['longitude']}_el+{location.get('elevation', 0):04d}"
-            
-            result = {
-                'task_id': task_id,
-                'location_key': location_key,
-                'time_bucket': time_bucket,
-                'timestamp': time_bucket,
-                'comets': results,
-                'computed_at': datetime.now(timezone.utc).isoformat(),
-                'worker_id': self.worker_id,
-                'duration': time.time() - start_time
-            }
-            
-            # Reply mit correlation_id
-            reply_to = properties.reply_to or 'computation.results'
-            ch.basic_publish(
-                exchange='',
-                routing_key=reply_to,
-                properties=pika.BasicProperties(
-                    correlation_id=properties.correlation_id,
-                    delivery_mode=2,
-                    content_type='application/json'
-                ),
-                body=json.dumps(result)
-            )
-            
-            # ACK
+            # ACK - Task erfolgreich verarbeitet und in Cache gespeichert
             ch.basic_ack(delivery_tag=method.delivery_tag)
             
             duration = time.time() - start_time
@@ -199,7 +170,7 @@ class CometWorker:
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                 logger.warning("Task failed, requeued for retry")
     
-    def publish_status(self, task_id, status, progress, correlation_id):
+    def publish_status(self, task_id, status, progress, correlation_id=None):
         """
         Publiziert Status-Update
         
@@ -207,7 +178,7 @@ class CometWorker:
             task_id: Task-ID
             status: Status ('started', 'progress', 'completed', 'failed')
             progress: Fortschritt (0-100)
-            correlation_id: Correlation-ID
+            correlation_id: Optional Correlation-ID
         """
         try:
             status_msg = {
@@ -218,14 +189,17 @@ class CometWorker:
                 'worker_id': self.worker_id
             }
             
+            props = pika.BasicProperties(
+                delivery_mode=1,
+                content_type='application/json'
+            )
+            if correlation_id:
+                props.correlation_id = correlation_id
+            
             self.channel.basic_publish(
                 exchange='',
                 routing_key='computation.status',
-                properties=pika.BasicProperties(
-                    correlation_id=correlation_id,
-                    delivery_mode=1,
-                    content_type='application/json'
-                ),
+                properties=props,
                 body=json.dumps(status_msg)
             )
             

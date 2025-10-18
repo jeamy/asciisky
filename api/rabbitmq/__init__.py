@@ -1,6 +1,6 @@
 """
 RabbitMQ Integration für ASCII Sky
 """
-from .rpc_client import RabbitMQRPCClient
+from .task_publisher import TaskPublisher, get_task_publisher
 
-__all__ = ['RabbitMQRPCClient']
+__all__ = ['TaskPublisher', 'get_task_publisher']

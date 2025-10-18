@@ -1,0 +1,210 @@
+services:
+  web:
+    image: asciisky-web
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      # Horizon für vom Webprozess getriggerte Fenster-Tasks (30 Tage)
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
+      # Duplikate und Last begrenzen (siehe api/background.py)
+      - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=1
+      - ASCII_SKY_MAX_WINDOW_WORKERS=4
+      # Session Secret (für Prod sinnvoll ändern)
+      - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
+      - ASCII_SKY_COMET_EVENTS_MAX=50
+      - ASCII_SKY_DISABLE_PICKLE=1
+      # RabbitMQ Migration Feature Flags (WICHTIG!)
+      - USE_RABBITMQ=false
+      - USE_RABBITMQ_ASTEROIDS=false
+      - USE_RABBITMQ_COMETS=false
+      - USE_RABBITMQ_CELESTIAL=false
+      - RABBITMQ_PERCENTAGE=0
+      - FALLBACK_TO_OLD_ON_ERROR=true
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - RABBITMQ_TIMEOUT=30
+    restart: unless-stopped
+ 
+  worker:
+    image: asciisky-worker
+    build: .
+    command: ["python", "precompute_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
+      - ASCII_SKY_PRECOMPUTE_WORKERS=4
+      - ASCII_SKY_ADAPTIVE_WORKERS=0
+      - ASCII_SKY_RETENTION_DAYS=30
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
+      - ASCII_SKY_COMET_EVENTS_MAX=50
+      - ASCII_SKY_DISABLE_PICKLE=1
+    restart: unless-stopped
+ 
+  worker_once:
+    image: asciisky-worker
+    build: .
+    command: ["python", "precompute_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
+      - ASCII_SKY_PRECOMPUTE_WORKERS=4
+      - ASCII_SKY_ADAPTIVE_WORKERS=0
+      - ASCII_SKY_RETENTION_DAYS=30
+      - ASCII_SKY_WORKER_RUN_ONCE=1
+      # Magnitude limits for asteroids and comets
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
+      - ASCII_SKY_COMET_EVENTS_MAX=50
+      - ASCII_SKY_DISABLE_PICKLE=1
+    restart: "no"
+    profiles: ["once"]
+
+  task_cleanup:
+    image: asciisky-worker
+    build: .
+    command: ["python", "task_cleanup_service.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_TASK_CLEANUP_HOURS=6
+      - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
+    restart: unless-stopped
+
+  data_updater:
+    image: asciisky-worker
+    build: .
+    command: ["python", "nightly_data_updater.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_UPDATE_HOUR=4
+    restart: unless-stopped
+
+  # ===== NEUE RABBITMQ WORKER (für Migration) =====
+  # Diese Services sind standardmäßig deaktiviert (profiles: ["rabbitmq"])
+  # Aktivieren mit: docker compose --profile rabbitmq up -d
+  
+  asteroid-worker-1:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/asteroid_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=asteroid-worker-1
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]
+  
+  asteroid-worker-2:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/asteroid_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=asteroid-worker-2
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]
+  
+  comet-worker-1:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/comet_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=comet-worker-1
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]
+  
+  comet-worker-2:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/comet_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=comet-worker-2
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]
+  
+  celestial-worker-1:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/celestial_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=celestial-worker-1
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]
+  
+  constellation-worker-1:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/constellation_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - RABBITMQ_URL=amqp://admin:password@localhost:5672/
+      - WORKER_ID=constellation-worker-1
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    profiles: ["rabbitmq"]

@@ -1,8 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param
-from api.computation import LOADER, ts, eph
-from api.background import trigger_background_precompute_spot
 from api.cache_interpolation import load_comets_with_interpolation
 import comets
 import settings
@@ -11,8 +9,104 @@ import pickle
 from cache_utils import build_cache_path, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
 from db_utils import get_comet_positions
 import asyncio
+import logging
+import uuid
+import time
+from datetime import datetime, timedelta
+
+# RabbitMQ Integration
+from config.feature_flags import use_rabbitmq_for
+from api.rabbitmq.task_publisher import get_task_publisher
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def trigger_rabbitmq_precompute_comets(lat, lon, elevation, dt_utc, hours_radius=12):
+    """Triggert RabbitMQ Background Tasks für Comet Precompute"""
+    try:
+        publisher = get_task_publisher()
+        if not publisher:
+            logger.warning("TaskPublisher not available")
+            return
+        
+        location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
+        tasks = []
+        
+        for hour_offset in range(-hours_radius, hours_radius + 1):
+            time_bucket = dt_utc + timedelta(hours=hour_offset)
+            tasks.append({
+                'kind': 'comets',
+                'location': location,
+                'time_bucket': time_bucket.isoformat(),
+                'magnitude': 14.0,
+                'priority': 5
+            })
+        
+        await asyncio.to_thread(publisher.publish_batch, tasks)
+        logger.info(f"Published {len(tasks)} comet precompute tasks")
+    except Exception as e:
+        logger.error(f"Failed to trigger comet precompute: {e}")
+
+
+async def compute_comets_rabbitmq(location_dict, dt_utc, max_magnitude):
+    """
+    Berechnet Kometen über RabbitMQ (neue Architektur)
+    
+    Args:
+        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
+        dt_utc: datetime object
+        max_magnitude: float
+        
+    Returns:
+        Liste von Kometen-Daten
+    """
+    client = get_rabbitmq_client()
+    if not client:
+        raise Exception("RabbitMQ client not available")
+    
+    task_id = f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    
+    request_data = {
+        'task_id': task_id,
+        'location': location_dict,
+        'time_bucket': dt_utc.isoformat(),
+        'magnitude': max_magnitude
+    }
+    
+    logger.info(f"Sending comet computation to RabbitMQ: {task_id}")
+    
+    # Synchroner RPC-Call mit Timeout
+    result = await asyncio.to_thread(
+        client.call,
+        'compute.comet',
+        request_data,
+        timeout=settings.RABBITMQ_TIMEOUT
+    )
+    
+    if result and 'comets' in result:
+        logger.info(f"Received {len(result['comets'])} comets from RabbitMQ")
+        return result['comets']
+    else:
+        raise Exception("Invalid response from RabbitMQ worker")
+
+
+async def compute_comets_old(location_dict, dt_utc, max_comets):
+    """
+    Berechnet Kometen mit alter Architektur (Fallback)
+    
+    Args:
+        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
+        dt_utc: datetime object
+        max_comets: int
+        
+    Returns:
+        Liste von Kometen-Daten
+    """
+    return await asyncio.to_thread(
+        lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc)
+    )
 
 @router.get("/comets")
 async def get_comets(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None, max_magnitude: float = None):
@@ -33,9 +127,15 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
-
-        if time is not None:
-            # Try loading with interpolation between cached buckets
+        location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
+        
+        # Feature Flag: RabbitMQ oder alte Architektur?
+        user_id = request.session.get('user_id', 'anonymous')
+        use_rabbitmq_flag = use_rabbitmq_for('comets', user_id)
+        
+        # Bei RabbitMQ: Cache-First + Background Tasks
+        if use_rabbitmq_flag:
+            logger.info(f"Using RabbitMQ architecture for comets: lat={lat}, lon={lon}")
             try:
                 comet_list = load_comets_with_interpolation(
                     lat, lon, elevation, dt_utc,
@@ -46,34 +146,24 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 )
                 
                 if isinstance(comet_list, list) and comet_list:
-                    result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                    count = 0
-                    for comet in comet_list:
-                        if isinstance(comet, dict) and "name" in comet:
-                            # Magnitude-Filter anwenden
-                            if comet.get("magnitude", 99) <= max_magnitude:
-                                result["bodies"][f"comet_{count}_{comet['name']}"] = comet
-                                count += 1
-                                if count >= max_comets:
-                                    break
-                    return result
+                    logger.info(f"Cache hit for comets: {len(comet_list)} found")
+                else:
+                    logger.info("Cache miss - triggering RabbitMQ background task")
+                    asyncio.create_task(trigger_rabbitmq_precompute_comets(
+                        lat, lon, elevation, dt_utc, hours_radius=12
+                    ))
+                    comet_list = []
             except Exception as e:
-                # Log error but continue to fallback
-                print(f"Comet interpolation failed: {e}")
-
-            # No cache available - trigger spot computation (±12h around requested time)
-            # This is much faster than full 30-day window
-            print(f"No cache for comets at {dt_utc.isoformat()}, triggering spot computation (±12h)...")
-            
-            # Trigger spot precompute for ±12 hours around requested time
-            asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
-            
-            # Return empty result immediately - data will appear on next poll (60s)
-            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-            return result
-
-        location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        comet_list = await asyncio.to_thread(lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc))
+                logger.warning(f"Cache read failed: {e}")
+                asyncio.create_task(trigger_rabbitmq_precompute_comets(
+                    lat, lon, elevation, dt_utc, hours_radius=12
+                ))
+                comet_list = []
+        else:
+            # RabbitMQ deaktiviert - sollte nicht passieren
+            logger.warning(f"RabbitMQ disabled for comets - returning empty")
+            comet_list = []
+        
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
         count = 0
         for comet in comet_list:
@@ -82,9 +172,6 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                 if comet.get("magnitude", 99) <= max_magnitude:
                     result["bodies"][f"comet_{count}_{comet['name']}"] = comet
                     count += 1
-        
-        # Trigger background precompute for future hours even without time parameter
-        asyncio.create_task(trigger_background_precompute_spot(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'], hours_radius=12))
         
         return result
     except Exception as e:
