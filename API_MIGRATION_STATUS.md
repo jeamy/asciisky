@@ -87,8 +87,14 @@ asciisky/
 
 ### Queue Status prüfen
 ```bash
+# Prüfen ob Queues existieren
 docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
+
+# Wenn leer → Queues erstellen (NUR beim ersten Mal!):
+./scripts/setup-rabbitmq-queues.sh
 ```
+
+**Hinweis:** Queues sind persistent! Bei `docker compose restart` bleiben sie erhalten.
 
 ### Worker Logs
 ```bash

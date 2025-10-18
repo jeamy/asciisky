@@ -90,17 +90,26 @@ Die RabbitMQ-Integration nutzt **NICHT** synchrones Request/Reply (RPC), sondern
 
 Siehe **[TESTING_LOCAL.md](TESTING_LOCAL.md)** für vollständige Anleitung.
 
-**Quick Start (3 Befehle!)**
+**Quick Start**
 
 ```bash
 # 1. Alles starten (RabbitMQ + 4 Worker)
 docker compose up -d
 
-# 2. Queues erstellen
+# 2. Queues erstellen (NUR beim ersten Mal!)
 ./scripts/setup-rabbitmq-queues.sh
 
 # 3. Testen!
 curl "http://localhost:8000/api/bright_asteroids?lat=48.2&lon=16.3"
+```
+
+**Hinweis:** Queues sind persistent! Script nur beim **ersten Setup** oder nach `docker compose down -v` nötig.
+
+**Bei Neustart:**
+```bash
+# Einfach nur:
+docker compose restart
+# Queues bleiben erhalten!
 ```
 
 **Neue `docker-compose.yml`** enthält jetzt:
@@ -116,8 +125,11 @@ curl "http://localhost:8000/api/bright_asteroids?lat=48.2&lon=16.3"
 ### Queue Status prüfen
 
 ```bash
-# Alle Queues mit Messages und Consumers
+# Prüfen ob Queues existieren (sollte asteroid.compute und comet.compute zeigen)
 docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
+
+# Wenn leer → Queues erstellen:
+# ./scripts/setup-rabbitmq-queues.sh
 
 # Detaillierte Queue-Info
 docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers durable
@@ -150,6 +162,37 @@ docker exec asciisky-rabbitmq rabbitmqctl list_bindings source_name destination_
 
 # Queue leeren (VORSICHT!)
 docker exec asciisky-rabbitmq rabbitmqctl purge_queue asteroid.compute
+
+# Queue löschen
+docker exec asciisky-rabbitmq rabbitmqctl delete_queue asteroid.compute
+```
+
+### Wann Queues neu erstellen?
+
+**✅ Queues neu erstellen nötig:**
+```bash
+# Nach Volume löschen
+docker compose down -v
+docker compose up -d
+./scripts/setup-rabbitmq-queues.sh
+
+# Nach Queue-Löschung
+docker exec asciisky-rabbitmq rabbitmqctl delete_queue asteroid.compute
+./scripts/setup-rabbitmq-queues.sh
+```
+
+**❌ Queues NICHT neu erstellen nötig:**
+```bash
+# Normaler Neustart
+docker compose restart
+
+# Stop/Start
+docker compose stop
+docker compose start
+
+# Down/Up (ohne -v!)
+docker compose down
+docker compose up -d
 ```
 
 ### Monitoring

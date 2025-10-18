@@ -20,18 +20,25 @@ Die RabbitMQ-Integration arbeitet **asynchron mit Cache**:
 - Docker und Docker Compose installiert
 - Ports 5672 (RabbitMQ) und 15672 (Management UI) frei
 
-## Quick Start (3 Befehle!)
+## Quick Start
 
 ```bash
 # 1. Alles starten (RabbitMQ + 4 Worker: 2x Asteroid, 2x Comet)
 docker compose up -d
 
-# 2. Queues erstellen
+# 2. Queues erstellen (NUR beim ersten Mal!)
 ./scripts/setup-rabbitmq-queues.sh
 
 # 3. Testen!
 curl "http://localhost:8000/api/bright_asteroids?lat=48.2&lon=16.3"
 curl "http://localhost:8000/api/comets?lat=48.2&lon=16.3"
+```
+
+**Wichtig:** Queues sind persistent! Script nur beim **ersten Setup** nötig.
+
+**Bei Neustart:**
+```bash
+docker compose restart  # Queues bleiben erhalten!
 ```
 
 **Hinweis:** Celestial & Zodiac nutzen KEIN RabbitMQ (zu schnell, < 1s)
