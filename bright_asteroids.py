@@ -9,7 +9,6 @@ import pandas as pd
 from skyfield import almanac
 import numpy as np
 import os
-import pickle
 import time
 from datetime import datetime, timedelta, timezone
 import gzip
@@ -18,18 +17,16 @@ from skyfield.data import mpc
 import math
 from types import SimpleNamespace
 from typing import Optional
-from cache_utils import build_cache_path, read_pickle_if_fresh, atomic_write_pickle
+from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from db_utils import (
     get_asteroids_by_magnitude, get_asteroid_orbit_data, 
     store_asteroid_dataframe, store_asteroid_positions,
-    get_asteroid_positions, migrate_from_pickle_cache
+    get_asteroid_positions
 )
 from data_paths import DATA_DIR, DE421_PATH, MPCORB_PATH
 
-# Konstanten für Cache-Dateien
-ASTEROID_DF_CACHE_FILE = 'cache/asteroids_dataframe.pkl'
-BRIGHT_ASTEROID_CACHE_FILE = 'cache/bright_asteroid_cache.pkl'
+# Konstanten
 MPCORB_FILE = Path(MPCORB_PATH)
 MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
@@ -51,19 +48,11 @@ ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 # Cache kind for consistency with celestial/comets naming
 ASTEROID_CACHE_KIND = 'asteroids'
-# Disable reading of legacy global cache by default to force recompute per location/time
-ASTEROID_ENABLE_LEGACY_FALLBACK = False
-# Enable SQLite backend (set to False to use legacy pickle cache)
+# SQLite only - no pickle cache
 ASTEROID_USE_SQLITE = True
 
 # Limit number of event computations (rise/set/transit) per request to reduce CPU peaks
 ASTEROIDS_EVENTS_MAX = int(os.environ.get('ASCII_SKY_ASTEROIDS_EVENTS_MAX', '50'))
-
-# Optionally disable pickle cache IO entirely (read + write)
-DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
-
-# Ensure cache directory exists
-os.makedirs("cache", exist_ok=True)
 
 # In-memory cache for asteroid DataFrame
 _asteroid_df_cache = None
@@ -204,20 +193,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             if cached_positions:
                 print(f"Loading SQLite cache for {loc_key}/{time_bucket} ({len(cached_positions)} objects)")
                 return cached_positions
-        else:
-            # Legacy pickle backend
-            if not DISABLE_PICKLE:
-                cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt, bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
-                cached = read_pickle_if_fresh(cache_file, ASTEROID_CACHE_TTL_SECONDS)
-                if isinstance(cached, list):
-                    print(f"Loading {cache_file} (valid per-location/time cache)")
-                    return cached
-            # Optional legacy global cache fallback (disabled by default)
-            if ASTEROID_ENABLE_LEGACY_FALLBACK and (not DISABLE_PICKLE):
-                legacy = read_pickle_if_fresh(BRIGHT_ASTEROID_CACHE_FILE, ASTEROID_CACHE_TTL_SECONDS)
-                if isinstance(legacy, list):
-                    print(f"Loading legacy cache {BRIGHT_ASTEROID_CACHE_FILE} (valid cache)")
-                    return legacy
+        # SQLite only - no pickle fallback
 
     # --- SQLite Loading (DB-first approach like comets) ---
     asteroid_rows = []
@@ -307,14 +283,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             except (IndexError, KeyError):
                 pass  # Skip if mapping fails
             
-            # Also save to pickle cache as fallback (for consistency with comets/celestial)
-            if not DISABLE_PICKLE:
-                try:
-                    cache_file = build_cache_path(ASTEROID_CACHE_KIND, lat, lon, elevation, dt=current_dt or datetime.now(timezone.utc), bucket_hours=ASTEROID_CACHE_BUCKET_HOURS)
-                    atomic_write_pickle(cache_file, asteroid_list)
-                    print(f"Saved {len(asteroid_list)} bright asteroids to pickle fallback cache ({cache_file})")
-                except Exception as e:
-                    print(f"Failed to write asteroid pickle cache {cache_file}: {e}")
+            # SQLite only - no pickle cache
         
         return asteroid_list
     
@@ -452,9 +421,7 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 print(f"Error in final processing for {row['designation']}: {e}")
                 continue
 
-        if not DISABLE_PICKLE:
-            atomic_write_pickle(cache_file, asteroid_list)
-            print(f"Saved {len(asteroid_list)} bright asteroids to cache ({cache_file}).")
+        # SQLite only - no pickle cache
         
         return asteroid_list
 
@@ -468,8 +435,6 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
     from skyfield.data import mpc
     from skyfield.toposlib import Topos
     from skyfield import almanac
-    import pickle
-    
     # Initialize Skyfield objects using shared data directory
     loader = Loader(str(DATA_DIR))
     ts = loader.timescale()
@@ -489,6 +454,7 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
     for row in asteroid_rows:
         try:
             # Deserialize orbit data
+            import pickle
             orbit_row = pickle.loads(row['orbit_data'])
             
             # Create Skyfield orbit object

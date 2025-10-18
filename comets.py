@@ -10,7 +10,6 @@ from skyfield import almanac
 
 import os
 import time
-import pickle
 import logging
 from datetime import datetime, timedelta, timezone
 import gzip
@@ -24,11 +23,11 @@ import pandas as pd
 import numpy as np
 from skyfield.magnitudelib import planetary_magnitude
 
-from cache_utils import build_cache_path, atomic_write_pickle, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc, CACHE_ROOT
+from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
-from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions, migrate_from_pickle_cache
+from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions
 from pathlib import Path
 from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
@@ -58,12 +57,9 @@ MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG'
 COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
 COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
-DISABLE_PICKLE = os.environ.get('ASCII_SKY_DISABLE_PICKLE', '0').strip() == '1'
 
 
-# Legacy cache files - no longer used, kept for reference only
-# COMET_DF_CACHE_FILE = 'cache/comets_dataframe.pkl'  # Removed: DataFrame now stored in SQLite only
-# BRIGHT_COMET_CACHE_FILE = 'cache/bright_comet_cache.pkl'  # Removed: Positions stored per-location/time
+# SQLite only - no pickle cache
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
 
@@ -87,18 +83,8 @@ def _clear_comet_caches():
     import glob
     import shutil
     
-    # Legacy pickle caches no longer used - only clear per-location caches and SQLite
-    logger.debug("Clearing comet caches (per-location directories and SQLite)")
-    
-    # Clear per-location comet cache directories
-    comet_cache_pattern = os.path.join(CACHE_ROOT, 'comets', '*')
-    for cache_dir in glob.glob(comet_cache_pattern):
-        if os.path.isdir(cache_dir):
-            try:
-                shutil.rmtree(cache_dir)
-                logger.debug(f"Removed comet cache directory: {cache_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to remove cache directory {cache_dir}: {e}")
+    # SQLite only - no pickle cache directories to clear
+    logger.debug("Clearing comet caches (SQLite only)")
     
     # Clear in-memory cache
     global _comet_df_cache, _comet_df_timestamp
@@ -341,7 +327,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         _comet_df_cache = comets
         _comet_df_timestamp = _now()
         
-        # DataFrame pickle cache removed - now using SQLite only (consistent with asteroids)
+        # SQLite only
         logger.debug(f"Loaded {len(comets)} comets from MPC (stored in SQLite).")
         return _comet_df_cache
     except Exception as e:
@@ -459,21 +445,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             except Exception as e:
                 logger.debug(f"SQLite comet cache failed: {e}")
         
-        # Fallback to pickle cache
-        cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
-        try:
-            cached_list = read_pickle_if_fresh(cache_file, COMET_CACHE_TTL_SECONDS)
-            if isinstance(cached_list, list):
-                logger.debug(f"Loading {cache_file} (valid per-location/time cache)")
-                return cached_list[:max_comets]
-            # Fallback to legacy global cache for migration
-            legacy = read_pickle_if_fresh(BRIGHT_COMET_CACHE_FILE, COMET_CACHE_TTL_SECONDS)
-            if isinstance(legacy, list):
-                logger.debug(f"Loading legacy comet cache {BRIGHT_COMET_CACHE_FILE}")
-                return legacy[:max_comets]
-        except Exception as e:
-            logger.debug(f"Error reading comet caches: {e}")
-
     # Load comet dataframe - PREFER SQLite database over file
     df = None
     if COMET_USE_SQLITE:
@@ -791,13 +762,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         except Exception as e:
             logger.debug(f"Failed to write SQLite comet cache: {e}")
     
-    # Also save to pickle cache as fallback
-    if not DISABLE_PICKLE:
-        try:
-            cache_file = build_cache_path('comets', lat, lon, elevation, dt=dt_utc, bucket_hours=COMET_CACHE_BUCKET_HOURS)
-            atomic_write_pickle(cache_file, comet_list)
-            logger.debug(f"Saved {len(comet_list)} bright comets to pickle cache ({cache_file})")
-        except Exception as e:
-            logger.debug(f"Failed to write comet pickle cache {cache_file}: {e}")
+    # SQLite only - no pickle cache
 
     return comet_list

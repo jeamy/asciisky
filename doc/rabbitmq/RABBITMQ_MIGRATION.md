@@ -240,6 +240,9 @@ docker compose logs -f
 
 **RabbitMQ auf separaten Hosts** - Siehe unten.
 
+**⚠️ WICHTIG für Multi-Host:** Worker und Web müssen auf **gemeinsamen Cache** zugreifen!
+- Siehe **[doc/rabbitmq/007-multi-host-storage.md](doc/rabbitmq/007-multi-host-storage.md)** für Shared Storage Setup (NFS/PostgreSQL)
+
 ## Voraussetzungen (Multi-Host)
 
 ### RabbitMQ Cluster

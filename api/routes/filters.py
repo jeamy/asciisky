@@ -28,15 +28,6 @@ def invalidate_cache():
         except Exception as e:
             print(f"Error clearing in-memory caches: {e}")
         
-        # Clear pickle cache directories
-        cache_dirs = ['cache/asteroids', 'cache/comets']
-        for cache_dir in cache_dirs:
-            if os.path.exists(cache_dir):
-                print(f"Invalidating cache directory: {cache_dir}")
-                shutil.rmtree(cache_dir)
-                os.makedirs(cache_dir, exist_ok=True)
-                print(f"Cache directory cleared: {cache_dir}")
-        
         # Clear SQLite cache tables (positions AND dataframes)
         try:
             from db_utils import get_db_connection

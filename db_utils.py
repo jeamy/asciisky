@@ -668,35 +668,7 @@ def get_database_stats() -> Dict[str, Any]:
     
     return stats
 
-def migrate_from_pickle_cache() -> Dict[str, int]:
-    """Migrate existing pickle cache files to SQLite database."""
-    migration_stats = {
-        'dataframe_migrated': 0,
-        'positions_migrated': 0,
-        'errors': 0
-    }
-    
-    # Migrate asteroid DataFrame if exists
-    df_cache_file = 'cache/asteroids_dataframe.pkl'
-    if os.path.exists(df_cache_file):
-        try:
-            import pandas as pd
-            with open(df_cache_file, 'rb') as f:
-                df = pickle.load(f)
-            
-            count = store_asteroid_dataframe(df)
-            migration_stats['dataframe_migrated'] = count
-            print(f"Migrated {count} asteroids from DataFrame cache")
-            
-        except Exception as e:
-            print(f"Error migrating DataFrame cache: {e}")
-            migration_stats['errors'] += 1
-    
-    # TODO: Migrate position cache files from cache/asteroids_v2/* structure
-    # This would scan the directory structure and convert pickle files to DB entries
-    
-    return migration_stats
-
+# Migration function removed - pickle cache no longer used
 
 def close_db_connection():
     """Close the thread-local database connection if it exists."""

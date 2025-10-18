@@ -111,20 +111,18 @@ Diese Dokumentation beschreibt die Migration von ASCII Sky zu einer RabbitMQ 4.1
 **Zielgruppe**: Projektmanager, Entscheider  
 **Lesedauer**: 20 Minuten
 
-### 7. [Migrations-Strategie: Alte vs. Neue Sourcen](007-migrations-strategie.md) ⭐ WICHTIG
-**Inhalt**: Trennung von alter und neuer Architektur während Migration
-- **Strangler Fig Pattern**: Schrittweise Migration ohne Big Bang
-- **Feature Flags System**: Graduelles Rollout (0-100%)
-- **Verzeichnisstruktur**: Klare Trennung alter/neuer Code
-- **API-Anpassungen**: Fallback-Mechanismen
-- **Docker Compose**: Parallele Services
-- **Schrittweises Rollout**: 10% → 25% → 50% → 75% → 100%
-- **Monitoring**: Vergleich alte vs. neue Architektur
-- **Rollback-Strategie**: Sofortiger Rollback möglich
-- **Testing**: Parallele Tests beider Architekturen
+### 7. [Multi-Host Storage](007-multi-host-storage.md) ⭐ WICHTIG
+**Inhalt**: Shared Storage für Multi-Host Deployments
+- **Problem**: Worker auf verschiedenen Hosts schreiben in lokale DBs
+- **Lösung 1**: NFS/GlusterFS für Shared Storage (einfach)
+- **Lösung 2**: PostgreSQL/MySQL statt SQLite (beste Performance)
+- **Lösung 3**: Hybrid (PostgreSQL + NFS) - empfohlen
+- **Setup-Guides**: NFS Server/Client, PostgreSQL, Docker Compose
+- **Troubleshooting**: SQLite Locks, NFS Performance
+- **Empfehlungen**: Dev vs. Produktion
 
-**Zielgruppe**: Entwickler, DevOps, Architekten  
-**Lesedauer**: 30 Minuten
+**Zielgruppe**: DevOps, Architekten  
+**Lesedauer**: 20 Minuten
 
 ## Schnellvergleich: RabbitMQ vs. Kafka
 

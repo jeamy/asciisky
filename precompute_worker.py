@@ -41,11 +41,9 @@ import bright_asteroids
 import comets
 from api.computation import ts, eph
 from cache_utils import (
-    build_cache_path,
     normalize_location,
     location_key,
-    atomic_write_pickle,
-    CACHE_ROOT,
+    time_bucket_utc
 )
 from db_utils import (
     store_asteroid_positions,
@@ -167,13 +165,11 @@ def get_target_locations() -> List[Dict[str, Any]]:
             except Exception:
                 continue
 
-    # 3) Cached locations from disk (cache/<kind>/*)
+    # 3) Cached locations from SQLite only (no pickle cache)
     try:
-        for kind in ("asteroids", "comets"):
-            base_dir = os.path.join(CACHE_ROOT, kind)
-            if not os.path.isdir(base_dir):
-                continue
-            for entry in os.listdir(base_dir):
+        # SQLite cache is checked via has_asteroid_positions/has_comet_positions
+        pass
+        for entry in []:
                 dir_path = os.path.join(base_dir, entry)
                 if not os.path.isdir(dir_path):
                     continue
@@ -279,24 +275,17 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
     """Ensure an asteroid list cache exists for this hour. Returns True if created."""
     from cache_utils import time_bucket_utc
     
-    # Check both SQLite and pickle cache
+    # Check SQLite cache only
     if bright_asteroids.ASTEROID_USE_SQLITE:
-        # Check SQLite cache first via fast existence query
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(dt_utc, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
         if has_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS):
             return False  # Already cached in SQLite
     
-    # Check pickle cache as fallback (unless disabled)
-    disable_pickle = os.environ.get("ASCII_SKY_DISABLE_PICKLE", "0").strip() == "1"
-    path = build_cache_path("asteroids", lat, lon, elevation, dt=dt_utc, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-    if (not disable_pickle) and os.path.exists(path):
-        return False
-    
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
-        # Module will write to both SQLite and pickle cache
+        # Module will write to SQLite cache
         from api.computation import LOADER
         
         # Use max magnitude 20.0 for precompute (cache all objects, filter in API)
@@ -308,8 +297,6 @@ def ensure_asteroids(lat: float, lon: float, elevation: float, dt_utc: datetime)
         
         if bright_asteroids.ASTEROID_USE_SQLITE and asteroid_list:
             print(f"[asteroids] wrote SQLite cache for {loc_key}/{time_bucket} ({len(asteroid_list)} objects)")
-        else:
-            print(f"[asteroids] wrote pickle cache {path}")
         return True
     except Exception as e:
         print(f"[asteroids] error for {lat},{lon},{elevation} at {dt_utc.isoformat()}: {e}")
@@ -332,11 +319,7 @@ def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) ->
         except Exception as e:
             print(f"[comets] SQLite cache check failed: {e}")
     
-    # Check pickle cache as fallback (unless disabled)
-    disable_pickle = os.environ.get("ASCII_SKY_DISABLE_PICKLE", "0").strip() == "1"
-    path = build_cache_path("comets", lat, lon, elevation, dt=dt_utc, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-    if (not disable_pickle) and os.path.exists(path):
-        return False
+    # SQLite only - no pickle cache
     
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
@@ -381,27 +364,19 @@ def _process_location_batch(loc: Dict[str, Any], hours: List[datetime], kinds: L
                     needs_processing = False
                     
                     if kind == "asteroids":
-                        # Check SQLite first, then pickle
+                        # Check SQLite only
                         if bright_asteroids.ASTEROID_USE_SQLITE:
-                            from cache_utils import time_bucket_utc
                             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
                             loc_key = location_key(lat_norm, lon_norm, elev_norm)
                             time_bucket = time_bucket_utc(dt, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
                             needs_processing = not has_asteroid_positions(loc_key, time_bucket, bright_asteroids.ASTEROID_CACHE_TTL_SECONDS)
-                        else:
-                            path = build_cache_path("asteroids", lat, lon, elevation, dt=dt, bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
-                            needs_processing = not os.path.exists(path)
                     elif kind == "comets":
-                        # Check SQLite first, then pickle
+                        # Check SQLite only
                         if comets.COMET_USE_SQLITE:
-                            from cache_utils import time_bucket_utc
                             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
                             loc_key = location_key(lat_norm, lon_norm, elev_norm)
                             time_bucket = time_bucket_utc(dt, comets.COMET_CACHE_BUCKET_HOURS)
                             needs_processing = not has_comet_positions(loc_key, time_bucket, comets.COMET_CACHE_TTL_SECONDS)
-                        else:
-                            path = build_cache_path("comets", lat, lon, elevation, dt=dt, bucket_hours=comets.COMET_CACHE_BUCKET_HOURS)
-                            needs_processing = not os.path.exists(path)
                     else:
                         continue
                     
@@ -581,23 +556,14 @@ def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
     except Exception as e:
         print(f"[prune] SQLite cleanup error: {e}")
     
-    # Prune pickle cache files
-    now = _now_utc()
-    cutoff = now - timedelta(days=int(retention_days))
+    # Pickle cache removed - SQLite only
+    # No file-based cache to prune
     try:
-        for kind in ("asteroids", "comets"):
-            base_dir = os.path.join(CACHE_ROOT, kind)
-            if not os.path.isdir(base_dir):
-                continue
-            for loc_entry in os.listdir(base_dir):
-                loc_dir = os.path.join(base_dir, loc_entry)
-                if not os.path.isdir(loc_dir):
-                    continue
-                for fn in os.listdir(loc_dir):
-                    if not fn.endswith(".pkl"):
-                        continue
-                    scanned += 1
-                    label = fn[:-4]
+        for kind in []:
+            pass
+        for fn in []:
+            scanned += 1
+            label = ""
                     dt = _parse_bucket_label(label)
                     if dt is None:
                         continue
