@@ -6,11 +6,12 @@ export const API_ENDPOINTS = {
     BRIGHT_ASTEROIDS: '/api/bright_asteroids',
     COMETS: '/api/comets',
     ZODIAC: '/api/zodiac',
-    CACHE_STATUS: '/api/cache_status',
-    PRECOMPUTE_WINDOW: '/api/precompute_window',
+    // Legacy endpoints removed (RabbitMQ migration):
+    // CACHE_STATUS: '/api/cache_status',
+    // PRECOMPUTE_WINDOW: '/api/precompute_window',
+    // CACHE_AVAILABILITY: '/api/cache_availability',
     SESSION_LOCATION_GET: '/api/session/location',
     SESSION_LOCATION_POST: '/api/session/location',
-    CACHE_AVAILABILITY: '/api/cache_availability',
     CONFIG: '/api/config',
     FILTERS_GET: '/api/filters',
     FILTERS_SET: '/api/filters'

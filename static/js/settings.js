@@ -191,19 +191,8 @@ export class SettingsManager {
             // 1) Session sofort aktualisieren (Cookie-basierte Session)
             await this.saveSessionLocation(this.settings.location);
 
-            // 2) Optional: Hintergrund-Precompute für neues Ziel anstoßen (nicht blockierend)
-            try {
-                fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        lat: parseFloat(latitude),
-                        lon: parseFloat(longitude),
-                        elevation: parseFloat(elevation),
-                        kinds: ['celestial','asteroids','comets']
-                    })
-                }).catch(() => {});
-            } catch (_) { /* noop */ }
+            // Legacy precompute trigger - disabled after RabbitMQ migration
+            // RabbitMQ automatically triggers precompute on cache miss
             this.serverSynced = true;
         } catch (error) {
             console.error('Error syncing location with server:', error);

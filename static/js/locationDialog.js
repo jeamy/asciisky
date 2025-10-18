@@ -323,35 +323,9 @@ export class LocationDialog {
             const startDate = today.toISOString().split('T')[0];
             const endDate = twoDaysLater.toISOString().split('T')[0];
             
-            console.log(`Triggering automatic precompute for location ${location.name} (${location.lat}, ${location.lon}) from ${startDate} to ${endDate}`);
-            
-            // Starte Precompute im Hintergrund - nicht warten
-            fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    lat: location.lat,
-                    lon: location.lon,
-                    elevation: location.elevation,
-                    start_date: startDate,
-                    end_date: endDate
-                })
-            }).then(response => {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    console.warn('Failed to start automatic precompute:', response.status);
-                    return null;
-                }
-            }).then(result => {
-                if (result) {
-                    console.log('Automatic precompute started:', result);
-                }
-            }).catch(error => {
-                console.error('Error triggering automatic precompute:', error);
-            });
+            // Legacy precompute trigger - disabled after RabbitMQ migration
+            // RabbitMQ automatically triggers precompute on cache miss
+            console.log(`[RabbitMQ] Precompute will be triggered automatically on first request for ${location.name}`);
             
         } catch (error) {
             console.error('Error triggering automatic precompute:', error);
