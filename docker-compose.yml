@@ -47,7 +47,6 @@ services:
       - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
       - ASCII_SKY_COMET_EVENTS_MAX=50
-      - ASCII_SKY_DISABLE_PICKLE=1
       # RabbitMQ - NUR neue Architektur!
       - USE_RABBITMQ=true
       - USE_RABBITMQ_ASTEROIDS=true
