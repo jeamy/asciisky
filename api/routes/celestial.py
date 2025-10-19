@@ -2,7 +2,6 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
 from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES
-from api.background import trigger_background_precompute_window
 
 router = APIRouter()
 
@@ -16,9 +15,7 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
         # Always compute fresh - no caching for celestial objects
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
         
-        # Trigger background precompute for asteroids/comets only
-        await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'])
-        
+        # No background tasks needed - celestial is always computed fresh
         return snapshot
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -36,9 +33,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
         # Always compute fresh - no caching for celestial objects
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
         
-        # Trigger background precompute for asteroids/comets only
-        await trigger_background_precompute_window(request.app, lat, lon, elevation, dt_utc, kinds=['asteroids','comets'])
-        
+        # No background tasks needed - celestial is always computed fresh
         if body_id in snapshot["bodies"]:
             return {**snapshot["bodies"][body_id], "id": body_id}
         else:

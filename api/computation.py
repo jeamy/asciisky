@@ -147,3 +147,27 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
             continue
 
     return result
+
+
+def load_constellations():
+    """
+    Lädt Constellation-Daten aus Stellarium
+    
+    Diese Funktion wird vom Constellation Worker genutzt.
+    Die eigentliche Berechnung erfolgt in api/routes/zodiac.py
+    
+    Returns:
+        Dict mit Constellation-Metadaten
+    """
+    from api.routes.zodiac import CONSTELLATION_NAMES, CONSTELLATION_TRANSLATIONS
+    
+    # Gebe nur Metadaten zurück - die eigentliche Berechnung
+    # erfolgt in zodiac.py mit Skyfield
+    constellations = {}
+    for name in CONSTELLATION_NAMES:
+        constellations[name] = {
+            'name': name,
+            'name_de': CONSTELLATION_TRANSLATIONS.get(name, name)
+        }
+    
+    return constellations

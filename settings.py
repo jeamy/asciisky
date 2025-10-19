@@ -6,6 +6,13 @@ import os
 import json
 from datetime import datetime
 
+# RabbitMQ Settings (für Migration)
+RABBITMQ_URL = os.environ.get('RABBITMQ_URL', 'amqp://admin:password@localhost:5672/')
+RABBITMQ_ENABLED = os.environ.get('USE_RABBITMQ', 'false').lower() in ('true', '1', 'yes', 'on')
+RABBITMQ_TIMEOUT = int(os.environ.get('RABBITMQ_TIMEOUT', '30'))
+RABBITMQ_RETRY_ATTEMPTS = int(os.environ.get('RABBITMQ_RETRY_ATTEMPTS', '3'))
+FALLBACK_TO_OLD_ON_ERROR = os.environ.get('FALLBACK_TO_OLD_ON_ERROR', 'true').lower() in ('true', '1', 'yes', 'on')
+
 # Pfad zur Einstellungsdatei
 SETTINGS_FILE = "user_settings.json"
 

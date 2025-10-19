@@ -589,39 +589,16 @@ export class SkyRenderer {
         }
     }
 
-    // Prüfe schnell, ob Cache für aktuelle Stunde vorhanden ist (per Backend-Shortcut)
+    // Legacy function - disabled after RabbitMQ migration
     async checkCacheAvailability(location) {
-        try {
-            let url = `${API_ENDPOINTS.CACHE_AVAILABILITY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&nocache=1`;
-            url = this.appendTimeParam(url);
-            const resp = await fetch(url, { cache: 'no-store' });
-            if (!resp.ok) return null;
-            return await resp.json();
-        } catch (_) {
-            return null;
-        }
+        // RabbitMQ handles caching automatically
+        return null;
     }
 
-    // Löst Hintergrund-Precompute aus, aber nur einmal pro (loc_key|time|kinds)
+    // Legacy function - disabled after RabbitMQ migration
     async triggerPrecomputeWindowIfNeeded(location, timeISO, kinds, locKey) {
-        try {
-            if (!Array.isArray(kinds) || kinds.length === 0) return;
-            const key = `${locKey || ''}|${timeISO || ''}|${[...kinds].sort().join('+')}`;
-            if (this._precomputeRequests.has(key)) return;
-            this._precomputeRequests.add(key);
-
-            await fetch(`${API_ENDPOINTS.PRECOMPUTE_WINDOW}?nocache=1`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    lat: location.latitude,
-                    lon: location.longitude,
-                    elevation: location.elevation,
-                    kinds,
-                    time: timeISO || undefined
-                })
-            }).catch(() => {});
-        } catch (_) { /* noop */ }
+        // RabbitMQ triggers precompute automatically on cache miss
+        return;
     }
 
     // Prüft, ob ein Update-Token noch aktiv ist (verhindert Out-of-Order-Merges)

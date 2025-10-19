@@ -260,21 +260,10 @@ export function initCacheStatusPanel(elementId = 'cache-status-panel') {
 }
 
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName) {
-  try {
-    const locKey = buildLocKey(lat, lon, elevation);
-    const url = appendTimeParam(`${API_ENDPOINTS.CACHE_STATUS}?lat=${lat}&lon=${lon}&elevation=${elevation}&loc_key=${encodeURIComponent(locKey)}&nocache=1`);
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    renderStatus(data, locKey, locationName);
-  } catch (error) {
-    console.error('Error fetching cache status:', error);
-    renderError(error.message || String(error), locationName);
-  }
+  // Legacy function - disabled after RabbitMQ migration
+  // Cache status is no longer exposed via API
+  console.log('[Cache Status] Legacy endpoint disabled - RabbitMQ handles caching automatically');
+  return;
 }
 
 export function updateCacheStatusForLocationDebounced(lat, lon, elevation, locationName) {

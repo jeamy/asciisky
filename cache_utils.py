@@ -2,17 +2,15 @@
 Shared utilities for per-location and time-bucketed caching.
 - Normalizes observer location (lat/lon to 4 decimals, elevation to nearest 10 m)
 - Generates 6-hour UTC time buckets (00, 06, 12, 18)
-- Builds cache file paths like cache/<kind>/<loc_key>/<bucket>.pkl
-- Provides atomic pickle write and TTL-aware read helpers
+- Location keys for SQLite cache
+
+Note: Pickle cache removed - using SQLite only
 """
 from __future__ import annotations
 
-import os
-import pickle
 from datetime import datetime, timezone
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
-CACHE_ROOT = "cache"
 DEFAULT_BUCKET_HOURS = 6
 DEFAULT_TTL_SECONDS = 6 * 3600  # 6 hours
 
@@ -53,46 +51,10 @@ def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_B
     return f"{dt:%Y%m%d}T{bucket_hour:02d}"
 
 
-def cache_path(kind: str, loc_key: str, bucket: str) -> str:
-    """Build cache path for a given kind ('comets' or 'asteroids'), location key, and bucket label."""
-    return os.path.join(CACHE_ROOT, kind, loc_key, f"{bucket}.pkl")
-
+# Pickle cache functions removed - using SQLite only
+# Legacy functions kept for backwards compatibility but do nothing:
 
 def build_cache_path(kind: str, lat: float, lon: float, elevation: float,
                      dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:
-    lat_n, lon_n, elev_n = normalize_location(lat, lon, elevation)
-    loc_key = location_key(lat_n, lon_n, elev_n)
-    bucket = time_bucket_utc(dt=dt, bucket_hours=bucket_hours)
-    return cache_path(kind, loc_key, bucket)
-
-
-def _is_fresh(path: str, max_age_seconds: int) -> bool:
-    try:
-        mtime = os.path.getmtime(path)
-        age = datetime.now().timestamp() - mtime
-        return age < max_age_seconds
-    except Exception:
-        return False
-
-
-def read_pickle_if_fresh(path: str, max_age_seconds: int = DEFAULT_TTL_SECONDS) -> Optional[Any]:
-    """Return unpickled object if file exists and is fresh according to TTL, else None."""
-    if not os.path.exists(path):
-        return None
-    if not _is_fresh(path, max_age_seconds):
-        return None
-    try:
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-    except Exception:
-        return None
-
-
-def atomic_write_pickle(path: str, data: Any) -> None:
-    """Atomically write pickle file by writing to a temp file and os.replace()."""
-    directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
-    tmp_path = f"{path}.tmp-{os.getpid()}-{int(datetime.now().timestamp())}"
-    with open(tmp_path, 'wb') as f:
-        pickle.dump(data, f)
-    os.replace(tmp_path, path)
+    """Legacy function - returns empty string. Use SQLite cache instead."""
+    return ""

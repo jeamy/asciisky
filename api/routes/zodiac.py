@@ -10,10 +10,15 @@ from skyfield.data import hipparcos, stellarium
 from skyfield.positionlib import Apparent
 import numpy as np
 from datetime import datetime, timezone
+import asyncio
+import uuid
+import time
+import settings
 
 from api.helpers import get_location_params
 from data_paths import DATA_DIR, CONSTELLATIONSHIP_PATH
 from api.computation import LOADER, ts as GLOBAL_TS, eph as GLOBAL_EPH
+
 
 # Constants
 STELLARIUM_CONSTELLATION_PATH = str(CONSTELLATIONSHIP_PATH)
@@ -113,6 +118,76 @@ def load_stellarium_constellations() -> Optional[List]:
             logger.error(f"Failed to parse Stellarium constellations: {e}")
     return None
 
+def compute_constellations(lat, lon, elevation, dt_utc):
+    """
+    Berechnet Constellations mit alter Architektur (Fallback)
+    
+    Args:
+        lat, lon, elevation: Location
+        dt_utc: datetime object
+        
+    Returns:
+        Result dict
+    """
+    init_skyfield()
+    
+    # Calculate constellation data using Skyfield
+    skyfield_time = GLOBAL_TS.from_datetime(dt_utc)
+    earth = GLOBAL_EPH['earth']
+    from skyfield.toposlib import wgs84
+    observer_location = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
+    
+    constellations = []
+    
+    # Load Stellarium constellation data
+    stellarium_data = load_stellarium_constellations()
+    if not stellarium_data or hip_data is None:
+        return {"constellations": [], "location": {'latitude': lat, 'longitude': lon, 'elevation': elevation}, "time": dt_utc.isoformat(), "count": 0}
+    
+    # Process Stellarium constellations
+    for code, edges in stellarium_data:
+        full_name = STELLARIUM_CODE_TO_NAME.get(code)
+        if full_name not in CONSTELLATION_NAMES:
+            continue
+            
+        constellation = {
+            'name': full_name,
+            'name_de': CONSTELLATION_TRANSLATIONS.get(full_name, full_name),
+            'stars': [],
+            'lines': [[a, b] for (a, b) in edges],
+            'boundary_ra': [0, 0],
+            'boundary_dec': [0, 0],
+        }
+        
+        # Gather unique star IDs from edges
+        star_ids = set()
+        for a, b in edges:
+            star_ids.add(a)
+            star_ids.add(b)
+            
+        # Calculate star positions
+        for hip_id in star_ids:
+            star_pos = get_star_position(hip_id, observer_location, skyfield_time)
+            if not star_pos:
+                continue
+            altitude, azimuth, magnitude = star_pos
+            constellation['stars'].append({
+                'hip_id': hip_id,
+                'altitude': altitude,
+                'azimuth': azimuth,
+                'magnitude': magnitude,
+                'visible': altitude > -10,
+            })
+        constellations.append(constellation)
+        
+    return {
+        'constellations': constellations,
+        'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+        'time': dt_utc.isoformat(),
+        'count': len(constellations)
+    }
+
+
 @router.get("/zodiac")
 async def get_zodiac_constellations(
     lat: float = Query(..., description="Latitude in degrees"),
@@ -124,8 +199,6 @@ async def get_zodiac_constellations(
     """Get zodiac constellation data with calculated star positions"""
     
     try:
-        init_skyfield()
-
         # Parse time parameter
         if time:
             try:
@@ -139,65 +212,8 @@ async def get_zodiac_constellations(
             dt_utc = datetime.now(timezone.utc)
         
         # Zodiac calculations are fast, no caching needed
-        # (Previously used pickle cache which created unnecessary directories)
-            
-        # Calculate constellation data using Skyfield
-        skyfield_time = GLOBAL_TS.from_datetime(dt_utc)
-        earth = GLOBAL_EPH['earth']
-        from skyfield.toposlib import wgs84
-        observer_location = earth + wgs84.latlon(lat, lon, elevation_m=elevation)
+        result = await asyncio.to_thread(compute_constellations, lat, lon, elevation, dt_utc)
         
-        constellations = []
-        
-        # Load Stellarium constellation data
-        stellarium_data = load_stellarium_constellations()
-        if not stellarium_data or hip_data is None:
-            return {"constellations": []}
-        
-        # Process Stellarium constellations
-        for code, edges in stellarium_data:
-            full_name = STELLARIUM_CODE_TO_NAME.get(code)
-            if full_name not in CONSTELLATION_NAMES:
-                continue
-                
-            constellation = {
-                'name': full_name,
-                'name_de': CONSTELLATION_TRANSLATIONS.get(full_name, full_name),
-                'stars': [],
-                'lines': [[a, b] for (a, b) in edges],
-                'boundary_ra': [0, 0],
-                'boundary_dec': [0, 0],
-            }
-            
-            # Gather unique star IDs from edges
-            star_ids = set()
-            for a, b in edges:
-                star_ids.add(a)
-                star_ids.add(b)
-                
-            # Calculate star positions
-            for hip_id in star_ids:
-                star_pos = get_star_position(hip_id, observer_location, skyfield_time)
-                if not star_pos:
-                    continue
-                altitude, azimuth, magnitude = star_pos
-                constellation['stars'].append({
-                    'hip_id': hip_id,
-                    'altitude': altitude,
-                    'azimuth': azimuth,
-                    'magnitude': magnitude,
-                    'visible': altitude > -10,
-                })
-            constellations.append(constellation)
-            
-        result = {
-            'constellations': constellations,
-            'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
-            'time': dt_utc.isoformat(),
-            'count': len(constellations)
-        }
-        
-        # No caching needed for zodiac (fast calculation)
         return result
         
     except Exception as e:
