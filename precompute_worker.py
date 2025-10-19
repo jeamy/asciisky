@@ -554,36 +554,6 @@ def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
     except Exception as e:
         print(f"[prune] SQLite cleanup error: {e}")
     
-    try:
-        for kind in []:
-            pass
-        for fn in []:
-            scanned += 1
-            label = ""
-                    dt = _parse_bucket_label(label)
-                    if dt is None:
-                        continue
-                    if dt < cutoff:
-                        fpath = os.path.join(loc_dir, fn)
-                        try:
-                            os.remove(fpath)
-                            deleted += 1
-                        except Exception:
-                            traceback.print_exc()
-                # Remove empty location directories
-                try:
-                    if not os.listdir(loc_dir):
-                        os.rmdir(loc_dir)
-                except Exception:
-                    pass
-            # Remove empty kind directory
-            try:
-                if not os.listdir(base_dir):
-                    os.rmdir(base_dir)
-            except Exception:
-                pass
-    except Exception:
-        traceback.print_exc()
     print(f"Retention prune: days={retention_days}, deleted={deleted}, scanned={scanned}")
     return deleted, scanned
 
@@ -663,13 +633,6 @@ def main() -> None:
             updated = bright_asteroids.download_mpcorb_file()
             if not updated:
                 print("Warning: MPCORB download reported failure; continuing with existing file")
-        # Drop stale asteroid dataframe cache so it will be rebuilt on demand
-        if os.path.exists(bright_asteroids.ASTEROID_DF_CACHE_FILE):
-            try:
-                os.remove(bright_asteroids.ASTEROID_DF_CACHE_FILE)
-                print(f"Removed stale asteroid dataframe cache {bright_asteroids.ASTEROID_DF_CACHE_FILE}")
-            except Exception as cache_err:
-                print(f"Warning: could not remove asteroid dataframe cache: {cache_err}")
     except Exception:
         traceback.print_exc()
 
