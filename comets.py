@@ -11,6 +11,7 @@ from skyfield import almanac
 import os
 import time
 import logging
+import pickle
 from datetime import datetime, timedelta, timezone
 import gzip
 import urllib.request

@@ -234,7 +234,46 @@ class CometWorker:
             logger.error(f"Error stopping worker: {e}")
 
 
+def wait_for_database():
+    """Warte bis Daten in PostgreSQL vorhanden sind"""
+    from db_utils import get_comet_dataframe
+    import time
+    
+    worker_id = os.getenv('WORKER_ID', 'comet-worker')
+    logger.info(f"[{worker_id}] Checking if database has data...")
+    
+    max_wait = 600  # 10 Minuten
+    check_interval = 30  # Alle 30 Sekunden prüfen
+    waited = 0
+    
+    while waited < max_wait:
+        try:
+            comet_df = get_comet_dataframe()
+            
+            if comet_df:
+                logger.info(f"[{worker_id}] ✅ Database has data - starting worker")
+                return True
+            else:
+                if waited == 0:
+                    logger.info(f"[{worker_id}] ⏳ Waiting for data_updater to populate database...")
+                waited += check_interval
+                time.sleep(check_interval)
+        except Exception as e:
+            if waited == 0:
+                logger.warning(f"[{worker_id}] Database not ready: {e}")
+                logger.info(f"[{worker_id}] ⏳ Waiting for database...")
+            waited += check_interval
+            time.sleep(check_interval)
+    
+    logger.error(f"[{worker_id}] ❌ Timeout waiting for database data after {max_wait}s")
+    return False
+
+
 if __name__ == '__main__':
+    # Warte bis Daten vorhanden sind
+    if not wait_for_database():
+        sys.exit(1)
+    
     # Konfiguration aus ENV
     rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     worker_id = os.environ.get('WORKER_ID', 'comet-worker-1')

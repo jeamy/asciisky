@@ -283,3 +283,19 @@ def get_last_data_update(update_type: str = None) -> Optional[Dict]:
     row = cursor.fetchone()
     return dict(row) if row else None
 
+def get_database_stats() -> dict:
+    """Get database statistics (asteroid/comet counts)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) as count FROM asteroid_elements")
+    asteroid_count = cursor.fetchone()['count']
+    
+    cursor.execute("SELECT COUNT(*) as count FROM comet_elements")
+    comet_count = cursor.fetchone()['count']
+    
+    return {
+        'asteroids_count': asteroid_count,
+        'comets_count': comet_count
+    }
+

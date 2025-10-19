@@ -267,5 +267,44 @@ def main():
             time.sleep(10)
 
 
+def wait_for_database():
+    """Warte bis Daten in PostgreSQL vorhanden sind"""
+    from db_utils import get_asteroid_dataframe, get_comet_dataframe
+    
+    logger.info(f"[{WORKER_ID}] Checking if database has data...")
+    
+    max_wait = 600  # 10 Minuten
+    check_interval = 30  # Alle 30 Sekunden prüfen
+    waited = 0
+    
+    while waited < max_wait:
+        try:
+            asteroid_df = get_asteroid_dataframe()
+            comet_df = get_comet_dataframe()
+            
+            if asteroid_df and comet_df:
+                logger.info(f"[{WORKER_ID}] ✅ Database has data - starting worker")
+                return True
+            else:
+                if waited == 0:
+                    logger.info(f"[{WORKER_ID}] ⏳ Waiting for data_updater to populate database...")
+                waited += check_interval
+                time.sleep(check_interval)
+        except Exception as e:
+            if waited == 0:
+                logger.warning(f"[{WORKER_ID}] Database not ready: {e}")
+                logger.info(f"[{WORKER_ID}] ⏳ Waiting for database...")
+            waited += check_interval
+            time.sleep(check_interval)
+    
+    logger.error(f"[{WORKER_ID}] ❌ Timeout waiting for database data after {max_wait}s")
+    return False
+
+
 if __name__ == '__main__':
+    # Warte bis Daten vorhanden sind
+    if not wait_for_database():
+        sys.exit(1)
+    
+    # Starte Worker
     main()
