@@ -1,0 +1,32 @@
+[
+  {
+    "latitude": 48.2082,
+    "longitude": 16.3738,
+    "elevation": 170,
+    "name": "Wien"
+  },
+  {
+    "latitude": 52.5200,
+    "longitude": 13.4050,
+    "elevation": 34,
+    "name": "Berlin"
+  },
+  {
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "elevation": 11,
+    "name": "London"
+  },
+  {
+    "latitude": 48.8566,
+    "longitude": 2.3522,
+    "elevation": 35,
+    "name": "Paris"
+  },
+  {
+    "latitude": 40.7128,
+    "longitude": -74.0060,
+    "elevation": 10,
+    "name": "New York"
+  }
+]
