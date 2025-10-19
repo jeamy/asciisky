@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import write_asteroid_positions, write_comet_positions
+from db_utils import store_asteroid_positions, store_comet_positions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,7 +105,18 @@ def process_task(task: Dict[str, Any]) -> bool:
             
             # Speichere in DB
             if asteroids_data:
-                write_asteroid_positions(norm_loc, dt_utc, asteroids_data)
+                # Verwende 0 als representative_id (da wir keine asteroid_id haben)
+                loc_key = location_key(norm_loc['latitude'], norm_loc['longitude'], norm_loc['elevation'])
+                tb = time_bucket_utc(dt_utc)
+                store_asteroid_positions(
+                    0,  # representative_id
+                    loc_key,
+                    tb,
+                    norm_loc['latitude'],
+                    norm_loc['longitude'],
+                    norm_loc['elevation'],
+                    asteroids_data
+                )
                 count = len(asteroids_data)
             else:
                 count = 0
@@ -131,7 +142,18 @@ def process_task(task: Dict[str, Any]) -> bool:
             
             # Speichere in DB
             if comets_data:
-                write_comet_positions(norm_loc, dt_utc, comets_data)
+                # Verwende 0 als representative_id (da wir keine comet_id haben)
+                loc_key = location_key(norm_loc['latitude'], norm_loc['longitude'], norm_loc['elevation'])
+                tb = time_bucket_utc(dt_utc)
+                store_comet_positions(
+                    0,  # representative_id
+                    loc_key,
+                    tb,
+                    norm_loc['latitude'],
+                    norm_loc['longitude'],
+                    norm_loc['elevation'],
+                    comets_data
+                )
                 count = len(comets_data)
             else:
                 count = 0
