@@ -2,6 +2,8 @@
 
 A web application that displays the current positions of celestial bodies (Sun, Moon, planets, asteroids, comets) in ASCII art.
 
+## Old legacy code. Deprecated
+
 ## Features
 
 - Real-time tracking of celestial bodies (altitude and azimuth)
