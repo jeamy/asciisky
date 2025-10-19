@@ -3,8 +3,6 @@ Shared utilities for per-location and time-bucketed caching.
 - Normalizes observer location (lat/lon to 4 decimals, elevation to nearest 10 m)
 - Generates 6-hour UTC time buckets (00, 06, 12, 18)
 - Location keys for SQLite cache
-
-Note: Pickle cache removed - using SQLite only
 """
 from __future__ import annotations
 
@@ -51,8 +49,7 @@ def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_B
     return f"{dt:%Y%m%d}T{bucket_hour:02d}"
 
 
-# Pickle cache functions removed - using SQLite only
-# Legacy functions kept for backwards compatibility but do nothing:
+# Legacy stub functions (no longer used):
 
 def build_cache_path(kind: str, lat: float, lon: float, elevation: float,
                      dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:

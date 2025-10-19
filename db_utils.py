@@ -668,7 +668,6 @@ def get_database_stats() -> Dict[str, Any]:
     
     return stats
 
-# Migration function removed - pickle cache no longer used
 
 def close_db_connection():
     """Close the thread-local database connection if it exists."""

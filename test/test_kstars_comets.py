@@ -14,7 +14,7 @@ from skyfield.toposlib import Topos
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2 as GM_SUN
 import math
 import pandas as pd
-import pickle
+import pickle  # Nur für interne DB-Serialisierung
 
 TEST_LAT = 46.7632
 TEST_LON = 14.8417

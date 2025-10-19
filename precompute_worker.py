@@ -165,7 +165,7 @@ def get_target_locations() -> List[Dict[str, Any]]:
             except Exception:
                 continue
 
-    # 3) Cached locations from SQLite only (no pickle cache)
+    # 3) Cached locations from SQLite
     try:
         # SQLite cache is checked via has_asteroid_positions/has_comet_positions
         pass
@@ -318,8 +318,6 @@ def ensure_comets(lat: float, lon: float, elevation: float, dt_utc: datetime) ->
                 return False  # Cache exists
         except Exception as e:
             print(f"[comets] SQLite cache check failed: {e}")
-    
-    # SQLite only - no pickle cache
     
     try:
         location = {"latitude": lat, "longitude": lon, "elevation": elevation}
@@ -556,8 +554,6 @@ def prune_old_snapshots(retention_days: int) -> Tuple[int, int]:
     except Exception as e:
         print(f"[prune] SQLite cleanup error: {e}")
     
-    # Pickle cache removed - SQLite only
-    # No file-based cache to prune
     try:
         for kind in []:
             pass

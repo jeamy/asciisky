@@ -1,6 +1,5 @@
 """
 Cache loading with interpolation support for asteroids and comets.
-SQLite only - no pickle cache.
 """
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -16,20 +15,19 @@ def load_asteroids_with_interpolation(
     dt_utc: datetime,
     bucket_hours: int,
     ttl_seconds: int,
-    use_sqlite: bool = True,
-    disable_pickle: bool = False  # Legacy parameter, ignored
+    use_sqlite: bool = True
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Load asteroid positions with interpolation between cached buckets.
-    SQLite only.
     
     Args:
-        lat, lon, elevation: Observer location
-        dt_utc: Target datetime (timezone-aware)
+        lat: Latitude
+        lon: Longitude
+        elevation: Elevation in meters
+        dt_utc: Target datetime (UTC)
         bucket_hours: Cache bucket size in hours
         ttl_seconds: Cache TTL in seconds
         use_sqlite: Whether to use SQLite backend
-        disable_pickle: Legacy parameter, ignored
     
     Returns:
         List of interpolated asteroid dictionaries, or None if no cache available
@@ -59,20 +57,19 @@ def load_comets_with_interpolation(
     dt_utc: datetime,
     bucket_hours: int,
     ttl_seconds: int,
-    use_sqlite: bool = True,
-    disable_pickle: bool = False  # Legacy parameter, ignored
+    use_sqlite: bool = True
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Load comet positions with interpolation between cached buckets.
-    SQLite only.
     
     Args:
-        lat, lon, elevation: Observer location
-        dt_utc: Target datetime (timezone-aware)
+        lat: Latitude
+        lon: Longitude
+        elevation: Elevation in meters
+        dt_utc: Target datetime (UTC)
         bucket_hours: Cache bucket size in hours
         ttl_seconds: Cache TTL in seconds
         use_sqlite: Whether to use SQLite backend
-        disable_pickle: Legacy parameter, ignored
     
     Returns:
         List of interpolated comet dictionaries, or None if no cache available

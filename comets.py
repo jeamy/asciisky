@@ -59,7 +59,6 @@ GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
 COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
 
 
-# SQLite only - no pickle cache
 # Photometric filters (align with bright_asteroids thresholds)
 # Limit number of final returned comets; we will iterate candidates until we collect up to this many
 
@@ -83,8 +82,7 @@ def _clear_comet_caches():
     import glob
     import shutil
     
-    # SQLite only - no pickle cache directories to clear
-    logger.debug("Clearing comet caches (SQLite only)")
+    logger.debug("Clearing comet caches")
     
     # Clear in-memory cache
     global _comet_df_cache, _comet_df_timestamp
@@ -280,7 +278,6 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
             except Exception as de:
                 logger.debug(f"Comet DF memory debug failed: {de}")
 
-    # DataFrame pickle cache removed - now using SQLite only (consistent with asteroids)
     # Fetch fresh (prefer local MPC file cache if available)
     try:
         # Download only if file doesn't exist (first start)
@@ -761,7 +758,5 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             logger.debug(f"Saved {len(comet_list)} bright comets to SQLite cache ({loc_key}/{time_bucket})")
         except Exception as e:
             logger.debug(f"Failed to write SQLite comet cache: {e}")
-    
-    # SQLite only - no pickle cache
 
     return comet_list

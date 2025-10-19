@@ -5,8 +5,7 @@ from api.cache_interpolation import load_comets_with_interpolation
 import comets
 import settings
 import os
-import pickle
-from cache_utils import build_cache_path, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
+from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_comet_positions
 import asyncio
 import logging
@@ -141,8 +140,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                     lat, lon, elevation, dt_utc,
                     bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
                     ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(comets, 'COMET_USE_SQLITE', False),
-                    disable_pickle=getattr(comets, 'DISABLE_PICKLE', False)
+                    use_sqlite=getattr(comets, 'COMET_USE_SQLITE', False)
                 )
                 
                 if isinstance(comet_list, list) and comet_list:

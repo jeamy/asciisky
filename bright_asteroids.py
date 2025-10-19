@@ -48,7 +48,6 @@ ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 # Cache kind for consistency with celestial/comets naming
 ASTEROID_CACHE_KIND = 'asteroids'
-# SQLite only - no pickle cache
 ASTEROID_USE_SQLITE = True
 
 # Limit number of event computations (rise/set/transit) per request to reduce CPU peaks
@@ -193,7 +192,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             if cached_positions:
                 print(f"Loading SQLite cache for {loc_key}/{time_bucket} ({len(cached_positions)} objects)")
                 return cached_positions
-        # SQLite only - no pickle fallback
 
     # --- SQLite Loading (DB-first approach like comets) ---
     asteroid_rows = []
@@ -282,8 +280,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 )
             except (IndexError, KeyError):
                 pass  # Skip if mapping fails
-            
-            # SQLite only - no pickle cache
         
         return asteroid_list
     
@@ -420,8 +416,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             except Exception as e:
                 print(f"Error in final processing for {row['designation']}: {e}")
                 continue
-
-        # SQLite only - no pickle cache
         
         return asteroid_list
 

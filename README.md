@@ -58,9 +58,10 @@ A web application that displays the current positions of celestial bodies (Sun, 
 The application runs multiple services:
 
 - **`web`** - FastAPI web server (port 8000)
-- **`worker`** - Precompute worker for cache generation
+- **`rabbitmq`** - RabbitMQ message broker for async task processing
+- **`asteroid-worker-1/2`** - RabbitMQ workers for asteroid computations
+- **`comet-worker-1/2`** - RabbitMQ workers for comet computations
 - **`data_updater`** - Nightly data update service (runs at 2:00 AM)
-- **`task_cleanup`** - Background task file cleanup service
 
 All services restart automatically unless stopped.
 
@@ -70,27 +71,19 @@ All services restart automatically unless stopped.
 - **Daily Updates**: The `data_updater` service automatically downloads fresh data at 2:00 AM local time
 - **Performance**: After initial setup, all data loads from database (10x faster than file parsing)
 
-- Cache Precomputation
-  - Precomputed data is stored in SQLite database and location-specific cache files for fast retrieval
+### Cache Architecture
 
-- SQLite Database (Primary Backend)
-  - **DB-first approach**: All asteroid and comet data loaded from database
-  - Stored in `celestial_cache.db`
-  - Contains ~2200 asteroids and ~1200 comets with orbital elements
+- **SQLite Database** (`cache/asciisky.db`)
+  - All asteroid and comet orbital data (~2200 asteroids, ~1200 comets)
   - Pre-computed positions cached per location and time bucket
   - Automatic nightly updates via `data_updater` service
   - See `doc/sqlite.md` and `doc/data-management.md` for details
 
-- Pickle Cache (Fallback)
-  - Asteroids
-    - `cache/asteroids_dataframe.pkl` (parsed MPCORB)
-    - `cache/asteroids/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
-  - Comets
-    - `cache/COMET_ELEMENTS.txt` (download-once copy of MPC comet elements)
-    - `cache/comets_dataframe.pkl` (standardized DataFrame; 49h TTL)
-    - `cache/comets/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache with 1h TTL and 1h buckets)
-  - Celestial
-    - `cache/celestial/lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ/YYYYMMDDTHH.pkl` (location/time-specific cache)
+- **RabbitMQ Task Queue**
+  - Async computation of asteroid and comet positions
+  - Dedicated worker processes for parallel processing
+  - Cache-first strategy: returns cached data immediately, computes missing data in background
+  - Automatic retry and error handling
 
 - Magnitude Filters
   - **User-adjustable filters** via UI (⚙️ button under "Visible Objects")
@@ -118,6 +111,7 @@ All services restart automatically unless stopped.
 
 ## Project Structure
 
+### Core Application
 - `main.py` - FastAPI application with celestial object calculation logic
 - `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
 - `comets.py` - Comet pipeline using MPC data with M1/k1 magnitude model
@@ -125,31 +119,33 @@ All services restart automatically unless stopped.
 - `nightly_data_updater.py` - Automatic daily updates of asteroid and comet data (2:00 AM)
 - `settings.py` - User/location settings; persists to `user_settings.json`
 - `de421.bsp` - JPL ephemeris used by Skyfield
+
+### RabbitMQ Workers
+- `workers/asteroid_worker.py` - Async worker for asteroid computations
+- `workers/comet_worker.py` - Async worker for comet computations
+
+### Frontend
 - `templates/` - HTML templates
 - `static/js/` - JavaScript modules
   - `constants.js` - Configuration parameters and centralized API endpoints
-  - `skyRenderer.js` - ASCII sky rendering, dialogs, zoom/pan functionality, name normalization and time label handling
+  - `skyRenderer.js` - ASCII sky rendering, dialogs, zoom/pan functionality
   - `skyManager.js` - Sky rendering initialization and update management
   - `i18n.js` - Internationalization module with translations
   - `locationDialog.js` - User location dialog logic
   - `settings.js` - Frontend settings utilities
   - `zodiacRenderer.js` - Zodiac rendering utilities
 - `static/css/` - CSS styles
-  - `dialogStyles.css` - Object dialog styles
-  - `loadingIndicator.css` - Loading indicator styles
-  - `locationDialogStyles.css` - Location dialog styles
-  - `navigationArrows.css` - Navigation arrows styles
-  - `timeControls.css` - Simulated time controls styles
-- `doc/` - Documentation files
-  - `plan.md` - Development plan and feature tracking
-  - `asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
-  - `comets.md` - Comet position and magnitude pipeline (M1/k1 model)
-  - `planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
-  - `cache.md` - Technical documentation of the cache system architecture
-  - `sqlite.md` - SQLite database schema and implementation details
-  - `data-management.md` - Data loading strategy, nightly updates, and troubleshooting
+
+### Documentation
+- `doc/asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
+- `doc/comets.md` - Comet position and magnitude pipeline (M1/k1 model)
+- `doc/planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
+- `doc/sqlite.md` - SQLite database schema and implementation details
+- `doc/data-management.md` - Data loading strategy, nightly updates, and troubleshooting
+
+### Configuration
 - `Dockerfile` - Docker configuration
-- `docker-compose.yml` - Docker Compose configuration
+- `docker-compose.yml` - Docker Compose configuration with RabbitMQ
 - `requirements.txt` - Python dependencies
 
 ## API Endpoints
@@ -197,35 +193,28 @@ The application provides zoom and pan functionality for desktop users:
 
 The application can be configured using the following environment variables in `docker-compose.yml`:
 
-### Cache Configuration
-- `ASCII_SKY_PRECOMPUTE_HOURS` - Number of hours to precompute in the rolling window (default: 144)
-- `ASCII_SKY_MAX_PRECOMPUTE_HOURS` - Maximum allowed hours for custom date range precomputation (default: 168)
-- `ASCII_SKY_PRECOMPUTE_KINDS` - Types of data to precompute (default: "celestial,asteroids,comets")
-- `ASCII_SKY_RETENTION_DAYS` - Number of days to retain cached data (default: 30)
-
-### Database Configuration
-- `ASTEROID_USE_SQLITE` - Enable SQLite backend for asteroids (default: 1)
-- `COMET_USE_SQLITE` - Enable SQLite backend for comets (default: 1)
-- `CELESTIAL_USE_SQLITE` - Enable SQLite backend for celestial objects (default: 1)
-
-### Worker Configuration
-- `ASCII_SKY_PRECOMPUTE_WORKERS` - Number of worker threads for precomputation (default: 4)
-- `ASCII_SKY_ADAPTIVE_WORKERS` - Enable adaptive worker count based on CPU cores (default: 1)
-- `ASCII_SKY_WORKER_RUN_ONCE` - Run worker once and exit (default: not set, only for worker_once service)
+### RabbitMQ Configuration
+- `USE_RABBITMQ` - Enable RabbitMQ for async processing (default: true)
+- `USE_RABBITMQ_ASTEROIDS` - Enable RabbitMQ for asteroids (default: true)
+- `USE_RABBITMQ_COMETS` - Enable RabbitMQ for comets (default: true)
+- `RABBITMQ_URL` - RabbitMQ connection URL (default: amqp://admin:password@rabbitmq:5672/)
+- `RABBITMQ_TIMEOUT` - RabbitMQ task timeout in seconds (default: 120)
 
 ### Data Update Configuration
-- `ASCII_SKY_UPDATE_HOUR` - Hour of day for automatic data updates (default: 2, meaning 2:00 AM)
+- `ASCII_SKY_UPDATE_HOUR` - Hour of day for automatic data updates (default: 4, meaning 4:00 AM)
 
 ### Magnitude Limits Configuration
 - `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for asteroid prefiltering (default: 12.0)
 - `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` - Maximum apparent magnitude for asteroid display (default: 10.0)
 - `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for comet prefiltering (default: 20.0)
 - `ASCII_SKY_COMET_MAX_APPARENT_MAG` - Maximum apparent magnitude for comet display (default: 14.0)
+- `ASCII_SKY_ASTEROIDS_EVENTS_MAX` - Maximum number of asteroid events (default: 100)
+- `ASCII_SKY_COMET_EVENTS_MAX` - Maximum number of comet events (default: 50)
 
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)
 - `TZ` - Timezone for the application (default: Europe/Berlin)
-- `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (default: "dev-secret-please-change")
+- `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (default: change-in-production)
 
 ## Documentation
 
@@ -236,21 +225,16 @@ The application can be configured using the following environment variables in `
 - [Constellations](doc/constellations.md) - Star patterns and visualization (using data from [Stellarium](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
 
 ### Architecture
-- [Runtime Ephemerides](doc/runtime_ephemerides.md) - On-demand position computation strategy
 - [SQLite Database](doc/sqlite.md) - Database schema and caching strategy
-- [Cache Management](doc/cache.md) - Caching layers and performance considerations
 - [Data Management](doc/data-management.md) - DB-first loading, nightly updates, and troubleshooting
-
-### Migration & Maintenance
-- [Runtime Migration Plan](doc/migration_plan_runtime_ephemerides.md) - Transitioning to on-the-fly computation
 - [Session Management](doc/sessionmgm.md) - User sessions and state handling
-- [Session Management (English)](doc/sessionmgm_en.md) - English version of session management docs
 
 ## Technologies Used
 
-- Backend: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), SQLite
-- Frontend: HTML, CSS, JavaScript
-- Containerization: Docker, Docker Compose
+- **Backend**: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), SQLite
+- **Message Queue**: RabbitMQ 4.1 with async workers
+- **Frontend**: HTML, CSS, JavaScript
+- **Containerization**: Docker, Docker Compose
 
 ## Skyfield 
 

@@ -7,10 +7,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import comets
-import pickle
 import sqlite3
 from db_utils import db_transaction
 import pandas as pd
+import pickle  # Nur für interne DB-Serialisierung
 
 print("=" * 80)
 print("DEBUG: Kometen-Speicherung")

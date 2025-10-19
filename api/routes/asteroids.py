@@ -6,12 +6,11 @@ import bright_asteroids
 import settings
 import asyncio
 import os
-import pickle
 import time
 import uuid
 import logging
 from datetime import datetime, timedelta
-from cache_utils import build_cache_path, read_pickle_if_fresh, normalize_location, location_key, time_bucket_utc
+from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_asteroid_positions
 
 # RabbitMQ Integration (für Migration)
@@ -147,8 +146,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                     ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False),
-                    disable_pickle=getattr(bright_asteroids, 'DISABLE_PICKLE', False)
+                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
                 )
                 
                 if isinstance(asteroid_list, list) and asteroid_list:
@@ -185,8 +183,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                     ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False),
-                    disable_pickle=getattr(bright_asteroids, 'DISABLE_PICKLE', False)
+                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
                 )
                 
                 if isinstance(bright_asteroid_list, list) and bright_asteroid_list:
