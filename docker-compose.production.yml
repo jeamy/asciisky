@@ -1,0 +1,148 @@
+# Docker Compose für asciisky.eibrain.org
+# Web-Server, RabbitMQ, PostgreSQL, Data Updater
+# Worker laufen auf rabbit-b/c.eibrain.org
+
+services:
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: asciisky-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asciisky -d asciisky"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
+  # ===== RabbitMQ Service =====
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: asciisky-rabbitmq
+    hostname: rabbitmq-asciisky
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-changeme}
+      - RABBITMQ_DEFAULT_VHOST=/
+      - RABBITMQ_NODENAME=rabbit@rabbitmq-asciisky
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./config/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
+  # ===== Web Service =====
+  web:
+    image: asciisky-web:latest
+    container_name: asciisky-web
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./cache:/app/cache
+      - ./user_settings.json:/app/user_settings.json
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      
+      # PostgreSQL Configuration
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration
+      - USE_RABBITMQ=true
+      - USE_RABBITMQ_ASTEROIDS=true
+      - USE_RABBITMQ_COMETS=true
+      - RABBITMQ_PERCENTAGE=100
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_TIMEOUT=120
+      
+      # Precompute Settings
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_MAX_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
+      - ASCII_SKY_BG_TASK_COOLDOWN_MINUTES=1
+      - ASCII_SKY_MAX_WINDOW_WORKERS=4
+      
+      # Session Secret (ÄNDERN für Produktion!)
+      - ASCII_SKY_SESSION_SECRET=${SESSION_SECRET:-c93d3747775793487777579348777757}
+      
+      # Magnitude Limits
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=12.0
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=10.0
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=20.0
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
+      - ASCII_SKY_COMET_EVENTS_MAX=50
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
+  # ===== Data Updater =====
+  data_updater:
+    image: asciisky-web:latest
+    container_name: asciisky-data-updater
+    command: ["python", "nightly_data_updater.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_UPDATE_HOUR=2
+      
+      # PostgreSQL Configuration
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
+volumes:
+  postgres_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+
+networks:
+  asciisky-net:
+    driver: bridge

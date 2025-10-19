@@ -1,0 +1,129 @@
+# Docker Compose für rabbit-c.eibrain.org
+# Asteroid Worker 3+4, Comet Worker 3+4
+
+services:
+  # ===== Asteroid Workers =====
+  asteroid-worker-3:
+    image: asciisky-web:latest
+    container_name: asciisky-asteroid-worker-3
+    command: ["python", "workers/asteroid_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=rabbit-c-asteroid-3
+      - LOG_LEVEL=info
+      
+      # PostgreSQL Configuration (Remote)
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration (Remote)
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    restart: unless-stopped
+    networks:
+      - worker-net
+
+  asteroid-worker-4:
+    image: asciisky-web:latest
+    container_name: asciisky-asteroid-worker-4
+    command: ["python", "workers/asteroid_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=rabbit-c-asteroid-4
+      - LOG_LEVEL=info
+      
+      # PostgreSQL Configuration (Remote)
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration (Remote)
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    restart: unless-stopped
+    networks:
+      - worker-net
+
+  # ===== Comet Workers =====
+  comet-worker-3:
+    image: asciisky-web:latest
+    container_name: asciisky-comet-worker-3
+    command: ["python", "workers/comet_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=rabbit-c-comet-3
+      - LOG_LEVEL=info
+      
+      # PostgreSQL Configuration (Remote)
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration (Remote)
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    restart: unless-stopped
+    networks:
+      - worker-net
+
+  comet-worker-4:
+    image: asciisky-web:latest
+    container_name: asciisky-comet-worker-4
+    command: ["python", "workers/comet_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=rabbit-c-comet-4
+      - LOG_LEVEL=info
+      
+      # PostgreSQL Configuration (Remote)
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration (Remote)
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    restart: unless-stopped
+    networks:
+      - worker-net
+
+networks:
+  worker-net:
+    driver: bridge
