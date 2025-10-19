@@ -73,6 +73,23 @@ services:
       - ASCII_SKY_UPDATE_HOUR=4
     restart: unless-stopped
 
+  # ===== Precompute Worker =====
+  precompute_worker:
+    image: asciisky-worker
+    build: .
+    command: ["python", "precompute_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
+      - ASCII_SKY_PRECOMPUTE_WORKERS=3
+      - ASCII_SKY_ADAPTIVE_WORKERS=1
+      - ASCII_SKY_RETENTION_DAYS=7
+    restart: unless-stopped
+
   # ===== Task Cleanup - OBSOLET (kann entfernt werden) =====
   # Wurde für alte api/background.py Task-Dateien benötigt
   # Diese werden mit RabbitMQ nicht mehr erstellt
