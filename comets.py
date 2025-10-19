@@ -438,31 +438,21 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         except Exception as e:
             logger.debug(f"PostgreSQL comet cache failed: {e}")
         
-    # Load comet dataframe - PREFER PostgreSQL database over file
+    # Load comet dataframe - PostgreSQL ONLY
     df = None
     try:
-        from db_utils import load_comets_dataframe_from_db
-        df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
+        from db_utils import get_comet_dataframe
+        df_pickle = get_comet_dataframe()
+        if df_pickle:
+            df = pickle.loads(df_pickle)
         if df is not None and not df.empty:
             print(f"Loaded {len(df)} comets from PostgreSQL database")
+        else:
+            print("ERROR: No comets in PostgreSQL database! Run data_updater first.")
+            return []
     except Exception as e:
-        print(f"Failed to load from PostgreSQL, falling back to file: {e}")
-    
-    # Fallback: Load from file if DB is empty
-    if df is None or df.empty:
-        print("Loading comets from file (DB empty)")
-        df = load_comet_dataframe()
-        
-        # Store in PostgreSQL for next time
-        if df is not None and not df.empty:
-            try:
-                from db_utils import store_comet_dataframe
-                stored_count = store_comet_dataframe(df)
-                logger.debug(f"Stored {stored_count} comets in PostgreSQL database")
-            except Exception as e:
-                logger.debug(f"Failed to store comets in PostgreSQL: {e}")
-    
-    if df is None or df.empty:
+        print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
+        print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
         return []
 
     # Prefilter by photometric parameters to reduce heavy computations

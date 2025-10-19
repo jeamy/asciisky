@@ -200,10 +200,37 @@ def run_update_loop():
             time.sleep(CHECK_INTERVAL_SECONDS)
 
 
+def check_initial_data():
+    """Check if database has data, if not perform initial update"""
+    try:
+        from db_utils import get_asteroid_dataframe, get_comet_dataframe
+        
+        asteroid_df = get_asteroid_dataframe()
+        comet_df = get_comet_dataframe()
+        
+        if not asteroid_df and not comet_df:
+            logger.info("=" * 80)
+            logger.info("Database is empty - performing initial data load")
+            logger.info("=" * 80)
+            perform_nightly_update()
+            return True
+        else:
+            logger.info("Database has data - skipping initial load")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not check database status: {e}")
+        logger.info("Performing initial data load to be safe")
+        perform_nightly_update()
+        return True
+
+
 if __name__ == "__main__":
     # Allow manual trigger
     if len(sys.argv) > 1 and sys.argv[1] == "--now":
         logger.info("Manual update triggered")
         perform_nightly_update()
     else:
+        # Check if initial data load is needed
+        check_initial_data()
+        # Then start regular update loop
         run_update_loop()

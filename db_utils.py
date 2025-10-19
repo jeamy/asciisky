@@ -71,9 +71,9 @@ def store_asteroid_dataframe(df_pickle: bytes) -> None:
                 dataframe_pickle = EXCLUDED.dataframe_pickle
         """, (datetime.now(timezone.utc), psycopg2.Binary(df_pickle)))
 
-def get_asteroid_dataframe_pg(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     """Retrieve cached asteroid DataFrame from PostgreSQL."""
-    conn = get_pg_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
@@ -116,7 +116,7 @@ def get_asteroid_orbit_data(asteroid_id: int) -> Optional[Any]:
         return pickle.loads(bytes(row['orbit_data']))
     return None
 
-def store_asteroid_positions_pg(asteroid_id: int, location_key: str, time_bucket: str,
+def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: str,
                                 observer_lat: float, observer_lon: float, observer_elevation: float,
                                 position_data: List[Dict]) -> None:
     """Store computed asteroid positions in PostgreSQL."""
@@ -140,10 +140,10 @@ def store_asteroid_positions_pg(asteroid_id: int, location_key: str, time_bucket
             datetime.now(timezone.utc), serialized_data
         ))
 
-def get_asteroid_positions_pg(location_key: str, time_bucket: str,
+def get_asteroid_positions(location_key: str, time_bucket: str,
                               max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
     """Retrieve cached asteroid positions from PostgreSQL."""
-    conn = get_pg_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
@@ -164,7 +164,7 @@ def get_asteroid_positions_pg(location_key: str, time_bucket: str,
 
 # ===== Comet Functions =====
 
-def store_comet_dataframe_pg(df_pickle: bytes) -> None:
+def store_comet_dataframe(df_pickle: bytes) -> None:
     """Store comet DataFrame in PostgreSQL."""
     with db_transaction() as conn:
         cursor = conn.cursor()
@@ -176,9 +176,9 @@ def store_comet_dataframe_pg(df_pickle: bytes) -> None:
                 dataframe_pickle = EXCLUDED.dataframe_pickle
         """, (datetime.now(timezone.utc), psycopg2.Binary(df_pickle)))
 
-def get_comet_dataframe_pg(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     """Retrieve cached comet DataFrame from PostgreSQL."""
-    conn = get_pg_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
@@ -192,9 +192,9 @@ def get_comet_dataframe_pg(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     row = cursor.fetchone()
     return bytes(row['dataframe_pickle']) if row else None
 
-def get_comets_by_magnitude_pg(max_absolute_mag: float) -> List[Dict]:
+def get_comets_by_magnitude(max_absolute_mag: float) -> List[Dict]:
     """Get comets filtered by magnitude from PostgreSQL."""
-    conn = get_pg_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -206,7 +206,7 @@ def get_comets_by_magnitude_pg(max_absolute_mag: float) -> List[Dict]:
     
     return [dict(row) for row in cursor.fetchall()]
 
-def store_comet_positions_pg(comet_id: int, location_key: str, time_bucket: str,
+def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                              observer_lat: float, observer_lon: float, observer_elevation: float,
                              position_data: List[Dict]) -> None:
     """Store computed comet positions in PostgreSQL."""
@@ -230,10 +230,10 @@ def store_comet_positions_pg(comet_id: int, location_key: str, time_bucket: str,
             datetime.now(timezone.utc), serialized_data
         ))
 
-def get_comet_positions_pg(location_key: str, time_bucket: str,
-                           max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
+def get_comet_positions(location_key: str, time_bucket: str,
+                           max_age_seconds: int = 3600) -> Optional[List[Dict]]:
     """Retrieve cached comet positions from PostgreSQL."""
-    conn = get_pg_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
@@ -282,3 +282,4 @@ def get_last_data_update(update_type: str = None) -> Optional[Dict]:
     
     row = cursor.fetchone()
     return dict(row) if row else None
+

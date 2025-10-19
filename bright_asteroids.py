@@ -186,67 +186,18 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
         
-    asteroid_rows = []
-    
+    # --- PostgreSQL Loading (ONLY source) ---
     try:
-        # Try loading from database FIRST
         asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
         if asteroid_rows and len(asteroid_rows) > 0:
             print(f"Loaded {len(asteroid_rows)} asteroids from PostgreSQL database")
         else:
-            print("No asteroids in database, will load from file")
-            asteroid_rows = []
-    except Exception as e:
-        print(f"Error loading from PostgreSQL database: {e}, falling back to file")
-        asteroid_rows = []
-    
-    # --- Fallback to File Loading (only if DB is empty or disabled) ---
-    if not asteroid_rows:
-        print("Loading asteroids from file (DB empty or disabled)")
-        df = None
-        
-        # Check if file exists, download if missing (e.g., first start)
-        if not MPCORB_FILE.exists():
-            print("MPCORB file not found, downloading for initial setup...")
-            if not download_mpcorb_file():
-                print("ERROR: Could not download MPCORB file. Cannot proceed without data.")
-                return []
-        
-        try:
-            print(f"Loading and parsing asteroid data from {MPCORB_FILE}...")
-            with gzip.open(MPCORB_FILE, 'rb') as f:
-                df = mpc.load_mpcorb_dataframe(f)
-            
-            df = df.iloc[:MAX_ASTEROIDS]
-        
-            # Convert types
-            numeric_cols = [
-                'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
-                'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
-                'mean_daily_motion_degrees', 'semimajor_axis_au'
-            ]
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-
-            # Store in PostgreSQL database for next time
-            try:
-                count = store_asteroid_dataframe(df)
-                print(f"Stored {count} asteroids in PostgreSQL database")
-                
-                # Now load from DB for processing
-                asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-                print(f"Loaded {len(asteroid_rows)} asteroids from PostgreSQL database")
-            except Exception as e:
-                print(f"Error storing/loading in PostgreSQL: {e}")
-                # Fallback: process from DataFrame directly (legacy mode)
-                asteroid_rows = []
-                    
-        except Exception as e:
-            print(f"Error processing MPCORB data: {e}")
+            print("ERROR: No asteroids in PostgreSQL database! Run data_updater first.")
             return []
+    except Exception as e:
+        print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
+        print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
+        return []
 
     # Process asteroids from PostgreSQL
     if asteroid_rows:
