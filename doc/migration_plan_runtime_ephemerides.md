@@ -5,7 +5,7 @@ This plan describes how to migrate AsciiSky from custom-range precomputation of 
 ## Goals
 
 - Compute positions on demand from MPC elements (no range precompute).
-- Keep persistent storage minimal (elements + small indices in SQLite).
+- Keep persistent storage minimal (elements + small indices in PostgreSQL).
 - Ensure smooth UX (panning/zooming/time steps) via small in-memory session caches only.
 - Preserve Docker-only environment; no local installs. Dependencies are already in the container (e.g., Skyfield).
 - No demo/fallback data; always use real data.
@@ -13,13 +13,13 @@ This plan describes how to migrate AsciiSky from custom-range precomputation of 
 
 ## Current State (Summary)
 
-- Precomputation UI allows custom date-range precompute; results stored in SQLite + pickle files.
+- Precomputation UI allows custom date-range precompute; results stored in PostgreSQL + pickle files.
 - Frontend can request precomputed availability and use cached results.
 - Magnitude thresholds and other settings via environment variables.
 
 ## Target Architecture
 
-- Persistent: only orbital elements and small metadata in SQLite.
+- Persistent: only orbital elements and small metadata in PostgreSQL.
 - Runtime: positions computed per request/time/location.
 - Session caches (memory):
   - Active object set (recently visible/bright).

@@ -93,58 +93,48 @@ def get_location_params(request: Request, lat: float = None, lon: float = None, 
     
     return float(resolved_lat), float(resolved_lon), float(resolved_elevation)
 
-def get_cache_data(cache_file: str, cache_ttl: int, use_sqlite: bool = False, loc_key: str = None, time_bucket: str = None, sqlite_getter=None):
+def get_cache_data(cache_file: str, cache_ttl: int, use_postgres: bool = True, loc_key: str = None, time_bucket: str = None, postgres_getter=None):
     """
-    Unified cache retrieval logic - SQLite only.
+    Unified cache retrieval logic - PostgreSQL only.
     
     Args:
         cache_file: Ignored (legacy parameter)
         cache_ttl: Cache TTL in seconds
-        use_sqlite: Whether to try SQLite cache
-        loc_key: Location key for SQLite cache
-        time_bucket: Time bucket for SQLite cache
-        sqlite_getter: Function to get data from SQLite cache
+        use_postgres: Whether to try PostgreSQL cache
+        loc_key: Location key for PostgreSQL cache
+        time_bucket: Time bucket for PostgreSQL cache
+        postgres_getter: Function to get data from PostgreSQL cache
         
     Returns:
         Cached data or None if not found/expired
     """
-    # SQLite cache only
-    if use_sqlite and sqlite_getter and loc_key and time_bucket:
+    # PostgreSQL cache only
+    if use_postgres and postgres_getter and loc_key and time_bucket:
         try:
-            cached_data = sqlite_getter(loc_key, time_bucket, cache_ttl)
+            cached_data = postgres_getter(loc_key, time_bucket, cache_ttl)
             if cached_data:
                 return cached_data
         except Exception as e:
-            print(f"SQLite cache failed: {e}")
+            print(f"PostgreSQL cache failed: {e}")
     
     return None
 
-def store_cache_data(data: Any, cache_file: str, use_sqlite: bool = False, loc_key: str = None, time_bucket: str = None, sqlite_storer=None, **sqlite_kwargs):
+def store_cache_data(data: Any, cache_file: str, use_postgres: bool = True, loc_key: str = None, time_bucket: str = None, postgres_storer=None, **postgres_kwargs):
     """
-    Unified cache storage logic - SQLite only.
+    Unified cache storage logic - PostgreSQL only.
     
     Args:
         data: Data to cache
         cache_file: Ignored (legacy parameter)
-        use_sqlite: Whether to store in SQLite cache
-        loc_key: Location key for SQLite cache
-        time_bucket: Time bucket for SQLite cache
-        sqlite_storer: Function to store data in SQLite cache
-        **sqlite_kwargs: Additional arguments for SQLite storer
+        use_postgres: Whether to store in PostgreSQL cache
+        loc_key: Location key for PostgreSQL cache
+        time_bucket: Time bucket for PostgreSQL cache
+        postgres_storer: Function to store data in PostgreSQL cache
+        **postgres_kwargs: Additional arguments for PostgreSQL storer
     """
-    # Store in SQLite only
-    if use_sqlite and sqlite_storer and loc_key and time_bucket:
+    # PostgreSQL cache only
+    if use_postgres and postgres_storer and loc_key and time_bucket:
         try:
-            # Determine which function signature to use
-            import inspect
-            sig = inspect.signature(sqlite_storer)
-            params = list(sig.parameters.keys())
-            
-            # If function accepts 'data' parameter, pass it
-            if 'data' in params:
-                sqlite_storer(loc_key, time_bucket, data, **sqlite_kwargs)
-            else:
-                # Otherwise pass individual kwargs
-                sqlite_storer(loc_key, time_bucket, **sqlite_kwargs)
+            postgres_storer(loc_key=loc_key, time_bucket=time_bucket, **postgres_kwargs)
         except Exception as e:
-            print(f"Failed to store in SQLite cache: {e}")
+            print(f"PostgreSQL cache write failed: {e}")

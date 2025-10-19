@@ -28,7 +28,7 @@ def invalidate_cache():
         except Exception as e:
             print(f"Error clearing in-memory caches: {e}")
         
-        # Clear SQLite cache tables (positions AND dataframes)
+        # Clear PostgreSQL cache tables (positions AND dataframes)
         try:
             from db_utils import get_db_connection
             conn = get_db_connection()
@@ -53,7 +53,7 @@ def invalidate_cache():
                 
                 conn.commit()
                 
-                print(f"Cleared SQLite cache:")
+                print(f"Cleared PostgreSQL cache:")
                 print(f"  - Asteroid positions: {deleted_asteroid_positions}")
                 print(f"  - Comet positions: {deleted_comet_positions}")
                 print(f"  - Asteroid dataframes: {deleted_asteroid_df}")
@@ -61,7 +61,7 @@ def invalidate_cache():
             finally:
                 conn.close()
         except Exception as e:
-            print(f"Error clearing SQLite cache: {e}")
+            print(f"Error clearing PostgreSQL cache: {e}")
             
     except Exception as e:
         print(f"Error invalidating cache: {e}")

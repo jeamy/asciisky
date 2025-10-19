@@ -54,7 +54,6 @@ COMET_DF_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 MAX_COMETS_DEFAULT = 1000
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
-COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
 COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
 
@@ -324,8 +323,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         _comet_df_cache = comets
         _comet_df_timestamp = _now()
         
-        # SQLite only
-        logger.debug(f"Loaded {len(comets)} comets from MPC (stored in SQLite).")
+        logger.debug(f"Loaded {len(comets)} comets from MPC (stored in PostgreSQL).")
         return _comet_df_cache
     except Exception as e:
         logger.error(f"Error loading comet data: {e}")
@@ -427,45 +425,42 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
     # Per-location/time-bucket cache for final comet list (bucket based on simulated time if provided)
     if use_cache:
-        if COMET_USE_SQLITE:
-            # Try SQLite cache first
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
-            
-            try:
-                from db_utils import get_comet_positions
-                cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
-                if cached_positions:
-                    logger.debug(f"Loading SQLite comet cache for {loc_key}/{time_bucket}")
-                    return cached_positions[:max_comets]
-            except Exception as e:
-                logger.debug(f"SQLite comet cache failed: {e}")
-        
-    # Load comet dataframe - PREFER SQLite database over file
-    df = None
-    if COMET_USE_SQLITE:
+        # Try PostgreSQL cache first
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
         try:
-            from db_utils import load_comets_dataframe_from_db
-            df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
-            if df is not None and not df.empty:
-                print(f"Loaded {len(df)} comets from SQLite database")
+            from db_utils import get_comet_positions
+            cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
+            if cached_positions:
+                logger.debug(f"Loading PostgreSQL comet cache for {loc_key}/{time_bucket}")
+                return cached_positions[:max_comets]
         except Exception as e:
-            print(f"Failed to load from SQLite, falling back to file: {e}")
+            logger.debug(f"PostgreSQL comet cache failed: {e}")
+        
+    # Load comet dataframe - PREFER PostgreSQL database over file
+    df = None
+    try:
+        from db_utils import load_comets_dataframe_from_db
+        df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
+        if df is not None and not df.empty:
+            print(f"Loaded {len(df)} comets from PostgreSQL database")
+    except Exception as e:
+        print(f"Failed to load from PostgreSQL, falling back to file: {e}")
     
-    # Fallback: Load from file if DB is empty or disabled
+    # Fallback: Load from file if DB is empty
     if df is None or df.empty:
-        print("Loading comets from file (DB empty or disabled)")
+        print("Loading comets from file (DB empty)")
         df = load_comet_dataframe()
         
-        # Store in SQLite for next time
-        if COMET_USE_SQLITE and df is not None and not df.empty:
+        # Store in PostgreSQL for next time
+        if df is not None and not df.empty:
             try:
                 from db_utils import store_comet_dataframe
                 stored_count = store_comet_dataframe(df)
-                logger.debug(f"Stored {stored_count} comets in SQLite database")
+                logger.debug(f"Stored {stored_count} comets in PostgreSQL database")
             except Exception as e:
-                logger.debug(f"Failed to store comets in SQLite: {e}")
+                logger.debug(f"Failed to store comets in PostgreSQL: {e}")
     
     if df is None or df.empty:
         return []
@@ -744,19 +739,18 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             count += 1
 
     # Save final list to cache for faster subsequent loads
-    if COMET_USE_SQLITE:
-        # Store in SQLite cache
-        try:
-            from db_utils import store_comet_positions
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
-            
-            # We need comet IDs for SQLite storage - use a dummy approach for now
-            # In a full implementation, we'd match comets to database IDs
-            store_comet_positions(0, loc_key, time_bucket, lat, lon, elevation, comet_list)
-            logger.debug(f"Saved {len(comet_list)} bright comets to SQLite cache ({loc_key}/{time_bucket})")
-        except Exception as e:
-            logger.debug(f"Failed to write SQLite comet cache: {e}")
+    # Store in PostgreSQL cache
+    try:
+        from db_utils import store_comet_positions
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
+        
+        # We need comet IDs for PostgreSQL storage - use a dummy approach for now
+        # In a full implementation, we'd match comets to database IDs
+        store_comet_positions(0, loc_key, time_bucket, lat, lon, elevation, comet_list)
+        logger.debug(f"Saved {len(comet_list)} bright comets to PostgreSQL cache ({loc_key}/{time_bucket})")
+    except Exception as e:
+        logger.debug(f"Failed to write PostgreSQL comet cache: {e}")
 
     return comet_list

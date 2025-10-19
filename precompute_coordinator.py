@@ -253,10 +253,14 @@ def main():
     # Konfiguration
     hours_ahead = int(os.getenv('ASCII_SKY_PRECOMPUTE_HOURS', '720'))
     run_interval = int(os.getenv('PRECOMPUTE_COORDINATOR_INTERVAL', '3600'))  # 1 Stunde
+    retry_interval = int(os.getenv('PRECOMPUTE_COORDINATOR_RETRY_INTERVAL', '30'))  # 30 Sekunden
     
     logger.info(f"Configuration:")
     logger.info(f"  - Hours ahead: {hours_ahead}")
     logger.info(f"  - Run interval: {run_interval}s")
+    logger.info(f"  - Retry interval: {retry_interval}s (on failure)")
+    
+    first_run = True
     
     while True:
         try:
@@ -265,7 +269,9 @@ def main():
             
             if not locations:
                 logger.warning("No locations configured - skipping this run")
-                time.sleep(run_interval)
+                sleep_time = retry_interval if first_run else run_interval
+                logger.info(f"Sleeping for {sleep_time}s...")
+                time.sleep(sleep_time)
                 continue
             
             # 2. Erstelle Tasks
@@ -276,12 +282,16 @@ def main():
             
             if success:
                 logger.info(f"✅ Coordinator run completed successfully")
+                first_run = False
+                # Bei Erfolg: Normales Intervall
+                logger.info(f"Sleeping for {run_interval}s until next run...")
+                time.sleep(run_interval)
             else:
                 logger.error(f"❌ Coordinator run failed")
-            
-            # 4. Warte bis nächster Run
-            logger.info(f"Sleeping for {run_interval}s until next run...")
-            time.sleep(run_interval)
+                # Bei Fehler: Kurzes Retry-Intervall (besonders beim ersten Start)
+                sleep_time = retry_interval if first_run else 300  # 30s beim Start, 5min später
+                logger.info(f"Retrying in {sleep_time}s...")
+                time.sleep(sleep_time)
         
         except KeyboardInterrupt:
             logger.info("Coordinator stopped by user")
@@ -289,8 +299,9 @@ def main():
         
         except Exception as e:
             logger.error(f"Coordinator error: {e}", exc_info=True)
-            logger.info(f"Retrying in 60 seconds...")
-            time.sleep(60)
+            sleep_time = retry_interval if first_run else 60
+            logger.info(f"Retrying in {sleep_time}s...")
+            time.sleep(sleep_time)
 
 
 if __name__ == '__main__':

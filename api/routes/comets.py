@@ -140,7 +140,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
                     lat, lon, elevation, dt_utc,
                     bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
                     ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(comets, 'COMET_USE_SQLITE', False)
+                    use_postgres=True
                 )
                 
                 if isinstance(comet_list, list) and comet_list:

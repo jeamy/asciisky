@@ -146,7 +146,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                     ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
+                    use_postgres=True
                 )
                 
                 if isinstance(asteroid_list, list) and asteroid_list:
@@ -183,7 +183,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                     ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
+                    use_postgres=True
                 )
                 
                 if isinstance(bright_asteroid_list, list) and bright_asteroid_list:

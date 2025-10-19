@@ -67,7 +67,6 @@ services:
       - TZ=Europe/Berlin
       
       # PostgreSQL Configuration
-      - USE_POSTGRES=true
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
@@ -123,7 +122,6 @@ services:
       - ASCII_SKY_UPDATE_HOUR=2
       
       # PostgreSQL Configuration
-      - USE_POSTGRES=true
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
@@ -158,6 +156,7 @@ services:
       # Precompute Settings
       - ASCII_SKY_PRECOMPUTE_HOURS=720
       - PRECOMPUTE_COORDINATOR_INTERVAL=3600
+      - PRECOMPUTE_COORDINATOR_RETRY_INTERVAL=30
       
     depends_on:
       rabbitmq:
@@ -180,7 +179,6 @@ services:
       - WORKER_ID=main-precompute-1
       
       # PostgreSQL Configuration
-      - USE_POSTGRES=true
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky

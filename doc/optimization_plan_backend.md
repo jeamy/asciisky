@@ -4,7 +4,7 @@ This document outlines incremental backend optimizations for AsciiSky that keep 
 
 ## Goals
 
-- Maintain the stable precompute pipeline (SQLite + pickle as needed) and automatic background window generation.
+- Maintain the stable precompute pipeline (PostgreSQL + pickle as needed) and automatic background window generation.
 - Reduce latency spikes during on-demand fallbacks in API routes.
 - Minimize redundant compute work (especially comet orbit builds and event times).
 - Keep everything running inside Docker; no local installs.
@@ -45,9 +45,9 @@ Existing environment variables remain unchanged (e.g., magnitude thresholds, pre
 2) Verify:
    - No event loop blocking under cache-miss load.
    - Comet API latency improved when many candidates exist.
-   - No stale pickle reads occur; SQLite path remains primary.
+   - No stale pickle reads occur; PostgreSQL path remains primary.
 3) Benchmark typical usage (panning/time jumps) and precompute sweeps.
-4) If desired, proceed with Phase 2 refinements (DB exists-check methods, optional disabling of pickle writes when SQLite is enabled, additional observability timers).
+4) If desired, proceed with Phase 2 refinements (DB exists-check methods, optional disabling of pickle writes when PostgreSQL is enabled, additional observability timers).
 
 ## Notes & Constraints
 

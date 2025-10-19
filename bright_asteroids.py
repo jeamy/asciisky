@@ -48,7 +48,6 @@ ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 # Cache kind for consistency with celestial/comets naming
 ASTEROID_CACHE_KIND = 'asteroids'
-ASTEROID_USE_SQLITE = True
 
 # Limit number of event computations (rise/set/transit) per request to reduce CPU peaks
 ASTEROIDS_EVENTS_MAX = int(os.environ.get('ASCII_SKY_ASTEROIDS_EVENTS_MAX', '50'))
@@ -179,35 +178,27 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     # Determine observer timezone from coordinates
     tz = get_tzinfo(lat, lon)
 
-    # Check cache based on backend type
+    # Check PostgreSQL cache
     if use_cache:
-        if ASTEROID_USE_SQLITE:
-            # SQLite backend: check for cached positions
-            from cache_utils import normalize_location, location_key, time_bucket_utc
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
-            
-            cached_positions = get_asteroid_positions(loc_key, time_bucket, ASTEROID_CACHE_TTL_SECONDS)
-            if cached_positions:
-                print(f"Loading SQLite cache for {loc_key}/{time_bucket} ({len(cached_positions)} objects)")
-                return cached_positions
-
-    # --- SQLite Loading (DB-first approach like comets) ---
+        # PostgreSQL backend: check for cached positions
+        from cache_utils import normalize_location, location_key, time_bucket_utc
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
+        
     asteroid_rows = []
     
-    if ASTEROID_USE_SQLITE:
-        try:
-            # Try loading from database FIRST
-            asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-            if asteroid_rows and len(asteroid_rows) > 0:
-                print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
-            else:
-                print("No asteroids in database, will load from file")
-                asteroid_rows = []
-        except Exception as e:
-            print(f"Error loading from SQLite database: {e}, falling back to file")
+    try:
+        # Try loading from database FIRST
+        asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+        if asteroid_rows and len(asteroid_rows) > 0:
+            print(f"Loaded {len(asteroid_rows)} asteroids from PostgreSQL database")
+        else:
+            print("No asteroids in database, will load from file")
             asteroid_rows = []
+    except Exception as e:
+        print(f"Error loading from PostgreSQL database: {e}, falling back to file")
+        asteroid_rows = []
     
     # --- Fallback to File Loading (only if DB is empty or disabled) ---
     if not asteroid_rows:
@@ -240,54 +231,49 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             
             df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
 
-            # Store in SQLite database for next time
-            if ASTEROID_USE_SQLITE:
-                try:
-                    count = store_asteroid_dataframe(df)
-                    print(f"Stored {count} asteroids in SQLite database")
-                    
-                    # Now load from DB for processing
-                    asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-                    print(f"Loaded {len(asteroid_rows)} asteroids from SQLite database")
-                except Exception as e:
-                    print(f"Error storing/loading in SQLite: {e}")
-                    # Fallback: process from DataFrame directly (legacy mode)
-                    asteroid_rows = []
+            # Store in PostgreSQL database for next time
+            try:
+                count = store_asteroid_dataframe(df)
+                print(f"Stored {count} asteroids in PostgreSQL database")
+                
+                # Now load from DB for processing
+                asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
+                print(f"Loaded {len(asteroid_rows)} asteroids from PostgreSQL database")
+            except Exception as e:
+                print(f"Error storing/loading in PostgreSQL: {e}")
+                # Fallback: process from DataFrame directly (legacy mode)
+                asteroid_rows = []
                     
         except Exception as e:
             print(f"Error processing MPCORB data: {e}")
             return []
 
-    # Process asteroids based on backend type
-    if ASTEROID_USE_SQLITE and asteroid_rows:
-        # SQLite backend: process database rows
-        asteroid_list = process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz)
+    # Process asteroids from PostgreSQL
+    if asteroid_rows:
+        # PostgreSQL backend: process database rows
+        asteroid_list = process_asteroids_from_postgres(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz)
         
         # Cache the results for future requests
         if use_cache:
             from cache_utils import normalize_location, location_key, time_bucket_utc
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(current_dt or datetime.now(timezone.utc), ASTEROID_CACHE_BUCKET_HOURS)
+            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
             
-            # Store all computed positions in database as single entry
             try:
+                from db_utils import store_asteroid_positions
                 # Use first asteroid's ID as representative (all share same location/time)
                 representative_id = asteroid_rows[0]['id'] if asteroid_rows else 0
                 store_asteroid_positions(
                     representative_id, loc_key, time_bucket,
                     lat, lon, elevation, asteroid_list
                 )
-            except (IndexError, KeyError):
-                pass  # Skip if mapping fails
+            except Exception as e:
+                print(f"Failed to cache asteroid positions: {e}")
         
         return asteroid_list
-    
-    elif not ASTEROID_USE_SQLITE and df is not None:
-        # Legacy DataFrame backend
-        pass  # Continue with existing logic below
     else:
-        print("No asteroid data available from any backend")
+        # No data available
         return []
 
     # --- Calculations ---
@@ -424,8 +410,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         return []
 
 
-def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz):
-    """Process asteroids from SQLite database rows and compute positions."""
+def process_asteroids_from_postgres(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz):
+    """Process asteroids from PostgreSQL database rows and compute positions."""
     from skyfield.data import mpc
     from skyfield.toposlib import Topos
     from skyfield import almanac
@@ -572,7 +558,7 @@ def process_asteroids_from_sqlite(asteroid_rows, lat, lon, elevation, current_dt
             })
             
         except Exception as e:
-            # sqlite3.Row has no .get; use keys() to check presence
+            # psycopg2 Row has no .get; use keys() to check presence
             try:
                 name = row['designation'] if 'designation' in row.keys() else 'unknown'
             except Exception:

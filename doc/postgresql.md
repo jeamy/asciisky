@@ -1,12 +1,15 @@
-# SQLite Database Documentation
+# PostgreSQL Database Documentation
 
-ASCII Sky uses SQLite for efficient storage and retrieval of astronomical data, providing significant performance improvements over the legacy pickle-based cache system.
+ASCII Sky uses PostgreSQL for efficient storage and retrieval of astronomical data, providing multi-host capability and better concurrency than PostgreSQL.
 
 ## Database Overview
 
-- **File Location**: `cache/asciisky.db`
-- **Current Schema Version**: 2
+- **Database**: PostgreSQL 16
+- **Host**: Configured via `POSTGRES_HOST` environment variable
+- **Port**: 5432 (default)
+- **Database Name**: `asciisky`
 - **Thread Safety**: Uses thread-local connections with proper configuration
+- **Multi-Host**: All workers connect to central PostgreSQL instance
 
 ## Schema
 
@@ -143,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_celestial_computed_at ON celestial_snapshots (com
 
 ## Database Configuration
 
-The SQLite database is configured with the following PRAGMA settings for optimal performance:
+The PostgreSQL database is configured with the following PRAGMA settings for optimal performance:
 
 ```sql
 PRAGMA synchronous=NORMAL  -- Balance safety/performance
@@ -187,7 +190,7 @@ PRAGMA temp_store=MEMORY   -- Use RAM for temp tables
 
 - `cleanup_old_positions()`: Removes position cache entries older than retention period
 - `get_database_stats()`: Gets database statistics for monitoring
-- `migrate_from_pickle_cache()`: Migrates existing pickle cache files to SQLite database
+- `migrate_from_pickle_cache()`: Migrates existing pickle cache files to PostgreSQL database
 
 ## Cache Keys
 
@@ -196,7 +199,7 @@ PRAGMA temp_store=MEMORY   -- Use RAM for temp tables
 
 ## Migration from Pickle Cache
 
-The system includes functionality to migrate data from the legacy pickle cache files to the SQLite database:
+The system includes functionality to migrate data from the legacy pickle cache files to the PostgreSQL database:
 
 1. Asteroid DataFrame migration from `cache/asteroids_dataframe.pkl`
 2. Position cache migration from `cache/asteroids/*` structure (planned)
@@ -207,7 +210,7 @@ The system includes functionality to migrate data from the legacy pickle cache f
 
 ## Performance Considerations
 
-- SQLite provides significant performance improvements over pickle files for:
+- PostgreSQL provides significant performance improvements over pickle files for:
   - Filtering by magnitude without loading entire datasets
   - Efficient location/time-based lookups
   - Reduced memory usage for large datasets
@@ -217,7 +220,7 @@ The system includes functionality to migrate data from the legacy pickle cache f
 ## Hybrid Cache System
 
 ASCII Sky uses a hybrid cache system:
-- SQLite as the primary cache backend
+- PostgreSQL as the primary cache backend
 - Pickle files as fallback for backward compatibility
 
 This approach ensures reliable operation while providing significant performance improvements.

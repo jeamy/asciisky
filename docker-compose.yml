@@ -1,4 +1,25 @@
 services:
+  # ===== PostgreSQL Service =====
+  postgres:
+    image: postgres:16
+    container_name: asciisky-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asciisky"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # ===== RabbitMQ Service =====
   rabbitmq:
     image: rabbitmq:4.1-management
@@ -48,6 +69,12 @@ services:
       - ASCII_SKY_COMET_MAX_APPARENT_MAG=14.0
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=100
       - ASCII_SKY_COMET_EVENTS_MAX=50
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       # RabbitMQ - NUR neue Architektur!
       - USE_RABBITMQ=true
       - USE_RABBITMQ_ASTEROIDS=true
@@ -56,6 +83,8 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_TIMEOUT=120
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
@@ -71,6 +100,15 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - ASCII_SKY_UPDATE_HOUR=4
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # ===== Precompute Coordinator =====
@@ -85,6 +123,7 @@ services:
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=720
       - PRECOMPUTE_COORDINATOR_INTERVAL=3600
+      - PRECOMPUTE_COORDINATOR_RETRY_INTERVAL=30
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
     restart: unless-stopped
 
@@ -99,8 +138,20 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - WORKER_ID=local-precompute-1
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      # RabbitMQ Configuration
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_PREFETCH_COUNT=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   # ===== RABBITMQ WORKER =====
@@ -175,5 +226,7 @@ services:
   
 
 volumes:
+  postgres_data:
+    driver: local
   rabbitmq_data:
     driver: local

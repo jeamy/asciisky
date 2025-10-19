@@ -86,19 +86,28 @@ def process_task(task: Dict[str, Any]) -> bool:
         
         if kind == 'asteroids':
             # Lade und berechne Asteroiden
-            from skyfield.api import load
-            ts = load.timescale()
-            eph = load('de421.bsp')
+            from skyfield.api import Loader
+            from data_paths import DATA_DIR, DE421_PATH
+            loader = Loader(str(DATA_DIR))
+            ts = loader.timescale()
+            eph = loader(str(DE421_PATH))
             
-            # Normalisiere Location
-            norm_loc = normalize_location(lat, lon, elevation)
+            # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            
+            # Erstelle Observer Location Dict für bright_asteroids
+            observer_loc = {
+                'latitude': lat_norm,
+                'longitude': lon_norm,
+                'elevation': elev_norm
+            }
             
             # Berechne
             asteroids_data = bright_asteroids.load_bright_asteroids(
-                bright_asteroids.LOADER,
+                loader,
                 ts,
                 eph,
-                norm_loc,
+                observer_loc,
                 max_magnitude=magnitude,
                 current_dt=dt_utc
             )
@@ -106,15 +115,15 @@ def process_task(task: Dict[str, Any]) -> bool:
             # Speichere in DB
             if asteroids_data:
                 # Verwende 0 als representative_id (da wir keine asteroid_id haben)
-                loc_key = location_key(norm_loc['latitude'], norm_loc['longitude'], norm_loc['elevation'])
+                loc_key = location_key(lat_norm, lon_norm, elev_norm)
                 tb = time_bucket_utc(dt_utc)
                 store_asteroid_positions(
                     0,  # representative_id
                     loc_key,
                     tb,
-                    norm_loc['latitude'],
-                    norm_loc['longitude'],
-                    norm_loc['elevation'],
+                    lat_norm,
+                    lon_norm,
+                    elev_norm,
                     asteroids_data
                 )
                 count = len(asteroids_data)
@@ -123,35 +132,43 @@ def process_task(task: Dict[str, Any]) -> bool:
         
         elif kind == 'comets':
             # Lade und berechne Kometen
-            from skyfield.api import load
-            ts = load.timescale()
-            eph = load('de421.bsp')
+            from skyfield.api import Loader
+            from data_paths import DATA_DIR, DE421_PATH
+            loader = Loader(str(DATA_DIR))
+            ts = loader.timescale()
+            eph = loader(str(DE421_PATH))
             
-            # Normalisiere Location
-            norm_loc = normalize_location(lat, lon, elevation)
+            # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            
+            # Erstelle Observer Location Dict für comets
+            observer_loc = {
+                'latitude': lat_norm,
+                'longitude': lon_norm,
+                'elevation': elev_norm
+            }
             
             # Berechne
-            comets_data = comets.load_bright_comets(
-                comets.LOADER,
+            comets_data = comets.load_comets(
                 ts,
                 eph,
-                norm_loc,
-                max_magnitude=magnitude,
+                observer_loc,
+                max_comets=100,  # Limit für Precompute
                 current_dt=dt_utc
             )
             
             # Speichere in DB
             if comets_data:
                 # Verwende 0 als representative_id (da wir keine comet_id haben)
-                loc_key = location_key(norm_loc['latitude'], norm_loc['longitude'], norm_loc['elevation'])
+                loc_key = location_key(lat_norm, lon_norm, elev_norm)
                 tb = time_bucket_utc(dt_utc)
                 store_comet_positions(
                     0,  # representative_id
                     loc_key,
                     tb,
-                    norm_loc['latitude'],
-                    norm_loc['longitude'],
-                    norm_loc['elevation'],
+                    lat_norm,
+                    lon_norm,
+                    elev_norm,
                     comets_data
                 )
                 count = len(comets_data)
