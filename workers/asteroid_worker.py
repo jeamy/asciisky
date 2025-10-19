@@ -49,6 +49,10 @@ class AsteroidWorker:
         """Stellt Verbindung zu RabbitMQ her"""
         try:
             self.params = pika.URLParameters(self.rabbitmq_url)
+            # Deaktiviere Heartbeat für lange Berechnungen (0 = disabled)
+            # Berechnungen können mehrere Minuten dauern
+            self.params.heartbeat = 0
+            self.params.blocked_connection_timeout = 0
             self.connection = pika.BlockingConnection(self.params)
             self.channel = self.connection.channel()
             

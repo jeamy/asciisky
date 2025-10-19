@@ -47,7 +47,10 @@ def get_rabbitmq_connection():
     
     try:
         params = pika.URLParameters(rabbitmq_url)
-        params.heartbeat = int(os.getenv('RABBITMQ_HEARTBEAT', '60'))
+        # Deaktiviere Heartbeat für lange Berechnungen (0 = disabled)
+        # Berechnungen können mehrere Minuten dauern
+        params.heartbeat = 0
+        params.blocked_connection_timeout = 0
         connection = pika.BlockingConnection(params)
         return connection
     except Exception as e:

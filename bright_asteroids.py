@@ -20,7 +20,6 @@ from typing import Optional
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from db_utils import (
-    get_asteroids_by_magnitude, get_asteroid_orbit_data, 
     store_asteroid_dataframe, store_asteroid_positions,
     get_asteroid_positions
 )
@@ -187,22 +186,117 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
         
     # --- PostgreSQL Loading (ONLY source) ---
+    import pickle
+    from db_utils import get_asteroid_dataframe
+    
     try:
-        asteroid_rows = get_asteroids_by_magnitude(MAX_ABSOLUTE_MAGNITUDE, MAX_ASTEROIDS * 2)
-        if asteroid_rows and len(asteroid_rows) > 0:
-            print(f"Loaded {len(asteroid_rows)} asteroids from PostgreSQL database")
-        else:
+        df_pickle = get_asteroid_dataframe()
+        if not df_pickle:
             print("ERROR: No asteroids in PostgreSQL database! Run data_updater first.")
             return []
+        
+        df = pickle.loads(df_pickle)
+        print(f"Loaded {len(df)} asteroids from PostgreSQL database")
+        
+        # Filter by magnitude
+        df_filtered = df[df['magnitude_H'] <= MAX_ABSOLUTE_MAGNITUDE].copy()
+        df_filtered = df_filtered.sort_values('magnitude_H')
+        df_filtered = df_filtered.head(MAX_ASTEROIDS * 2)
+        
+        print(f"Filtered to {len(df_filtered)} asteroids with H <= {MAX_ABSOLUTE_MAGNITUDE}")
+        
     except Exception as e:
         print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
         print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
         return []
 
-    # Process asteroids from PostgreSQL
-    if asteroid_rows:
-        # PostgreSQL backend: process database rows
-        asteroid_list = process_asteroids_from_postgres(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz)
+    # Process asteroids from DataFrame
+    if df_filtered is not None and not df_filtered.empty:
+        # Process DataFrame directly (same logic as before)
+        from skyfield.data import mpc
+        from skyfield.toposlib import Topos
+        from skyfield import almanac
+        
+        # Use passed parameters (don't create new ones!)
+        sun = eph['sun']
+        
+        dt_utc = current_dt or datetime.now(timezone.utc)
+        if dt_utc.tzinfo is None:
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        t = ts.from_datetime(dt_utc)
+        topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
+        observer = eph['earth'] + topos
+        
+        asteroid_list = []
+        events_computed = 0
+        
+        for idx, row in df_filtered.iterrows():
+            try:
+                # Create Skyfield orbit object from DataFrame row
+                orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+                
+                # QUICK PRE-FILTER
+                rough_apparent_mag = row['magnitude_H'] + 5.0
+                if rough_apparent_mag > 22.0:
+                    continue
+                
+                # Determine target
+                center_code = int(getattr(orbit, 'center', 10))
+                target = (sun + orbit) if center_code != 0 else orbit
+                
+                # Calculate position
+                astrometric = observer.at(t).observe(target)
+                
+                # Extract distances for magnitude calculation
+                r = astrometric.distance().au
+                delta = astrometric.radec()[2].au
+                phase_angle = math.degrees(math.acos(
+                    max(-1, min(1, (r**2 + delta**2 - 1) / (2 * r * delta)))
+                ))
+                
+                # Calculate apparent magnitude
+                H = row['magnitude_H']
+                G = row.get('magnitude_G', 0.15)
+                apparent_mag = asteroid_apparent_magnitude(H, G, r, delta, phase_angle)
+                
+                # Filter by magnitude
+                if apparent_mag > max_magnitude:
+                    continue
+                
+                # Get RA/Dec
+                ra, dec, _ = astrometric.radec()
+                
+                # Altitude/Azimuth
+                alt, az, _ = astrometric.apparent().altaz()
+                
+                # Rise/Set/Transit times
+                rise_time, transit_time, set_time = None, None, None
+                if events_computed < 50:
+                    try:
+                        rise_time, transit_time, set_time = compute_rise_set_transit(
+                            observer, target, t, ts, tz
+                        )
+                        events_computed += 1
+                    except Exception:
+                        pass
+                
+                asteroid_list.append({
+                    'name': row['designation'],
+                    'ra': ra.hours,
+                    'dec': dec.degrees,
+                    'magnitude': round(apparent_mag, 1),
+                    'altitude': alt.degrees,
+                    'azimuth': az.degrees,
+                    'distance_au': round(delta, 3),
+                    'rise_time': rise_time,
+                    'transit_time': transit_time,
+                    'set_time': set_time
+                })
+                
+            except Exception as e:
+                # Log error for debugging (but continue processing other asteroids)
+                # print(f"Error processing asteroid {row.get('designation', 'unknown')}: {e}")
+                continue
         
         # Cache the results for future requests
         if use_cache:
@@ -213,8 +307,8 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
             
             try:
                 from db_utils import store_asteroid_positions
-                # Use first asteroid's ID as representative (all share same location/time)
-                representative_id = asteroid_rows[0]['id'] if asteroid_rows else 0
+                # Use 0 as representative ID (all asteroids share same location/time)
+                representative_id = 0
                 store_asteroid_positions(
                     representative_id, loc_key, time_bucket,
                     lat, lon, elevation, asteroid_list
@@ -359,162 +453,3 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     except Exception as e:
         print(f"An unexpected error occurred during asteroid calculation: {e}")
         return []
-
-
-def process_asteroids_from_postgres(asteroid_rows, lat, lon, elevation, current_dt, max_magnitude, tz):
-    """Process asteroids from PostgreSQL database rows and compute positions."""
-    from skyfield.data import mpc
-    from skyfield.toposlib import Topos
-    from skyfield import almanac
-    # Initialize Skyfield objects using shared data directory
-    loader = Loader(str(DATA_DIR))
-    ts = loader.timescale()
-    eph = loader(str(DE421_PATH))
-    sun = eph['sun']
-    
-    dt_utc = current_dt or datetime.now(timezone.utc)
-    if dt_utc.tzinfo is None:
-        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-    t = ts.from_datetime(dt_utc)
-    topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
-    observer = eph['earth'] + topos
-    
-    asteroid_list = []
-    events_computed = 0
-    
-    for row in asteroid_rows:
-        try:
-            # Deserialize orbit data
-            import pickle
-            orbit_row = pickle.loads(row['orbit_data'])
-            
-            # Create Skyfield orbit object
-            orbit = mpc.mpcorb_orbit(orbit_row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
-            
-            # QUICK PRE-FILTER: Rough magnitude estimate to skip obviously faint objects
-            # Use H + 5 as rough estimate (typical V for asteroids at ~2 AU)
-            # This avoids expensive .observe() for objects that are clearly too faint
-            # Cache with mag 20.0 to include all asteroids, filtering happens in API route
-            rough_apparent_mag = row['magnitude_h'] + 5.0
-            if rough_apparent_mag > 22.0:  # Cache up to mag 20 + 2 safety margin
-                continue
-            
-            # Determine target (heliocentric or barycentric)
-            center_code = int(getattr(orbit, 'center', 10))
-            target = (sun + orbit) if center_code != 0 else orbit
-            
-            # Calculate position ONCE (not twice!)
-            astrometric = observer.at(t).observe(target)
-            
-            # Extract distances for magnitude calculation
-            r = astrometric.distance().au  # Distance from Sun
-            delta = astrometric.radec()[2].au  # Distance from Earth
-            phase_angle = math.degrees(math.acos(
-                max(-1, min(1, (r**2 + delta**2 - 1) / (2 * r * delta)))
-            ))
-            
-            # Calculate apparent magnitude
-            apparent_mag = asteroid_apparent_magnitude(
-                H=row['magnitude_h'], G=row['magnitude_g'] or 0.15, 
-                r=r, delta=delta, phase_angle_deg=phase_angle
-            )
-            
-            # Skip if too faint (filter AFTER position but saves rise/set calc)
-            # Cache with mag 20.0 to include all asteroids, filtering happens in API route
-            if apparent_mag > 20.0:
-                continue
-                
-            # Reuse astrometric for position (already computed above!)
-            apparent = astrometric.apparent()
-            ra, dec, distance = apparent.radec()
-            alt, az, _ = apparent.altaz()
-            
-            # Calculate rise/set/transit times with limit
-            rise_time, set_time, transit_time = None, None, None
-            if events_computed < ASTEROIDS_EVENTS_MAX:
-                start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                rise_set_func = almanac.risings_and_settings(eph, target, topos)
-                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
-                
-                for ti, event in zip(times, events):
-                    if event == 1 and rise_time is None: 
-                        rise_time = ti.utc_datetime()
-                    elif event == 0 and set_time is None: 
-                        set_time = ti.utc_datetime()
-                
-                # Determine next night window for transit
-                night_start_utc, night_end_utc = None, None
-                last_rise_utc = None
-                for ti_rs, ev_rs in zip(times, events):
-                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
-                    if ev_rs == 1:  # rise
-                        last_rise_utc = ev_dt_utc
-                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
-                        if ev_dt_utc >= (dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)):
-                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
-                            break
-                
-                if night_start_utc is None or night_end_utc is None:
-                    night_start_utc, night_end_utc = rise_time, set_time
-                
-                # Calculate transit time
-                f = almanac.meridian_transits(eph, target, topos)
-                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                chosen_time_utc = None
-                
-                if len(t_times):
-                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(tzinfo=timezone.utc)
-                    candidates = []
-                    for ti, ev in zip(t_times, t_events):
-                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        try:
-                            alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                        except Exception:
-                            alt_deg = float('-inf')
-                        candidates.append((utc_dt, alt_deg, int(ev)))
-                    
-                    # Filter to night window if available
-                    if night_start_utc is not None and night_end_utc is not None:
-                        if night_end_utc < night_start_utc:  # Crosses midnight
-                            pool = [c for c in candidates if c[0] >= night_start_utc or c[0] <= night_end_utc]
-                        else:
-                            pool = [c for c in candidates if c[0] >= night_start_utc and c[0] <= night_end_utc]
-                    else:
-                        pool = [c for c in candidates if c[0] >= now_utc]
-                        if not pool:
-                            pool = candidates
-                    
-                    if pool:
-                        pool.sort(key=lambda x: (-x[1], x[0]))
-                        chosen_time_utc = pool[0][0]
-                
-                transit_time = chosen_time_utc
-                events_computed += 1
-            
-            asteroid_list.append({
-                "name": row['designation'], 
-                "number": str(row['number']) if row['number'] else '',
-                "magnitude": round(apparent_mag, 1),
-                "ra": ra.hours * 15.0, 
-                "dec": dec.degrees,
-                "altitude": alt.degrees, 
-                "azimuth": az.degrees,
-                "distance": round(distance.au, 3), 
-                "rise_time": format_time(rise_time, tz),
-                "set_time": format_time(set_time, tz), 
-                "transit_time": format_time(transit_time, tz),
-                "type": "asteroid", 
-                "symbol": "⚸"
-            })
-            
-        except Exception as e:
-            # psycopg2 Row has no .get; use keys() to check presence
-            try:
-                name = row['designation'] if 'designation' in row.keys() else 'unknown'
-            except Exception:
-                name = 'unknown'
-            print(f"Error processing asteroid {name}: {e}")
-            continue
-    
-    return asteroid_list

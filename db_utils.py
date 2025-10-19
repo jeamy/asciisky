@@ -87,35 +87,6 @@ def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     row = cursor.fetchone()
     return bytes(row['dataframe_pickle']) if row else None
 
-def get_asteroids_by_magnitude(max_absolute_mag: float, max_apparent_mag: float) -> List[Dict]:
-    """Get asteroids filtered by magnitude from PostgreSQL."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT id, designation, h_mag, orbit_data
-        FROM asteroid_elements
-        WHERE h_mag <= %s
-        ORDER BY h_mag ASC
-    """, (max_absolute_mag,))
-    
-    return [dict(row) for row in cursor.fetchall()]
-
-def get_asteroid_orbit_data(asteroid_id: int) -> Optional[Any]:
-    """Get orbit data for specific asteroid from PostgreSQL."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT orbit_data FROM asteroid_elements
-        WHERE id = %s
-    """, (asteroid_id,))
-    
-    row = cursor.fetchone()
-    if row and row['orbit_data']:
-        return pickle.loads(bytes(row['orbit_data']))
-    return None
-
 def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: str,
                                 observer_lat: float, observer_lon: float, observer_elevation: float,
                                 position_data: List[Dict]) -> None:
@@ -284,18 +255,19 @@ def get_last_data_update(update_type: str = None) -> Optional[Dict]:
     return dict(row) if row else None
 
 def get_database_stats() -> dict:
-    """Get database statistics (asteroid/comet counts)."""
+    """Get database statistics (asteroid/comet DataFrame availability)."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COUNT(*) as count FROM asteroid_elements")
-    asteroid_count = cursor.fetchone()['count']
+    # Check if DataFrames exist (not individual elements)
+    cursor.execute("SELECT COUNT(*) as count FROM asteroid_dataframes")
+    asteroid_df_count = cursor.fetchone()['count']
     
-    cursor.execute("SELECT COUNT(*) as count FROM comet_elements")
-    comet_count = cursor.fetchone()['count']
+    cursor.execute("SELECT COUNT(*) as count FROM comet_dataframes")
+    comet_df_count = cursor.fetchone()['count']
     
     return {
-        'asteroids_count': asteroid_count,
-        'comets_count': comet_count
+        'asteroids_count': asteroid_df_count,
+        'comets_count': comet_df_count
     }
 

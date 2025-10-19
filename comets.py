@@ -28,7 +28,7 @@ from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
-from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions
+from db_utils import get_db_connection, store_comet_dataframe, store_comet_positions, get_comet_positions
 from pathlib import Path
 from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
