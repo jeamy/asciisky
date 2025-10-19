@@ -269,29 +269,76 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                 # Altitude/Azimuth
                 alt, az, _ = astrometric.apparent().altaz()
                 
-                # Rise/Set/Transit times
-                rise_time, transit_time, set_time = None, None, None
+                # Rise/Set/Transit times (from legacy code)
+                rise_time, set_time, transit_time = None, None, None
                 if events_computed < 50:
                     try:
-                        rise_time, transit_time, set_time = compute_rise_set_transit(
-                            observer, target, t, ts, tz
-                        )
+                        # Start/end window anchored at simulated day's UTC midnight
+                        start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+                        end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+                        rise_set_func = almanac.risings_and_settings(eph, target, topos)
+                        times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+
+                        for ti, event in zip(times, events):
+                            if event == 1 and rise_time is None: 
+                                rise_time = ti.utc_datetime()
+                            elif event == 0 and set_time is None: 
+                                set_time = ti.utc_datetime()
+                        
+                        # Transit time calculation
+                        f = almanac.meridian_transits(eph, target, topos)
+                        t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                        if len(t_times):
+                            now_utc = current_dt if current_dt.tzinfo is not None else current_dt.replace(tzinfo=timezone.utc)
+                            candidates = []
+                            for ti, ev in zip(t_times, t_events):
+                                utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                                try:
+                                    alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                                except Exception:
+                                    alt_deg = float('-inf')
+                                candidates.append((utc_dt, alt_deg, int(ev)))
+                            
+                            # Prefer future events
+                            pool = [c for c in candidates if c[0] >= now_utc]
+                            if not pool:
+                                pool = candidates
+                            if pool:
+                                pool.sort(key=lambda x: (-x[1], x[0]))
+                                transit_time = pool[0][0]
+                        
                         events_computed += 1
                     except Exception:
                         pass
                 
-                asteroid_list.append({
+                # Format times (datetime -> string)
+                def format_time_str(dt, tz):
+                    if dt is None:
+                        return None
+                    if not hasattr(dt, 'tzinfo') or dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(tz).strftime('%H:%M')
+                
+                asteroid_data = {
                     'name': row['designation'],
                     'ra': ra.hours,
                     'dec': dec.degrees,
                     'magnitude': round(apparent_mag, 1),
                     'altitude': alt.degrees,
                     'azimuth': az.degrees,
-                    'distance_au': round(delta, 3),
-                    'rise_time': rise_time,
-                    'transit_time': transit_time,
-                    'set_time': set_time
-                })
+                    'distance': round(delta, 3),
+                    'rise_time': format_time_str(rise_time, tz),
+                    'transit_time': format_time_str(transit_time, tz),
+                    'set_time': format_time_str(set_time, tz),
+                    'type': 'asteroid',
+                    'symbol': '⚸'
+                }
+                
+                # Debug first asteroid
+                if len(asteroid_list) == 0:
+                    print(f"DEBUG First asteroid: {asteroid_data['name']}, distance={asteroid_data['distance']}, rise={asteroid_data['rise_time']}")
+                
+                asteroid_list.append(asteroid_data)
                 
             except Exception as e:
                 # Log error for debugging (but continue processing other asteroids)

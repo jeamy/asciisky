@@ -37,6 +37,14 @@ def interpolate_position(pos1: Dict[str, Any], pos2: Dict[str, Any], factor: flo
     # Keep string fields from pos1 (name, rise/set times, etc.)
     # These don't interpolate meaningfully
     
+    # Ensure type and symbol are preserved (prefer pos2 if pos1 doesn't have them)
+    if 'type' not in result or result['type'] is None:
+        if 'type' in pos2 and pos2['type'] is not None:
+            result['type'] = pos2['type']
+    if 'symbol' not in result or result['symbol'] is None:
+        if 'symbol' in pos2 and pos2['symbol'] is not None:
+            result['symbol'] = pos2['symbol']
+    
     return result
 
 
