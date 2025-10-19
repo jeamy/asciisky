@@ -59,7 +59,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ===== Data Updater (behält alte Logik) =====
+  # ===== Data Updater =====
   data_updater:
     image: asciisky-worker
     build: .
@@ -72,19 +72,21 @@ services:
       - ASCII_SKY_UPDATE_HOUR=4
     restart: unless-stopped
 
-  # ===== Task Cleanup (behält alte Logik) =====
-  task_cleanup:
-    image: asciisky-worker
-    build: .
-    command: ["python", "task_cleanup_service.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - ASCII_SKY_TASK_CLEANUP_HOURS=6
-      - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
-    restart: unless-stopped
+  # ===== Task Cleanup - OBSOLET (kann entfernt werden) =====
+  # Wurde für alte api/background.py Task-Dateien benötigt
+  # Diese werden mit RabbitMQ nicht mehr erstellt
+  # task_cleanup:
+  #   image: asciisky-worker
+  #   build: .
+  #   command: ["python", "task_cleanup_service.py"]
+  #   volumes:
+  #     - .:/app
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - TZ=Europe/Berlin
+  #     - ASCII_SKY_TASK_CLEANUP_HOURS=6
+  #     - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
+  #   restart: unless-stopped
 
   # ===== RABBITMQ WORKER =====
   
