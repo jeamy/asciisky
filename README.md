@@ -2,7 +2,11 @@
 
 A web application that displays the current positions of celestial bodies (Sun, Moon, planets, asteroids, comets) in ASCII art.
 
-## Features
+## RabbitMQ Integration v1
+
+with sqlite3 cache and rabbitmq workers
+
+### Features
 
 - Real-time tracking of celestial bodies (altitude and azimuth)
 - Display of objects above and below the horizon
