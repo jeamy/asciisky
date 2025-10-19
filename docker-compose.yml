@@ -73,38 +73,35 @@ services:
       - ASCII_SKY_UPDATE_HOUR=4
     restart: unless-stopped
 
-  # ===== Precompute Worker =====
-  precompute_worker:
+  # ===== Precompute Coordinator =====
+  precompute_coordinator:
     image: asciisky-worker
     build: .
-    command: ["python", "precompute_worker.py"]
+    command: ["python", "precompute_coordinator.py"]
     volumes:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=720
-      - ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
-      - ASCII_SKY_PRECOMPUTE_WORKERS=3
-      - ASCII_SKY_ADAPTIVE_WORKERS=1
-      - ASCII_SKY_RETENTION_DAYS=7
+      - PRECOMPUTE_COORDINATOR_INTERVAL=3600
+      - RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
     restart: unless-stopped
 
-  # ===== Task Cleanup - OBSOLET (kann entfernt werden) =====
-  # Wurde für alte api/background.py Task-Dateien benötigt
-  # Diese werden mit RabbitMQ nicht mehr erstellt
-  # task_cleanup:
-  #   image: asciisky-worker
-  #   build: .
-  #   command: ["python", "task_cleanup_service.py"]
-  #   volumes:
-  #     - .:/app
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - TZ=Europe/Berlin
-  #     - ASCII_SKY_TASK_CLEANUP_HOURS=6
-  #     - ASCII_SKY_TASK_CLEANUP_INTERVAL=60
-  #   restart: unless-stopped
+  # ===== Precompute Worker =====
+  precompute_worker:
+    image: asciisky-worker
+    build: .
+    command: ["python", "workers/precompute_worker.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=local-precompute-1
+      - RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+    restart: unless-stopped
 
   # ===== RABBITMQ WORKER =====
   

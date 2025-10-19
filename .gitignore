@@ -63,3 +63,5 @@ MPCORB.DAT*
 hipparcos.dat
 cache/
 .cache
+
+.env

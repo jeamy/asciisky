@@ -137,6 +137,70 @@ services:
     networks:
       - asciisky-net
 
+  # ===== Precompute Coordinator =====
+  precompute_coordinator:
+    image: asciisky-web:latest
+    container_name: asciisky-precompute-coordinator
+    command: ["python", "precompute_coordinator.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+      - ./precompute_locations.json:/app/precompute_locations.json:ro
+      - ./user_settings.json:/app/user_settings.json:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      
+      # RabbitMQ Configuration
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_HEARTBEAT=60
+      
+      # Precompute Settings
+      - ASCII_SKY_PRECOMPUTE_HOURS=720
+      - PRECOMPUTE_COORDINATOR_INTERVAL=3600
+      
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
+  # ===== Precompute Worker (Hauptserver) =====
+  precompute_worker:
+    image: asciisky-web:latest
+    container_name: asciisky-precompute-worker
+    command: ["python", "workers/precompute_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=main-precompute-1
+      
+      # PostgreSQL Configuration
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - asciisky-net
+
 volumes:
   postgres_data:
     driver: local

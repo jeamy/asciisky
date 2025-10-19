@@ -124,6 +124,36 @@ services:
     networks:
       - worker-net
 
+  # ===== Precompute Worker =====
+  precompute-worker:
+    image: asciisky-web:latest
+    container_name: asciisky-precompute-worker-b
+    command: ["python", "workers/precompute_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - WORKER_ID=rabbit-b-precompute-1
+      
+      # PostgreSQL Configuration (Remote)
+      - USE_POSTGRES=true
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      
+      # RabbitMQ Configuration (Remote)
+      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      
+    restart: unless-stopped
+    networks:
+      - worker-net
+
 networks:
   worker-net:
     driver: bridge
