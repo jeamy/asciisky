@@ -78,7 +78,7 @@ Ausgehend: 5432 (PostgreSQL), 5672 (RabbitMQ)
 ### 1. Vorbereitung
 
 ```bash
-# Auf dem Entwicklungsrechner
+# Auf dem Entwicklungsrechner (LOKAL)
 cd /path/to/asciisky
 
 # Erstelle .env aus Vorlage
@@ -88,10 +88,31 @@ cp .env.example .env
 nano .env
 ```
 
-**Wichtig:** Setze starke Passwörter für:
-- `POSTGRES_PASSWORD`
-- `RABBITMQ_PASSWORD`
-- `SESSION_SECRET` (generiere mit: `openssl rand -hex 32`)
+**⚠️ WICHTIG: .env Konfiguration**
+
+Die `.env` Datei wird **automatisch** auf alle Server kopiert!
+
+**Setze starke Passwörter für:**
+- `POSTGRES_PASSWORD` - **Muss auf allen Servern identisch sein!**
+- `RABBITMQ_PASSWORD` - **Muss auf allen Servern identisch sein!**
+- `SESSION_SECRET` - Nur für Hauptserver (generiere mit: `openssl rand -hex 32`)
+
+**Warum identische Passwörter?**
+- Worker-Server (rabbit-b/c) verbinden sich zu PostgreSQL auf Hauptserver
+- Worker-Server (rabbit-b/c) verbinden sich zu RabbitMQ auf Hauptserver
+- Authentifizierung funktioniert nur mit gleichen Credentials
+
+**Beispiel .env:**
+```bash
+# Gleiche Passwörter auf ALLEN Servern
+POSTGRES_PASSWORD=SuperSicheres_PG_Passwort_123!
+RABBITMQ_PASSWORD=SuperSicheres_RMQ_Passwort_456!
+SESSION_SECRET=a1b2c3d4e5f6...  # openssl rand -hex 32
+
+# Deployment-Optionen
+SETUP_WORKER_B=true
+SETUP_WORKER_C=true
+```
 
 ### 2. SSH-Zugriff einrichten
 
@@ -120,8 +141,12 @@ Das Skript:
 2. ✅ Startet PostgreSQL und RabbitMQ auf asciisky.eibrain.org
 3. ✅ Initialisiert PostgreSQL-Schema
 4. ✅ Erstellt RabbitMQ-Queues
-5. ✅ Deployed Worker auf rabbit-b.eibrain.org
-6. ✅ Deployed Worker auf rabbit-c.eibrain.org
+5. ✅ **Kopiert .env auf rabbit-b.eibrain.org** (automatisch via scp)
+6. ✅ Deployed Worker auf rabbit-b.eibrain.org
+7. ✅ **Kopiert .env auf rabbit-c.eibrain.org** (automatisch via scp)
+8. ✅ Deployed Worker auf rabbit-c.eibrain.org
+
+**Wichtig:** Die `.env` Datei wird automatisch von deinem lokalen Rechner auf alle Server kopiert. Du musst sie **nicht manuell** auf jeden Server kopieren!
 
 ---
 
