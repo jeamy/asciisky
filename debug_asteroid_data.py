@@ -4,7 +4,7 @@ from db_utils import get_asteroid_positions
 
 # Lade Daten aus DB
 loc_key = "lat+46.7632_lon+14.8417_el+0410"
-time_bucket = "20251019T19"
+time_bucket = "20251019T18"
 print(f"Checking bucket: {time_bucket} for location: {loc_key}")
 
 data = get_asteroid_positions(loc_key, time_bucket, max_age_seconds=31*24*3600)
