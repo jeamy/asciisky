@@ -7,8 +7,8 @@ services:
       - "5672:5672"    # AMQP
       - "15672:15672"  # Management UI
     environment:
-      - RABBITMQ_DEFAULT_USER=admin
-      - RABBITMQ_DEFAULT_PASS=password
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-changeme}
       - RABBITMQ_DEFAULT_VHOST=/
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
@@ -53,7 +53,7 @@ services:
       - USE_RABBITMQ_ASTEROIDS=true
       - USE_RABBITMQ_COMETS=true
       - RABBITMQ_PERCENTAGE=100
-      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_TIMEOUT=120
     depends_on:
       rabbitmq:
@@ -85,7 +85,7 @@ services:
       - TZ=Europe/Berlin
       - ASCII_SKY_PRECOMPUTE_HOURS=720
       - PRECOMPUTE_COORDINATOR_INTERVAL=3600
-      - RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
     restart: unless-stopped
 
   # ===== Precompute Worker =====
@@ -99,7 +99,7 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - WORKER_ID=local-precompute-1
-      - RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_PREFETCH_COUNT=1
     restart: unless-stopped
 
@@ -114,7 +114,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - WORKER_ID=asteroid-worker-1
       - LOG_LEVEL=info
     depends_on:
@@ -131,7 +131,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - WORKER_ID=asteroid-worker-2
       - LOG_LEVEL=info
     depends_on:
@@ -148,7 +148,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - WORKER_ID=comet-worker-1
       - LOG_LEVEL=info
     depends_on:
@@ -165,7 +165,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://admin:password@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - WORKER_ID=comet-worker-2
       - LOG_LEVEL=info
     depends_on:

@@ -35,7 +35,7 @@ services:
       - "5672:5672"    # AMQP
       - "15672:15672"  # Management UI
     environment:
-      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-changeme}
       - RABBITMQ_DEFAULT_VHOST=/
       - RABBITMQ_NODENAME=rabbit@rabbitmq-asciisky
@@ -79,7 +79,7 @@ services:
       - USE_RABBITMQ_ASTEROIDS=true
       - USE_RABBITMQ_COMETS=true
       - RABBITMQ_PERCENTAGE=100
-      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_TIMEOUT=120
       
       # Precompute Settings
@@ -152,7 +152,7 @@ services:
       - TZ=Europe/Berlin
       
       # RabbitMQ Configuration
-      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_HEARTBEAT=60
       
       # Precompute Settings
@@ -188,7 +188,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       
       # RabbitMQ Configuration
-      - RABBITMQ_URL=amqp://admin:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
       

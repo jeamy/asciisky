@@ -239,7 +239,7 @@ class AsteroidWorker:
 
 if __name__ == '__main__':
     # Konfiguration aus ENV
-    rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:password@localhost:5672/')
+    rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     worker_id = os.environ.get('WORKER_ID', 'asteroid-worker-1')
     
     # Worker starten

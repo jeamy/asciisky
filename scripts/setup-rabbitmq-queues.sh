@@ -6,7 +6,7 @@ set -e
 
 CONTAINER_NAME="${RABBITMQ_CONTAINER:-asciisky-rabbitmq}"
 RABBITMQ_USER="${RABBITMQ_USER:-admin}"
-RABBITMQ_PASS="${RABBITMQ_PASSWORD:-password}"
+RABBITMQ_PASS="${RABBITMQ_PASSWORD:-changeme}"
 
 echo "🐰 Setting up RabbitMQ queues in container: $CONTAINER_NAME"
 

@@ -67,8 +67,8 @@ POSTGRES_USER=asciisky
 POSTGRES_DB=asciisky
 
 # RabbitMQ
-RABBITMQ_PASSWORD=dev_password_change_me
 RABBITMQ_USER=admin
+RABBITMQ_PASSWORD=dev_password_change_me
 
 # Session Secret (generate with: openssl rand -hex 32)
 SESSION_SECRET=dev_secret_change_me_in_production
