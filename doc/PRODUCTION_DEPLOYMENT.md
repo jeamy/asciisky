@@ -9,16 +9,21 @@
 │ asciisky.eibrain.org (Hauptserver)                          │
 │ ┌─────────────┐  ┌──────────────┐  ┌──────────────┐        │
 │ │   Web UI    │  │  RabbitMQ    │  │  PostgreSQL  │        │
-│ │   (Flask)   │  │   (4.1)      │  │    (16)      │        │
-│ │   Port 8000 │  │   Port 5672  │  │   Port 5432  │        │
+│ │  (FastAPI)  │  │   (4.1)      │  │    (16)      │        │
+│ │   Port 80   │  │   Port 5672  │  │   Port 5432  │        │
+│ │  (nginx →   │  │   Port 15672 │  │              │        │
+│ │   :8000)    │  │              │  │              │        │
 │ └─────────────┘  └──────────────┘  └──────────────┘        │
-│ ┌─────────────┐                                             │
-│ │Data Updater │                                             │
-│ │  (Nightly)  │                                             │
-│ └─────────────┘                                             │
+│ ┌─────────────┐  ┌──────────────┐                          │
+│ │Data Updater │  │  Precompute  │                          │
+│ │  (Nightly)  │  │ Coordinator  │                          │
+│ └─────────────┘  └──────────────┘                          │
+│ ┌───────────────────────────────────────────────┐          │
+│ │ Precompute Workers x4 (skalierbar via .env)   │          │
+│ └───────────────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────┘
                             │
-                            │ AMQP + PostgreSQL
+                            │ AMQP + PostgreSQL (IP-restricted)
                             │
         ┌───────────────────┴───────────────────┐
         │                                       │
@@ -26,10 +31,10 @@
 ┌──────────────────────┐            ┌──────────────────────┐
 │ rabbit-b.eibrain.org │            │ rabbit-c.eibrain.org │
 │ ┌──────────────────┐ │            │ ┌──────────────────┐ │
-│ │ Asteroid Worker 1│ │            │ │ Asteroid Worker 3│ │
-│ │ Asteroid Worker 2│ │            │ │ Asteroid Worker 4│ │
-│ │ Comet Worker 1   │ │            │ │ Comet Worker 3   │ │
-│ │ Comet Worker 2   │ │            │ │ Comet Worker 4   │ │
+│ │Precompute x4     │ │            │ │Precompute x4     │ │
+│ │Asteroid x2       │ │            │ │Asteroid x2       │ │
+│ │Comet x2          │ │            │ │Comet x2          │ │
+│ │(skalierbar)      │ │            │ │(skalierbar)      │ │
 │ └──────────────────┘ │            │ └──────────────────┘ │
 └──────────────────────┘            └──────────────────────┘
 ```
@@ -38,11 +43,27 @@
 
 | Server | Komponenten | Ports | Zweck |
 |--------|-------------|-------|-------|
-| **asciisky.eibrain.org** | Web, RabbitMQ, PostgreSQL, Data Updater | 8000, 5672, 15672, 5432 | Hauptserver mit UI und Datenbanken |
-| **rabbit-b.eibrain.org** | 4 Worker (2 Asteroid, 2 Comet) | - | Worker-Pool B |
-| **rabbit-c.eibrain.org** | 4 Worker (2 Asteroid, 2 Comet) | - | Worker-Pool C |
+| **asciisky.eibrain.org** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Hauptserver mit UI und Datenbanken |
+| **rabbit-b.eibrain.org** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool B (skalierbar) |
+| **rabbit-c.eibrain.org** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool C (skalierbar) |
 
-**Gesamt: 8 Worker** (4 Asteroid + 4 Comet)
+**Gesamt (Default): 12 Precompute + 4 Asteroid + 4 Comet Workers**
+
+**Worker-Skalierung** via `.env`:
+```bash
+# Hauptserver
+PRECOMPUTE_WORKERS=4
+
+# Worker Server B
+PRECOMPUTE_WORKERS_B=4
+ASTEROID_WORKERS_B=2
+COMET_WORKERS_B=2
+
+# Worker Server C
+PRECOMPUTE_WORKERS_C=4
+ASTEROID_WORKERS_C=2
+COMET_WORKERS_C=2
+```
 
 ---
 
@@ -61,15 +82,30 @@
 **Firewall-Regeln:**
 
 ```bash
-# asciisky.eibrain.org → Internet
+# asciisky.eibrain.org (Hauptserver)
+Eingehend: 80, 443 (Web UI - öffentlich)
+Eingehend: 5672 (RabbitMQ - NUR von Worker-B/C IPs)
+Eingehend: 5432 (PostgreSQL - NUR von Worker-B/C IPs)
+Eingehend: 15672 (RabbitMQ UI - NUR localhost/SSH-Tunnel)
 Ausgehend: 80, 443 (HTTP/HTTPS für Daten-Downloads)
 
-# asciisky.eibrain.org → rabbit-b/c.eibrain.org
-Eingehend: 5432 (PostgreSQL), 5672 (RabbitMQ)
-
-# rabbit-b/c.eibrain.org → asciisky.eibrain.org
-Ausgehend: 5432 (PostgreSQL), 5672 (RabbitMQ)
+# rabbit-b/c.eibrain.org (Worker-Server)
+Ausgehend: 5432 (PostgreSQL zu Hauptserver)
+Ausgehend: 5672 (RabbitMQ zu Hauptserver)
 ```
+
+**Automatisches Firewall-Setup:**
+```bash
+# Nur auf asciisky.eibrain.org ausführen:
+sudo ./scripts/setup-firewall.sh
+```
+
+Das Script:
+- Ermittelt automatisch IPs via DNS
+- Beschränkt Port 5672 (RabbitMQ) auf Worker-IPs
+- Beschränkt Port 5432 (PostgreSQL) auf Worker-IPs
+- Beschränkt Port 15672 (RabbitMQ UI) auf localhost (SSH-Tunnel)
+- Worker-Server benötigen KEINE Firewall-Änderungen
 
 ---
 
@@ -112,6 +148,22 @@ SESSION_SECRET=a1b2c3d4e5f6...  # openssl rand -hex 32
 # Deployment-Optionen
 SETUP_WORKER_B=true
 SETUP_WORKER_C=true
+
+# Worker-Skalierung
+PRECOMPUTE_WORKERS=4
+ASTEROID_WORKERS=2
+COMET_WORKERS=2
+
+PRECOMPUTE_WORKERS_B=4
+ASTEROID_WORKERS_B=2
+COMET_WORKERS_B=2
+
+PRECOMPUTE_WORKERS_C=4
+ASTEROID_WORKERS_C=2
+COMET_WORKERS_C=2
+
+# Precompute Settings
+ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
 ```
 
 ### 2. SSH-Zugriff einrichten
@@ -141,12 +193,20 @@ Das Skript:
 2. ✅ Startet PostgreSQL und RabbitMQ auf asciisky.eibrain.org
 3. ✅ Initialisiert PostgreSQL-Schema
 4. ✅ Erstellt RabbitMQ-Queues
-5. ✅ **Kopiert .env auf rabbit-b.eibrain.org** (automatisch via scp)
-6. ✅ Deployed Worker auf rabbit-b.eibrain.org
-7. ✅ **Kopiert .env auf rabbit-c.eibrain.org** (automatisch via scp)
-8. ✅ Deployed Worker auf rabbit-c.eibrain.org
+5. ✅ Startet Precompute Coordinator und Workers
+6. ✅ **Kopiert .env auf rabbit-b.eibrain.org** (automatisch via scp)
+7. ✅ Deployed Worker auf rabbit-b.eibrain.org
+8. ✅ **Kopiert .env auf rabbit-c.eibrain.org** (automatisch via scp)
+9. ✅ Deployed Worker auf rabbit-c.eibrain.org
 
 **Wichtig:** Die `.env` Datei wird automatisch von deinem lokalen Rechner auf alle Server kopiert. Du musst sie **nicht manuell** auf jeden Server kopieren!
+
+**Nach dem Deployment:**
+```bash
+# Firewall auf Hauptserver konfigurieren
+ssh asciisky.eibrain.org
+sudo ./scripts/setup-firewall.sh
+```
 
 ---
 
@@ -224,16 +284,23 @@ ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.work
 
 ### RabbitMQ Management UI
 
-```
-URL: http://asciisky.eibrain.org:15672
+**Zugriff via SSH-Tunnel:**
+```bash
+# Von deinem lokalen Rechner:
+ssh -L 15672:localhost:15672 asciisky.eibrain.org
+
+# Dann im Browser öffnen:
+http://localhost:15672
+
 User: admin
 Password: <RABBITMQ_PASSWORD aus .env>
 ```
 
 **Prüfe:**
-- ✅ 8 Worker verbunden (Connections)
-- ✅ Queues: `asteroid.compute`, `comet.compute`
+- ✅ 20 Worker verbunden (12 Precompute + 4 Asteroid + 4 Comet)
+- ✅ Queues: `precompute.tasks`, `asteroid.compute`, `comet.compute`
 - ✅ Messages werden verarbeitet
+- ✅ Precompute Coordinator läuft
 
 ### PostgreSQL Status
 
@@ -388,23 +455,32 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
 
 ### Empfohlene Maßnahmen
 
-1. **Firewall konfigurieren**
+1. **Firewall konfigurieren (WICHTIG!)**
    ```bash
-   # Nur notwendige Ports öffnen
-   sudo ufw allow 8000/tcp   # Web UI
-   sudo ufw allow 15672/tcp  # RabbitMQ UI (nur aus vertrautem Netz)
-   sudo ufw enable
+   # Auf asciisky.eibrain.org:
+   sudo ./scripts/setup-firewall.sh
    ```
+   
+   Das Script:
+   - ✅ Beschränkt Port 5672 (RabbitMQ) auf Worker-B/C IPs
+   - ✅ Beschränkt Port 5432 (PostgreSQL) auf Worker-B/C IPs
+   - ✅ Beschränkt Port 15672 (RabbitMQ UI) auf localhost
+   - ✅ Ermittelt IPs automatisch via DNS
+   - ✅ Worker-Server benötigen KEINE Änderungen
 
-2. **PostgreSQL Zugriff beschränken**
-   - Nur von Worker-IPs erlauben
-   - SSL/TLS für Verbindungen aktivieren
+2. **RabbitMQ UI Zugriff**
+   - ✅ Nur via SSH-Tunnel: `ssh -L 15672:localhost:15672 asciisky.eibrain.org`
+   - ✅ Nicht öffentlich erreichbar
 
-3. **RabbitMQ absichern**
-   - Starkes Passwort verwenden
-   - Management UI nur über VPN/SSH-Tunnel
+3. **PostgreSQL Zugriff**
+   - ✅ Nur von Worker-IPs erlaubt (via Firewall)
+   - ✅ Starkes Passwort in `.env`
 
-4. **Regelmäßige Updates**
+4. **Web UI**
+   - ✅ Läuft über nginx (Port 80/443)
+   - ✅ Port 8000 nicht öffentlich (intern)
+
+5. **Regelmäßige Updates**
    ```bash
    docker compose pull
    docker compose up -d

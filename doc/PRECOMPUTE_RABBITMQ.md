@@ -26,14 +26,18 @@
         │               │               │
         ▼               ▼               ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│ Worker 1     │ │ Worker 2     │ │ Worker 3     │
+│ Workers x4   │ │ Workers x4   │ │ Workers x4   │
 │ (Hauptserver)│ │ (rabbit-b)   │ │ (rabbit-c)   │
+│ (skalierbar) │ │ (skalierbar) │ │ (skalierbar) │
 │              │ │              │ │              │
 │ Holt Task    │ │ Holt Task    │ │ Holt Task    │
 │ Berechnet    │ │ Berechnet    │ │ Berechnet    │
 │ Speichert DB │ │ Speichert DB │ │ Speichert DB │
 │ ACK          │ │ ACK          │ │ ACK          │
 └──────────────┘ └──────────────┘ └──────────────┘
+
+Default: 12 Worker total (4 pro Server)
+Skalierbar via .env: PRECOMPUTE_WORKERS, PRECOMPUTE_WORKERS_B/C
 ```
 
 ---
@@ -50,7 +54,8 @@
 
 3. **Einfach skalierbar**
    - Mehr Worker = schneller fertig
-   - Einfach Container starten: `docker compose up -d precompute-worker`
+   - Skalierung via `.env`: `PRECOMPUTE_WORKERS=8`
+   - Dann: `docker compose up -d`
 
 4. **Failover**
    - Worker fällt aus → anderer übernimmt
@@ -64,30 +69,45 @@
 
 ## 🚀 Setup
 
-### 1. Hauptserver (Coordinator + 1 Worker)
+### 1. Automatisches Setup (Empfohlen)
 
 ```bash
-# Bereits in docker-compose.production.yml enthalten
-docker compose -f docker-compose.production.yml up -d precompute_coordinator
-docker compose -f docker-compose.production.yml up -d precompute_worker
+# Auf Entwicklungsrechner
+./scripts/setup-production.sh
 ```
 
-**Komponenten:**
-- `precompute_coordinator`: Erstellt Tasks stündlich
-- `precompute_worker`: Bearbeitet Tasks
+Das Script deployed automatisch:
+- Hauptserver: Coordinator + 4 Precompute Workers
+- Worker-B: 4 Precompute Workers
+- Worker-C: 4 Precompute Workers
 
-### 2. Worker-Server B (optional, empfohlen)
+### 2. Worker-Skalierung (via .env)
 
 ```bash
-# Auf rabbit-b.eibrain.org
-docker compose -f docker-compose.worker-b.yml up -d precompute-worker
+# .env editieren
+PRECOMPUTE_WORKERS=8        # Hauptserver
+PRECOMPUTE_WORKERS_B=8      # Worker-B
+PRECOMPUTE_WORKERS_C=8      # Worker-C
+
+# Neu starten
+docker compose up -d
 ```
 
-### 3. Worker-Server C (optional)
+### 3. Manuelles Setup
 
 ```bash
-# Auf rabbit-c.eibrain.org
-docker compose -f docker-compose.worker-c.yml up -d precompute-worker
+# Hauptserver
+docker compose -f docker-compose.production.yml up -d
+
+# Worker-B (optional)
+ssh rabbit-b.eibrain.org
+cd ~/asciisky
+docker compose -f docker-compose.worker-b.yml up -d
+
+# Worker-C (optional)
+ssh rabbit-c.eibrain.org
+cd ~/asciisky
+docker compose -f docker-compose.worker-c.yml up -d
 ```
 
 ---
@@ -98,14 +118,17 @@ docker compose -f docker-compose.worker-c.yml up -d precompute-worker
 
 **Setup:**
 - 1 Coordinator (Hauptserver)
-- 1 Worker (Hauptserver)
+- 4 Worker (Hauptserver)
 
 ```bash
+# .env
+PRECOMPUTE_WORKERS=4
+
 # Nur Hauptserver
 docker compose -f docker-compose.production.yml up -d
 ```
 
-**Performance:** ~60 min für 720h × 2 Locations
+**Performance:** ~30 min für 720h × 2 Locations
 
 ---
 
@@ -113,17 +136,19 @@ docker compose -f docker-compose.production.yml up -d
 
 **Setup:**
 - 1 Coordinator (Hauptserver)
-- 2 Worker (Hauptserver + rabbit-b)
+- 12 Worker (4 Hauptserver + 4 rabbit-b + 4 rabbit-c)
 
 ```bash
-# Hauptserver
-docker compose -f docker-compose.production.yml up -d
+# .env (Default)
+PRECOMPUTE_WORKERS=4
+PRECOMPUTE_WORKERS_B=4
+PRECOMPUTE_WORKERS_C=4
 
-# rabbit-b
-docker compose -f docker-compose.worker-b.yml up -d precompute-worker
+# Deployment
+./scripts/setup-production.sh
 ```
 
-**Performance:** ~30 min für 720h × 5 Locations
+**Performance:** ~10 min für 720h × 5 Locations
 
 ---
 
@@ -131,20 +156,19 @@ docker compose -f docker-compose.worker-b.yml up -d precompute-worker
 
 **Setup:**
 - 1 Coordinator (Hauptserver)
-- 3 Worker (Hauptserver + rabbit-b + rabbit-c)
+- 24 Worker (8 Hauptserver + 8 rabbit-b + 8 rabbit-c)
 
 ```bash
-# Hauptserver
-docker compose -f docker-compose.production.yml up -d
+# .env
+PRECOMPUTE_WORKERS=8
+PRECOMPUTE_WORKERS_B=8
+PRECOMPUTE_WORKERS_C=8
 
-# rabbit-b
-docker compose -f docker-compose.worker-b.yml up -d precompute-worker
-
-# rabbit-c
-docker compose -f docker-compose.worker-c.yml up -d precompute-worker
+# Deployment
+./scripts/setup-production.sh
 ```
 
-**Performance:** ~20 min für 720h × 10 Locations
+**Performance:** ~5 min für 720h × 10 Locations
 
 ---
 
@@ -152,14 +176,23 @@ docker compose -f docker-compose.worker-c.yml up -d precompute-worker
 
 ### RabbitMQ UI
 
-```
-URL: http://asciisky.eibrain.org:15672
+**Zugriff via SSH-Tunnel:**
+```bash
+# Von deinem lokalen Rechner
+ssh -L 15672:localhost:15672 asciisky.eibrain.org
+
+# Dann im Browser öffnen
+http://localhost:15672
+
+User: admin
+Password: <RABBITMQ_PASSWORD aus .env>
+
 Queue: precompute.tasks
 ```
 
 **Prüfen:**
 - ✅ Tasks in Queue
-- ✅ Worker verbunden (Consumers)
+- ✅ Worker verbunden (Consumers) - sollte 12 sein (Default)
 - ✅ Messages/sec Rate
 
 ### Logs
@@ -171,11 +204,11 @@ docker logs -f asciisky-precompute-coordinator
 # Worker (Hauptserver)
 docker logs -f asciisky-precompute-worker
 
-# Worker (rabbit-b)
-ssh rabbit-b.eibrain.org "docker logs -f asciisky-precompute-worker-b"
+# Worker (rabbit-b) - alle 4 Worker
+ssh rabbit-b.eibrain.org "docker compose -f docker-compose.worker-b.yml logs -f precompute_worker"
 
-# Worker (rabbit-c)
-ssh rabbit-c.eibrain.org "docker logs -f asciisky-precompute-worker-c"
+# Worker (rabbit-c) - alle 4 Worker
+ssh rabbit-c.eibrain.org "docker compose -f docker-compose.worker-c.yml logs -f precompute_worker"
 ```
 
 ### PostgreSQL Cache-Status
@@ -262,8 +295,11 @@ docker exec asciisky-precompute-worker pg_isready -h postgres -U asciisky
 ### 1. Mehr Worker starten
 
 ```bash
-# Einfach mehr Container starten
-docker compose -f docker-compose.production.yml up -d --scale precompute_worker=2
+# .env editieren
+PRECOMPUTE_WORKERS=8  # Statt 4
+
+# Neu starten
+docker compose -f docker-compose.production.yml up -d
 ```
 
 ### 2. PREFETCH_COUNT erhöhen
@@ -302,12 +338,30 @@ environment:
 
 **Deployment:**
 ```bash
-# Hauptserver (immer)
+# Automatisch (empfohlen)
+./scripts/setup-production.sh
+
+# Oder manuell:
+# Hauptserver
 docker compose -f docker-compose.production.yml up -d
 
-# Worker-Server (optional, für mehr Performance)
-docker compose -f docker-compose.worker-b.yml up -d precompute-worker
-docker compose -f docker-compose.worker-c.yml up -d precompute-worker
+# Worker-Server B
+ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml up -d"
+
+# Worker-Server C
+ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml up -d"
+```
+
+**Worker-Skalierung:**
+```bash
+# .env editieren
+PRECOMPUTE_WORKERS=8        # Hauptserver: 8 Worker
+PRECOMPUTE_WORKERS_B=8      # Worker-B: 8 Worker
+PRECOMPUTE_WORKERS_C=8      # Worker-C: 8 Worker
+# = 24 Worker total
+
+# Neu starten
+docker compose up -d
 ```
 
 **Fertig!** 🚀

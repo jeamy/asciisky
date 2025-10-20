@@ -2,7 +2,12 @@
 
 ## 🎯 Zweck
 
-Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** und speichert sie im Cache (PostgreSQL/PostgreSQL). Dadurch sind API-Anfragen **sofort schnell**, ohne auf Berechnungen warten zu müssen.
+Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** und speichert sie im Cache (PostgreSQL). Dadurch sind API-Anfragen **sofort schnell**, ohne auf Berechnungen warten zu müssen.
+
+**Architektur:**
+- **Coordinator** (Hauptserver): Erstellt Tasks und publiziert in RabbitMQ Queue
+- **Worker** (alle Server): Holen Tasks aus Queue, berechnen, speichern in PostgreSQL
+- **Skalierbar**: Mehr Worker = schneller fertig (via `.env`)
 
 ---
 
@@ -10,14 +15,28 @@ Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** u
 
 ### Environment Variables
 
+**Worker-Skalierung (via .env):**
+```bash
+PRECOMPUTE_WORKERS=4        # Hauptserver
+PRECOMPUTE_WORKERS_B=4      # Worker-B
+PRECOMPUTE_WORKERS_C=4      # Worker-C
+```
+
+**Coordinator Environment Variables:**
+
 | Variable | Default | Beschreibung |
 |----------|---------|--------------|
-| `ASCII_SKY_PRECOMPUTE_HOURS` | 144 | Zeitfenster in Stunden (720 = 30 Tage) |
-| `ASCII_SKY_PRECOMPUTE_KINDS` | "asteroids,comets" | Welche Objekte berechnen |
-| `ASCII_SKY_PRECOMPUTE_WORKERS` | 3 | Parallele Worker-Threads |
-| `ASCII_SKY_ADAPTIVE_WORKERS` | 1 | Adaptive Worker-Skalierung (0=aus, 1=an) |
-| `ASCII_SKY_RETENTION_DAYS` | 0 | Cache-Aufbewahrung in Tagen (0=unbegrenzt) |
-| `ASCII_SKY_WORKER_RUN_ONCE` | 0 | Nur einmal ausführen und beenden (1=ja) |
+| `ASCII_SKY_PRECOMPUTE_HOURS` | 720 | Zeitfenster in Stunden (720 = 30 Tage) |
+| `PRECOMPUTE_COORDINATOR_INTERVAL` | 3600 | Wie oft Tasks erstellen (Sekunden) |
+| `RABBITMQ_URL` | amqp://... | RabbitMQ Verbindung |
+
+**Worker Environment Variables:**
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `RABBITMQ_URL` | amqp://... | RabbitMQ Verbindung |
+| `RABBITMQ_PREFETCH_COUNT` | 1 | Wie viele Tasks gleichzeitig |
+| `POSTGRES_HOST` | postgres | PostgreSQL Server |
 
 ### Aktuelle Konfiguration (docker-compose.yml)
 

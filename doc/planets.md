@@ -10,7 +10,8 @@ This document explains how ASCII Sky computes positions, magnitudes, and event t
 - Output: altitude, azimuth, Earth-center distance (AU), and magnitude, plus rise/set/transit times
 - API: `/api/celestial` (all bodies) and `/api/celestial/{body}` (single body)
 
-Backend implementation: see `main.py` functions `get_celestial_objects()` and `get_celestial_object()`.
+Backend implementation: see `api/routes/celestial.py` functions `get_celestial_objects()` and `get_celestial_object()`.
+Note: Planets are computed **synchronously** (no RabbitMQ workers), as they are fast to calculate.
 
 ## Geometry and Distances
 

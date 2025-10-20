@@ -1,6 +1,7 @@
-#!/bin/bash
+#\!/bin/bash
 # UFW Firewall Setup für ASCII Sky Multi-Host Deployment
-# Führe dieses Skript auf JEDEM Server aus!
+# Führe dieses Skript auf JEDEM Server aus\!
+# Konfiguriert IP-basierte Zugriffsbeschränkungen für RabbitMQ/PostgreSQL
 
 set -e
 
@@ -27,8 +28,26 @@ warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
+# ===== SERVER IPs AUTOMATISCH ERMITTELN =====
+echo "📋 Ermittle Server-IPs..."
+
+MAIN_IP=$(dig +short asciisky.eibrain.org | tail -n1)
+WORKER_B_IP=$(dig +short rabbit-b.eibrain.org | tail -n1)
+WORKER_C_IP=$(dig +short rabbit-c.eibrain.org | tail -n1)
+
+if [ -z "$MAIN_IP" ] || [ -z "$WORKER_B_IP" ] || [ -z "$WORKER_C_IP" ]; then
+    error_exit "Konnte nicht alle Server-IPs auflösen. Prüfe DNS-Konfiguration."
+fi
+
+echo ""
+echo "📍 Ermittelte IPs:"
+echo "   asciisky.eibrain.org: $MAIN_IP"
+echo "   rabbit-b.eibrain.org: $WORKER_B_IP"
+echo "   rabbit-c.eibrain.org: $WORKER_C_IP"
+echo ""
+
 # Prüfe ob UFW installiert ist
-if ! command -v ufw &> /dev/null; then
+if \! command -v ufw &> /dev/null; then
     echo "📦 UFW nicht installiert. Installiere..."
     sudo apt-get update
     sudo apt-get install -y ufw || error_exit "UFW Installation fehlgeschlagen"
@@ -39,127 +58,47 @@ HOSTNAME=$(hostname -f)
 echo "🖥️  Server: $HOSTNAME"
 echo ""
 
-# Frage nach Server-Rolle
-echo "Welche Server-Rolle hat diese Maschine?"
-echo "1) asciisky.eibrain.org (Hauptserver: Web + RabbitMQ + PostgreSQL)"
-echo "2) rabbit-b.eibrain.org (Worker Server B)"
-echo "3) rabbit-c.eibrain.org (Worker Server C)"
+echo "📍 Konfiguriere Firewall für Hauptserver (asciisky.eibrain.org)"
+echo "   RabbitMQ und PostgreSQL werden auf Worker-IPs beschränkt"
 echo ""
-read -p "Wähle (1-3): " ROLE
 
-case $ROLE in
-    1)
-        SERVER_TYPE="main"
-        echo "📍 Konfiguriere als: Hauptserver (asciisky.eibrain.org)"
-        ;;
-    2)
-        SERVER_TYPE="worker-b"
-        echo "📍 Konfiguriere als: Worker Server B (rabbit-b.eibrain.org)"
-        ;;
-    3)
-        SERVER_TYPE="worker-c"
-        echo "📍 Konfiguriere als: Worker Server C (rabbit-c.eibrain.org)"
-        ;;
-    *)
-        error_exit "Ungültige Auswahl"
-        ;;
-esac
-
-echo ""
-warning "ACHTUNG: UFW wird neu konfiguriert!"
-warning "Stelle sicher, dass SSH (Port 22) erlaubt wird, sonst verlierst du den Zugriff!"
+warning "ACHTUNG: UFW wird konfiguriert!"
+warning "Nur auf dem Hauptserver (asciisky.eibrain.org) ausführen!"
+warning "Worker-Server (rabbit-b/c) benötigen KEINE Firewall-Änderungen!"
 echo ""
 read -p "Fortfahren? (y/N) " -n 1 -r
 echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+if [[ \! $REPLY =~ ^[Yy]$ ]]; then
     echo "Abgebrochen."
     exit 0
 fi
 
 echo ""
 echo "🔧 Konfiguriere UFW..."
-
-# UFW zurücksetzen (optional)
-# sudo ufw --force reset
-
-# Standard-Policies
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-success "Standard-Policies gesetzt (deny incoming, allow outgoing)"
-
-# ===== GEMEINSAME REGELN (alle Server) =====
 echo ""
-echo "📋 Setze gemeinsame Regeln..."
+echo "📋 Setze Firewall-Regeln für RabbitMQ und PostgreSQL..."
 
-# SSH (WICHTIG!)
-sudo ufw allow 22/tcp comment 'SSH'
-success "Port 22 (SSH) erlaubt"
+# RabbitMQ AMQP (nur von Worker-Servern)
+sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
+success "Port 5672 (RabbitMQ AMQP) - NUR Worker-B ($WORKER_B_IP) und Worker-C ($WORKER_C_IP)"
 
-# ===== SERVER-SPEZIFISCHE REGELN =====
+# PostgreSQL (NUR von Worker-Servern)
+sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
+success "Port 5432 (PostgreSQL) - NUR Worker-B ($WORKER_B_IP) und Worker-C ($WORKER_C_IP)"
+
+# RabbitMQ Management UI (NUR localhost für SSH-Tunnel)
+sudo ufw allow from 127.0.0.1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost'
+success "Port 15672 (RabbitMQ Management UI) - NUR localhost (SSH-Tunnel)"
+echo "   💡 Zugriff via SSH-Tunnel: ssh -L 15672:localhost:15672 asciisky.eibrain.org"
+
+# ===== UFW NEU LADEN =====
 echo ""
-echo "📋 Setze server-spezifische Regeln..."
+echo "🔄 Lade UFW-Regeln neu..."
+sudo ufw reload || error_exit "UFW Reload fehlgeschlagen"
 
-if [ "$SERVER_TYPE" == "main" ]; then
-    # ===== HAUPTSERVER: asciisky.eibrain.org =====
-    echo "🌐 Hauptserver-Regeln..."
-    
-    # Web UI (öffentlich)
-    sudo ufw allow 8000/tcp comment 'ASCII Sky Web UI'
-    success "Port 8000 (Web UI) erlaubt"
-    
-    # RabbitMQ AMQP (nur von Worker-Servern)
-    # Option 1: Von überall (einfacher, aber weniger sicher)
-    sudo ufw allow 5672/tcp comment 'RabbitMQ AMQP'
-    success "Port 5672 (RabbitMQ AMQP) erlaubt"
-    
-    # RabbitMQ Management UI (nur aus vertrautem Netz empfohlen)
-    echo ""
-    read -p "RabbitMQ Management UI (Port 15672) öffentlich freigeben? (y/N) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo ufw allow 15672/tcp comment 'RabbitMQ Management UI'
-        success "Port 15672 (RabbitMQ Management UI) erlaubt"
-        warning "Empfehlung: Nur über VPN/SSH-Tunnel zugreifen!"
-    else
-        echo "Port 15672 nicht freigegeben (Zugriff über SSH-Tunnel empfohlen)"
-    fi
-    
-    # PostgreSQL (nur von Worker-Servern)
-    # Option 1: Von überall (einfacher, aber weniger sicher)
-    sudo ufw allow 5432/tcp comment 'PostgreSQL'
-    success "Port 5432 (PostgreSQL) erlaubt"
-    
-    echo ""
-    warning "SICHERHEITSHINWEIS für Produktion:"
-    echo "   Beschränke Ports 5672 und 5432 auf Worker-IPs:"
-    echo "   sudo ufw delete allow 5672/tcp"
-    echo "   sudo ufw delete allow 5432/tcp"
-    echo "   sudo ufw allow from <rabbit-b-IP> to any port 5672 proto tcp"
-    echo "   sudo ufw allow from <rabbit-b-IP> to any port 5432 proto tcp"
-    echo "   sudo ufw allow from <rabbit-c-IP> to any port 5672 proto tcp"
-    echo "   sudo ufw allow from <rabbit-c-IP> to any port 5432 proto tcp"
-    
-elif [ "$SERVER_TYPE" == "worker-b" ] || [ "$SERVER_TYPE" == "worker-c" ]; then
-    # ===== WORKER SERVER =====
-    echo "👷 Worker-Server-Regeln..."
-    
-    # Worker brauchen nur ausgehende Verbindungen zu:
-    # - RabbitMQ (5672)
-    # - PostgreSQL (5432)
-    # Diese sind bereits durch "default allow outgoing" erlaubt
-    
-    success "Keine zusätzlichen eingehenden Ports nötig"
-    echo "   Worker verbinden sich ausgehend zu asciisky.eibrain.org:5672 und :5432"
-fi
-
-# ===== UFW AKTIVIEREN =====
-echo ""
-echo "🚀 Aktiviere UFW..."
-
-# UFW aktivieren (mit --force um Bestätigung zu überspringen)
-sudo ufw --force enable || error_exit "UFW Aktivierung fehlgeschlagen"
-
-success "UFW aktiviert und konfiguriert!"
+success "Firewall-Regeln erfolgreich hinzugefügt!"
 
 # ===== STATUS ANZEIGEN =====
 echo ""
@@ -174,23 +113,15 @@ echo "✅ Firewall Setup abgeschlossen!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-if [ "$SERVER_TYPE" == "main" ]; then
-    echo "🌐 Hauptserver-Ports:"
-    echo "   ✅ 22    - SSH"
-    echo "   ✅ 8000  - Web UI (öffentlich)"
-    echo "   ✅ 5672  - RabbitMQ AMQP (für Worker)"
-    echo "   ✅ 5432  - PostgreSQL (für Worker)"
-    if sudo ufw status | grep -q "15672"; then
-        echo "   ✅ 15672 - RabbitMQ Management UI"
-    else
-        echo "   ⚠️  15672 - RabbitMQ Management UI (nicht freigegeben)"
-        echo "              Zugriff via SSH-Tunnel: ssh -L 15672:localhost:15672 asciisky.eibrain.org"
-    fi
-else
-    echo "👷 Worker-Server-Ports:"
-    echo "   ✅ 22    - SSH"
-    echo "   ℹ️  Ausgehende Verbindungen zu asciisky.eibrain.org:5672 und :5432"
-fi
+echo "🌐 Hauptserver - Neue Firewall-Regeln:"
+echo "   🔒 5672  - RabbitMQ AMQP (NUR Worker-B: $WORKER_B_IP, Worker-C: $WORKER_C_IP)"
+echo "   🔒 5432  - PostgreSQL (NUR Worker-B: $WORKER_B_IP, Worker-C: $WORKER_C_IP)"
+echo "   🔒 15672 - RabbitMQ Management UI (NUR localhost/SSH-Tunnel)"
+echo ""
+echo "🔒 Sicherheit:"
+echo "   ✅ RabbitMQ (5672) und PostgreSQL (5432) NUR von Worker-Servern erreichbar"
+echo "   ✅ RabbitMQ UI (15672) NUR via SSH-Tunnel erreichbar"
+echo "   ✅ Alle anderen IPs werden auf Ports 5672, 5432, 15672 blockiert"
 
 echo ""
 echo "📝 Nützliche Befehle:"
@@ -199,4 +130,8 @@ echo "   sudo ufw status numbered         # Regeln mit Nummern"
 echo "   sudo ufw delete <nummer>         # Regel löschen"
 echo "   sudo ufw disable                 # UFW deaktivieren"
 echo "   sudo ufw reload                  # UFW neu laden"
+echo ""
+echo "💡 RabbitMQ UI Zugriff (von deinem lokalen Rechner):"
+echo "   ssh -L 15672:localhost:15672 asciisky.eibrain.org"
+echo "   Dann: http://localhost:15672 im Browser öffnen"
 echo ""

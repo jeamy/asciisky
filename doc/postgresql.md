@@ -1,6 +1,6 @@
 # PostgreSQL Database Documentation
 
-ASCII Sky uses PostgreSQL for efficient storage and retrieval of astronomical data, providing multi-host capability and better concurrency than PostgreSQL.
+ASCII Sky uses PostgreSQL for efficient storage and retrieval of astronomical data, providing multi-host capability and better concurrency than SQLite.
 
 ## Database Overview
 
@@ -26,104 +26,59 @@ CREATE TABLE IF NOT EXISTS db_metadata (
 )
 ```
 
-### 2. `asteroids`
+### 2. `asteroid_dataframes`
 
-Stores asteroid orbital data from the Minor Planet Center (MPC).
+Stores pickled asteroid DataFrames from MPC.
 
 ```sql
-CREATE TABLE IF NOT EXISTS asteroids (
-    id INTEGER PRIMARY KEY,
-    designation TEXT UNIQUE NOT NULL,
-    number INTEGER,
-    magnitude_h REAL,
-    magnitude_g REAL,
-    epoch_packed TEXT,
-    mean_anomaly REAL,
-    argument_perihelion REAL,
-    longitude_node REAL,
-    inclination REAL,
-    eccentricity REAL,
-    mean_daily_motion REAL,
-    semimajor_axis REAL,
-    orbit_data BLOB,  -- Serialized mpcorb row for Skyfield
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS asteroid_dataframes (
+    id SERIAL PRIMARY KEY,
+    data_pickle BYTEA NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ```
 
-### 3. `comets`
+### 3. `comet_dataframes`
 
-Stores comet orbital data from the Minor Planet Center (MPC).
+Stores pickled comet DataFrames from MPC.
 
 ```sql
-CREATE TABLE IF NOT EXISTS comets (
-    id INTEGER PRIMARY KEY,
-    designation TEXT UNIQUE NOT NULL,
-    name TEXT,
-    magnitude_h REAL,
-    magnitude_g REAL,
-    epoch_packed TEXT,
-    perihelion_distance REAL,
-    eccentricity REAL,
-    argument_perihelion REAL,
-    longitude_node REAL,
-    inclination REAL,
-    orbit_data BLOB,  -- Serialized comet row for Skyfield
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS comet_dataframes (
+    id SERIAL PRIMARY KEY,
+    data_pickle BYTEA NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ```
 
-### 4. `asteroid_positions`
+### 4. `cached_positions`
 
-Caches computed asteroid positions for specific locations and time buckets.
+Caches computed positions for asteroids, comets, and celestial bodies.
 
 ```sql
-CREATE TABLE IF NOT EXISTS asteroid_positions (
-    asteroid_id INTEGER,
-    location_key TEXT,
-    time_bucket TEXT,
-    observer_lat REAL,
-    observer_lon REAL,
-    observer_elevation REAL,
-    computed_at TIMESTAMP,
-    position_data BLOB,  -- Serialized position/magnitude/times data
-    PRIMARY KEY (asteroid_id, location_key, time_bucket),
-    FOREIGN KEY (asteroid_id) REFERENCES asteroids (id)
+CREATE TABLE IF NOT EXISTS cached_positions (
+    id SERIAL PRIMARY KEY,
+    object_type VARCHAR(20) NOT NULL,
+    object_id VARCHAR(100),
+    location_key VARCHAR(100) NOT NULL,
+    time_bucket VARCHAR(20) NOT NULL,
+    position_data BYTEA NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    UNIQUE(object_type, object_id, location_key, time_bucket)
 )
 ```
 
-### 5. `comet_positions`
+### 5. `data_updates`
 
-Caches computed comet positions for specific locations and time buckets.
-
-```sql
-CREATE TABLE IF NOT EXISTS comet_positions (
-    comet_id INTEGER,
-    location_key TEXT,
-    time_bucket TEXT,
-    observer_lat REAL,
-    observer_lon REAL,
-    observer_elevation REAL,
-    computed_at TIMESTAMP,
-    position_data BLOB,  -- Serialized position/magnitude/times data
-    PRIMARY KEY (comet_id, location_key, time_bucket),
-    FOREIGN KEY (comet_id) REFERENCES comets (id)
-)
-```
-
-### 6. `celestial_snapshots`
-
-Caches computed positions for celestial bodies (sun, moon, planets) for specific locations and time buckets.
+Tracks data update operations (asteroid/comet data downloads).
 
 ```sql
-CREATE TABLE IF NOT EXISTS celestial_snapshots (
-    location_key TEXT,
-    time_bucket TEXT,
-    observer_lat REAL,
-    observer_lon REAL,
-    observer_elevation REAL,
-    computed_at TIMESTAMP,
-    snapshot_data BLOB,  -- Serialized celestial snapshot
-    PRIMARY KEY (location_key, time_bucket)
+CREATE TABLE IF NOT EXISTS data_updates (
+    id SERIAL PRIMARY KEY,
+    update_type VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ```
 
@@ -132,26 +87,31 @@ CREATE TABLE IF NOT EXISTS celestial_snapshots (
 The following indexes are created to optimize query performance:
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_asteroids_designation ON asteroids (designation)
-CREATE INDEX IF NOT EXISTS idx_asteroids_magnitude_h ON asteroids (magnitude_h)
-CREATE INDEX IF NOT EXISTS idx_comets_designation ON comets (designation)
-CREATE INDEX IF NOT EXISTS idx_comets_magnitude_h ON comets (magnitude_h)
-CREATE INDEX IF NOT EXISTS idx_positions_location_time ON asteroid_positions (location_key, time_bucket)
-CREATE INDEX IF NOT EXISTS idx_positions_computed_at ON asteroid_positions (computed_at)
-CREATE INDEX IF NOT EXISTS idx_comet_positions_location_time ON comet_positions (location_key, time_bucket)
-CREATE INDEX IF NOT EXISTS idx_comet_positions_computed_at ON comet_positions (computed_at)
-CREATE INDEX IF NOT EXISTS idx_celestial_location_time ON celestial_snapshots (location_key, time_bucket)
-CREATE INDEX IF NOT EXISTS idx_celestial_computed_at ON celestial_snapshots (computed_at)
+CREATE INDEX idx_cached_positions_lookup 
+    ON cached_positions(object_type, location_key, time_bucket);
+CREATE INDEX idx_cached_positions_expires 
+    ON cached_positions(expires_at);
+CREATE INDEX idx_data_updates_type 
+    ON data_updates(update_type, created_at DESC);
 ```
 
 ## Database Configuration
 
-The PostgreSQL database is configured with the following PRAGMA settings for optimal performance:
+The PostgreSQL database is configured with the following settings:
 
-```sql
-PRAGMA synchronous=NORMAL  -- Balance safety/performance
-PRAGMA cache_size=10000    -- 10MB cache
-PRAGMA temp_store=MEMORY   -- Use RAM for temp tables
+```python
+# Connection pooling
+min_connections = 1
+max_connections = 20
+
+# Timeouts
+connect_timeout = 10
+command_timeout = 300  # 5 minutes for long computations
+
+# Multi-Host
+# All workers (main, rabbit-b, rabbit-c) connect to central PostgreSQL
+POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'postgres')
+POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
 ```
 
 ## Key Functions
@@ -166,43 +126,55 @@ PRAGMA temp_store=MEMORY   -- Use RAM for temp tables
 - `init_database()`: Initializes database schema if it doesn't exist
 - `create_schema()`: Creates database tables and indexes
 
-### Asteroid Functions
+### DataFrame Functions
 
-- `store_asteroid_dataframe()`: Stores asteroid DataFrame in database
-- `get_asteroids_by_magnitude()`: Retrieves asteroids filtered by H magnitude
-- `get_asteroid_orbit_data()`: Gets deserialized orbit data for Skyfield calculations
-- `store_asteroid_positions()`: Stores computed asteroid positions for a location/time bucket
-- `get_asteroid_positions()`: Retrieves cached asteroid positions if fresh enough
+- `store_asteroid_dataframe(df_pickle)`: Stores pickled asteroid DataFrame
+- `get_asteroid_dataframe(max_age_seconds)`: Retrieves asteroid DataFrame if fresh
+- `store_comet_dataframe(df_pickle)`: Stores pickled comet DataFrame
+- `get_comet_dataframe(max_age_seconds)`: Retrieves comet DataFrame if fresh
 
-### Comet Functions
+### Position Cache Functions
 
-- `store_comet_dataframe()`: Stores comet DataFrame in database
-- `get_comets_by_magnitude()`: Retrieves comets filtered by H magnitude
-- `store_comet_positions()`: Stores computed comet positions for a location/time bucket
-- `get_comet_positions()`: Retrieves cached comet positions if fresh enough
+- `store_asteroid_positions(asteroid_id, location_key, time_bucket, ...)`: Stores computed positions
+- `get_asteroid_positions(location_key, time_bucket, max_age_seconds)`: Retrieves cached positions
+- `store_comet_positions(comet_id, location_key, time_bucket, ...)`: Stores computed positions
+- `get_comet_positions(location_key, time_bucket, max_age_seconds)`: Retrieves cached positions
 
-### Celestial Functions
+### Data Update Tracking
 
-- `store_celestial_snapshot()`: Stores computed celestial snapshot for a location/time bucket
-- `get_celestial_snapshot()`: Retrieves cached celestial snapshot if fresh enough
+- `record_data_update(update_type, status, message)`: Records data update operations
+- `get_last_data_update(update_type)`: Gets last update timestamp for a data type
 
 ### Maintenance Functions
 
-- `cleanup_old_positions()`: Removes position cache entries older than retention period
+- `cleanup_old_positions(retention_days)`: Removes expired cache entries
 - `get_database_stats()`: Gets database statistics for monitoring
-- `migrate_from_pickle_cache()`: Migrates existing pickle cache files to PostgreSQL database
 
 ## Cache Keys
 
 - **Location Key**: Normalized format `lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ`
 - **Time Bucket**: ISO format with hourly granularity `YYYYMMDDTHH`
 
-## Migration from Pickle Cache
+## Multi-Host Architecture
 
-The system includes functionality to migrate data from the legacy pickle cache files to the PostgreSQL database:
+PostgreSQL enables multi-host deployment:
 
-1. Asteroid DataFrame migration from `cache/asteroids_dataframe.pkl`
-2. Position cache migration from `cache/asteroids/*` structure (planned)
+- **Main Server** (asciisky.eibrain.org): Runs PostgreSQL container
+- **Worker Servers** (rabbit-b/c.eibrain.org): Connect to central PostgreSQL
+- **Benefits**:
+  - Single source of truth for all data
+  - No SQLite file locking issues
+  - Better concurrency for multiple workers
+  - Centralized data management
+
+## RabbitMQ Integration
+
+PostgreSQL works with RabbitMQ for async computation:
+
+1. **API Request**: Check PostgreSQL cache
+2. **Cache Miss**: Publish task to RabbitMQ
+3. **Worker**: Compute positions, store in PostgreSQL
+4. **Next Request**: Serve from PostgreSQL cache
 
 ## Environment Variables
 
@@ -210,17 +182,16 @@ The system includes functionality to migrate data from the legacy pickle cache f
 
 ## Performance Considerations
 
-- PostgreSQL provides significant performance improvements over pickle files for:
-  - Filtering by magnitude without loading entire datasets
-  - Efficient location/time-based lookups
-  - Reduced memory usage for large datasets
-  - Atomic transactions for data integrity
-  - Concurrent access from multiple threads/processes
+- PostgreSQL provides significant performance improvements:
+  - **Multi-Host**: All workers share same cache
+  - **Concurrency**: No file locking issues
+  - **Indexes**: Fast location/time lookups
+  - **Transactions**: Atomic operations
+  - **Scalability**: Handles multiple workers efficiently
 
-## Hybrid Cache System
+## Cache Strategy
 
-ASCII Sky uses a hybrid cache system:
-- PostgreSQL as the primary cache backend
-- Pickle files as fallback for backward compatibility
-
-This approach ensures reliable operation while providing significant performance improvements.
+- **DataFrames**: Stored as pickled BYTEA (12h TTL)
+- **Positions**: Stored as pickled BYTEA (6h TTL)
+- **Filtering**: Always cache with mag 20.0, filter in API
+- **Cleanup**: Automatic expiration via `expires_at` timestamp

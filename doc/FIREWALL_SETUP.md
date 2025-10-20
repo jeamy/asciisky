@@ -8,27 +8,36 @@ Firewall-Konfiguration für das Multi-Host Production Deployment.
 
 | Server | Port | Service | Zugriff | Beschreibung |
 |--------|------|---------|---------|--------------|
-| **asciisky.eibrain.org** | 22 | SSH | Vertrauenswürdig | Server-Administration |
-| | 8000 | Web UI | Öffentlich | ASCII Sky Web-Interface |
-| | 5672 | RabbitMQ AMQP | Worker-Server | Message Queue |
-| | 5432 | PostgreSQL | Worker-Server | Datenbank |
-| | 15672 | RabbitMQ UI | Optional/VPN | Management Interface |
-| **rabbit-b.eibrain.org** | 22 | SSH | Vertrauenswürdig | Server-Administration |
-| **rabbit-c.eibrain.org** | 22 | SSH | Vertrauenswürdig | Server-Administration |
+| **asciisky.eibrain.org** | 22 | SSH | Bereits konfiguriert | Server-Administration |
+| | 80/443 | Web UI (nginx) | Öffentlich | ASCII Sky Web-Interface |
+| | 8000 | FastAPI | Intern (nginx) | Backend (nicht öffentlich) |
+| | 5672 | RabbitMQ AMQP | NUR Worker-B/C IPs | Message Queue |
+| | 5432 | PostgreSQL | NUR Worker-B/C IPs | Datenbank |
+| | 15672 | RabbitMQ UI | NUR localhost | Management Interface (SSH-Tunnel) |
+| **rabbit-b.eibrain.org** | 22 | SSH | Bereits konfiguriert | Server-Administration |
+| **rabbit-c.eibrain.org** | 22 | SSH | Bereits konfiguriert | Server-Administration |
 
 ---
 
 ## 🚀 Schnellstart
 
-### Automatisches Setup
+### Automatisches Setup (Empfohlen)
+
+**NUR auf asciisky.eibrain.org ausführen:**
 
 ```bash
-# Auf JEDEM Server ausführen:
 chmod +x scripts/setup-firewall.sh
 sudo ./scripts/setup-firewall.sh
 ```
 
-Das Skript fragt nach der Server-Rolle und konfiguriert UFW automatisch.
+Das Script:
+- ✅ Ermittelt automatisch IPs via DNS
+- ✅ Beschränkt Port 5672 (RabbitMQ) auf Worker-B/C IPs
+- ✅ Beschränkt Port 5432 (PostgreSQL) auf Worker-B/C IPs
+- ✅ Beschränkt Port 15672 (RabbitMQ UI) auf localhost
+- ✅ Worker-Server benötigen KEINE Firewall-Änderungen
+
+**Wichtig:** Port 80/443 (nginx) und SSH werden als bereits konfiguriert vorausgesetzt!
 
 ---
 
@@ -36,69 +45,54 @@ Das Skript fragt nach der Server-Rolle und konfiguriert UFW automatisch.
 
 ### Auf asciisky.eibrain.org (Hauptserver)
 
+**Empfehlung:** Verwende das automatische Script (siehe oben)!
+
+**Manuelle Konfiguration:**
+
 ```bash
-# UFW installieren (falls nicht vorhanden)
-sudo apt-get update
-sudo apt-get install -y ufw
+# IPs ermitteln
+WORKER_B_IP=$(dig +short rabbit-b.eibrain.org | tail -n1)
+WORKER_C_IP=$(dig +short rabbit-c.eibrain.org | tail -n1)
 
-# Standard-Policies
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
+echo "Worker-B IP: $WORKER_B_IP"
+echo "Worker-C IP: $WORKER_C_IP"
 
-# SSH (WICHTIG - zuerst!)
-sudo ufw allow 22/tcp comment 'SSH'
+# RabbitMQ AMQP (NUR von Worker-Servern)
+sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
 
-# Web UI (öffentlich)
-sudo ufw allow 8000/tcp comment 'ASCII Sky Web UI'
+# PostgreSQL (NUR von Worker-Servern)
+sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
 
-# RabbitMQ AMQP (für Worker)
-sudo ufw allow 5672/tcp comment 'RabbitMQ AMQP'
+# RabbitMQ Management UI (NUR localhost)
+sudo ufw allow from 127.0.0.1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost'
 
-# PostgreSQL (für Worker)
-sudo ufw allow 5432/tcp comment 'PostgreSQL'
-
-# RabbitMQ Management UI (optional, siehe Sicherheitshinweise)
-sudo ufw allow 15672/tcp comment 'RabbitMQ Management UI'
-
-# UFW aktivieren
-sudo ufw enable
+# UFW neu laden
+sudo ufw reload
 
 # Status prüfen
 sudo ufw status verbose
 ```
 
-### Auf rabbit-b.eibrain.org (Worker Server B)
+**Hinweis:** Port 80/443 (nginx), SSH und andere Ports werden als bereits konfiguriert vorausgesetzt.
 
+### Auf rabbit-b.eibrain.org und rabbit-c.eibrain.org (Worker Server)
+
+**Keine Firewall-Änderungen nötig!**
+
+Worker-Server:
+- ✅ Ausgehende Verbindungen sind bereits erlaubt (`default allow outgoing`)
+- ✅ Verbinden sich zu asciisky.eibrain.org:5672 (RabbitMQ)
+- ✅ Verbinden sich zu asciisky.eibrain.org:5432 (PostgreSQL)
+- ✅ Benötigen keine eingehenden Ports (außer SSH)
+
+**Falls UFW noch nicht konfiguriert:**
 ```bash
-# UFW installieren
-sudo apt-get update
-sudo apt-get install -y ufw
-
-# Standard-Policies
+# Nur falls UFW noch nicht aktiv ist
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
-
-# SSH
-sudo ufw allow 22/tcp comment 'SSH'
-
-# UFW aktivieren
 sudo ufw enable
-
-# Status prüfen
-sudo ufw status verbose
-```
-
-### Auf rabbit-c.eibrain.org (Worker Server C)
-
-```bash
-# Identisch zu rabbit-b.eibrain.org
-sudo apt-get update
-sudo apt-get install -y ufw
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp comment 'SSH'
-sudo ufw enable
-sudo ufw status verbose
 ```
 
 ---
@@ -107,80 +101,88 @@ sudo ufw status verbose
 
 ### 1. RabbitMQ und PostgreSQL auf Worker-IPs beschränken
 
-**Problem:** Ports 5672 und 5432 sind von überall erreichbar.
+**Status:** ✅ Wird automatisch durch `setup-firewall.sh` konfiguriert!
 
-**Lösung:** Beschränke auf Worker-Server-IPs:
-
+**Manuelle Prüfung:**
 ```bash
 # Auf asciisky.eibrain.org
+sudo ufw status numbered | grep -E '5672|5432'
 
-# Aktuelle Regeln entfernen
-sudo ufw delete allow 5672/tcp
-sudo ufw delete allow 5432/tcp
-
-# Nur von rabbit-b.eibrain.org erlauben
-sudo ufw allow from <rabbit-b-IP> to any port 5672 proto tcp comment 'RabbitMQ from rabbit-b'
-sudo ufw allow from <rabbit-b-IP> to any port 5432 proto tcp comment 'PostgreSQL from rabbit-b'
-
-# Nur von rabbit-c.eibrain.org erlauben
-sudo ufw allow from <rabbit-c-IP> to any port 5672 proto tcp comment 'RabbitMQ from rabbit-c'
-sudo ufw allow from <rabbit-c-IP> to any port 5432 proto tcp comment 'PostgreSQL from rabbit-c'
-
-# Status prüfen
-sudo ufw status numbered
+# Sollte zeigen:
+# [X] 5672/tcp ALLOW IN <Worker-B-IP>
+# [Y] 5672/tcp ALLOW IN <Worker-C-IP>
+# [Z] 5432/tcp ALLOW IN <Worker-B-IP>
+# [W] 5432/tcp ALLOW IN <Worker-C-IP>
 ```
 
-**IPs ermitteln:**
+**Falls manuell konfiguriert werden muss:**
 ```bash
-# Auf rabbit-b.eibrain.org
-hostname -I | awk '{print $1}'
+# IPs automatisch ermitteln
+WORKER_B_IP=$(dig +short rabbit-b.eibrain.org | tail -n1)
+WORKER_C_IP=$(dig +short rabbit-c.eibrain.org | tail -n1)
 
-# Auf rabbit-c.eibrain.org
-hostname -I | awk '{print $1}'
+# Regeln hinzufügen
+sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
+sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
+sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
 ```
 
 ### 2. RabbitMQ Management UI absichern
 
-**Option A: Nicht öffentlich freigeben (empfohlen)**
+**Status:** ✅ Wird automatisch durch `setup-firewall.sh` auf localhost beschränkt!
 
-Zugriff nur über SSH-Tunnel:
+**Zugriff via SSH-Tunnel (empfohlen):**
 ```bash
 # Von deinem lokalen Rechner
 ssh -L 15672:localhost:15672 asciisky.eibrain.org
 
 # Dann im Browser öffnen:
-# http://localhost:15672
+http://localhost:15672
+
+User: admin
+Password: <RABBITMQ_PASSWORD aus .env>
 ```
 
-**Option B: Auf vertrauenswürdige IPs beschränken**
-
+**Prüfung:**
 ```bash
-# Nur von deiner Admin-IP erlauben
-sudo ufw allow from <deine-IP> to any port 15672 proto tcp comment 'RabbitMQ UI from Admin'
+# Auf asciisky.eibrain.org
+sudo ufw status | grep 15672
+
+# Sollte zeigen:
+# 15672/tcp ALLOW IN 127.0.0.1
 ```
 
-### 3. SSH absichern
+### 3. SSH absichern (Optional)
 
+**Hinweis:** SSH wird als bereits konfiguriert vorausgesetzt!
+
+**Optionale Verbesserungen:**
 ```bash
-# SSH-Port ändern (optional)
-# /etc/ssh/sshd_config: Port 2222
-sudo ufw allow 2222/tcp comment 'SSH (custom port)'
-sudo ufw delete allow 22/tcp
+# Rate Limiting aktivieren
+sudo ufw limit 22/tcp comment 'SSH with rate limiting'
 
-# Nur von vertrauenswürdigen IPs
+# Nur von vertrauenswürdigen IPs (falls gewünscht)
 sudo ufw delete allow 22/tcp
 sudo ufw allow from <admin-IP> to any port 22 proto tcp comment 'SSH from Admin'
-
-# SSH neu starten
-sudo systemctl restart sshd
 ```
 
-### 4. Rate Limiting für SSH
+### 4. Port 8000 (FastAPI) nicht öffentlich
 
+**Status:** ✅ Port 8000 sollte NICHT öffentlich erreichbar sein!
+
+**Prüfung:**
 ```bash
-# Schutz vor Brute-Force
-sudo ufw limit 22/tcp comment 'SSH with rate limiting'
+# Auf asciisky.eibrain.org
+sudo ufw status | grep 8000
+
+# Sollte NICHTS zeigen oder nur localhost
 ```
+
+**Warum?**
+- Web UI läuft über nginx (Port 80/443)
+- nginx leitet intern zu Port 8000 weiter
+- Port 8000 muss nicht öffentlich sein
 
 ---
 
@@ -222,14 +224,20 @@ docker ps --format "table {{.Names}}\t{{.Ports}}"
 ### Problem: Kein Zugriff auf Web UI
 
 ```bash
-# Prüfe ob Port 8000 offen ist
-sudo ufw status | grep 8000
+# Prüfe nginx
+sudo systemctl status nginx
+
+# Prüfe nginx Konfiguration
+sudo nginx -t
+
+# Prüfe ob Port 80/443 offen ist
+sudo ufw status | grep -E '80|443'
 
 # Prüfe ob Web-Container läuft
 docker ps | grep asciisky-web
 
-# Prüfe ob Port gebunden ist
-sudo netstat -tulpn | grep 8000
+# Prüfe ob Port 8000 intern erreichbar ist
+curl http://localhost:8000/api/celestial?lat=48.2&lon=16.3
 ```
 
 ### Problem: Worker können sich nicht verbinden
@@ -326,17 +334,25 @@ sudo ufw default allow outgoing    # Ausgehend erlauben
 
 ## 📋 Checkliste für Production
 
-- [ ] UFW auf allen 3 Servern installiert und aktiviert
-- [ ] SSH (Port 22) auf allen Servern erlaubt
-- [ ] Web UI (Port 8000) auf asciisky.eibrain.org öffentlich
-- [ ] RabbitMQ (Port 5672) auf Worker-IPs beschränkt
-- [ ] PostgreSQL (Port 5432) auf Worker-IPs beschränkt
-- [ ] RabbitMQ UI (Port 15672) nur über SSH-Tunnel oder VPN
-- [ ] SSH Rate Limiting aktiviert (`ufw limit 22/tcp`)
-- [ ] UFW Logging aktiviert für Monitoring
-- [ ] Firewall-Regeln dokumentiert
-- [ ] Worker-Verbindung getestet (telnet/nc)
-- [ ] Web UI von extern erreichbar getestet
+**Hauptserver (asciisky.eibrain.org):**
+- [ ] `setup-firewall.sh` ausgeführt
+- [ ] Port 80/443 (nginx) öffentlich erreichbar
+- [ ] Port 8000 (FastAPI) NICHT öffentlich
+- [ ] RabbitMQ (Port 5672) NUR von Worker-B/C IPs erreichbar
+- [ ] PostgreSQL (Port 5432) NUR von Worker-B/C IPs erreichbar
+- [ ] RabbitMQ UI (Port 15672) NUR via SSH-Tunnel
+- [ ] UFW Status geprüft: `sudo ufw status verbose`
+
+**Worker-Server (rabbit-b/c):**
+- [ ] Keine Firewall-Änderungen nötig (ausgehende Verbindungen erlaubt)
+- [ ] Verbindung zu RabbitMQ getestet: `telnet asciisky.eibrain.org 5672`
+- [ ] Verbindung zu PostgreSQL getestet: `telnet asciisky.eibrain.org 5432`
+
+**Tests:**
+- [ ] Web UI von extern erreichbar: `http://asciisky.eibrain.org`
+- [ ] RabbitMQ UI via SSH-Tunnel: `ssh -L 15672:localhost:15672 asciisky.eibrain.org`
+- [ ] Worker können Tasks verarbeiten (RabbitMQ UI prüfen)
+- [ ] PostgreSQL von Workern erreichbar
 
 ---
 

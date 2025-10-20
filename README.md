@@ -43,27 +43,61 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 ## Running the Application
 
-### Using Docker Compose (Recommended)
+### Development Setup (Local)
 
 1. Clone this repository
 2. Navigate to the project directory
-3. Run the following command:
+3. Run the setup script:
    ```bash
-   docker-compose up --build
+   ./scripts/setup-dev.sh
    ```
 4. Open your browser and navigate to `http://localhost:8000`
+
+The setup script automatically:
+- Creates `.env` file with default configuration
+- Builds Docker images
+- Starts all services (web, PostgreSQL, RabbitMQ, workers)
+- Initializes the database
+- Downloads initial asteroid/comet data
+
+### Production Deployment (Multi-Host)
+
+For production deployment across multiple servers:
+
+1. Configure `.env` file (see `.env.example`)
+2. Run the production setup script:
+   ```bash
+   ./scripts/setup-production.sh
+   ```
+
+This deploys:
+- **Main Server** (asciisky.eibrain.org): Web UI, PostgreSQL, RabbitMQ, Data Updater
+- **Worker Server B** (rabbit-b.eibrain.org): Scalable compute workers
+- **Worker Server C** (rabbit-c.eibrain.org): Scalable compute workers
+
+See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions.
 
 ### Docker Services
 
 The application runs multiple services:
 
 - **`web`** - FastAPI web server (port 8000)
-- **`rabbitmq`** - RabbitMQ message broker for async task processing
-- **`asteroid-worker-1/2`** - RabbitMQ workers for asteroid computations
-- **`comet-worker-1/2`** - RabbitMQ workers for comet computations
+- **`postgres`** - PostgreSQL database (port 5432)
+- **`rabbitmq`** - RabbitMQ message broker for async task processing (ports 5672, 15672)
+- **`precompute_worker`** - Scalable workers for precomputation tasks (configurable via `.env`)
+- **`asteroid_worker`** - Scalable workers for asteroid computations (configurable via `.env`)
+- **`comet_worker`** - Scalable workers for comet computations (configurable via `.env`)
+- **`precompute_coordinator`** - Coordinates precomputation tasks
 - **`data_updater`** - Nightly data update service (runs at 2:00 AM)
 
 All services restart automatically unless stopped.
+
+**Worker Scaling** (via `.env`):
+```bash
+PRECOMPUTE_WORKERS=4  # Number of precompute workers
+ASTEROID_WORKERS=2    # Number of asteroid workers
+COMET_WORKERS=2       # Number of comet workers
+```
 
 ### First Run and Data Management
 
@@ -73,10 +107,11 @@ All services restart automatically unless stopped.
 
 ### Cache Architecture
 
-- **PostgreSQL Database** (`cache/asciisky.db`)
+- **PostgreSQL Database**
   - All asteroid and comet orbital data (~2200 asteroids, ~1200 comets)
   - Pre-computed positions cached per location and time bucket
   - Automatic nightly updates via `data_updater` service
+  - Multi-host capable: All workers connect to central PostgreSQL instance
   - See `doc/postgresql.md` and `doc/data-management.md` for details
 
 - **RabbitMQ Task Queue**
@@ -121,8 +156,16 @@ All services restart automatically unless stopped.
 - `de421.bsp` - JPL ephemeris used by Skyfield
 
 ### RabbitMQ Workers
+- `workers/precompute_worker.py` - Async worker for precomputation tasks
 - `workers/asteroid_worker.py` - Async worker for asteroid computations
 - `workers/comet_worker.py` - Async worker for comet computations
+- `workers/precompute_coordinator.py` - Coordinates precomputation across workers
+
+### Deployment Scripts
+- `scripts/setup-dev.sh` - Development environment setup
+- `scripts/setup-production.sh` - Multi-host production deployment
+- `scripts/setup-firewall.sh` - Firewall configuration for production
+- `scripts/setup-rabbitmq-queues.sh` - RabbitMQ queue initialization
 
 ### Frontend
 - `templates/` - HTML templates
@@ -145,7 +188,11 @@ All services restart automatically unless stopped.
 
 ### Configuration
 - `Dockerfile` - Docker configuration
-- `docker-compose.yml` - Docker Compose configuration with RabbitMQ
+- `docker-compose.yml` - Development Docker Compose configuration
+- `docker-compose.production.yml` - Production configuration (main server)
+- `docker-compose.worker-b.yml` - Worker server B configuration
+- `docker-compose.worker-c.yml` - Worker server C configuration
+- `.env.example` - Environment variables template
 - `requirements.txt` - Python dependencies
 
 ## API Endpoints
@@ -228,6 +275,7 @@ The application can be configured using the following environment variables in `
 - [PostgreSQL Database](doc/postgresql.md) - Database schema and caching strategy
 - [Data Management](doc/data-management.md) - DB-first loading, nightly updates, and troubleshooting
 - [Session Management](doc/sessionmgm.md) - User sessions and state handling
+- [Production Deployment](doc/PRODUCTION_DEPLOYMENT.md) - Multi-host deployment guide
 
 ## Technologies Used
 
