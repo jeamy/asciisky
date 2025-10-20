@@ -36,15 +36,16 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
         rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
         
         def publish_task():
+            import json
             params = pika.URLParameters(rabbitmq_url)
             connection = pika.BlockingConnection(params)
             channel = connection.channel()
             
-            # Stelle sicher dass Queue existiert
-            channel.queue_declare(queue='asteroid.compute', durable=True)
+            # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
             
             # Task-Daten
             task = {
+                'task_id': f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}",
                 'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
                 'time_bucket': dt_utc.isoformat(),
                 'magnitude': 20.0
@@ -54,7 +55,7 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
             channel.basic_publish(
                 exchange='',
                 routing_key='asteroid.compute',
-                body=str(task),
+                body=json.dumps(task),  # JSON statt str()
                 properties=pika.BasicProperties(
                     delivery_mode=2,  # persistent
                     priority=5
