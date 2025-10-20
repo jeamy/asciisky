@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from api.helpers import parse_time_param
 from api.cache_interpolation import load_comets_with_interpolation
 from api.computation import ts, eph
@@ -139,7 +139,7 @@ async def compute_comets_old(location_dict, dt_utc, max_comets):
     )
 
 @router.get("/comets")
-async def get_comets(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None, max_magnitude: float = None):
+async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None, max_magnitude: float = None):
     """Get comets with real MPC data and rise/set/transit times."""
     try:
         location_settings = settings.get_location()
@@ -178,16 +178,13 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             else:
                 # Cache-Miss: Triggere Comet-Worker
                 logger.warning(f"❌ Cache MISS - triggering comet worker for {dt_utc.isoformat()}")
-                # Starte Task im Hintergrund (fire-and-forget)
-                task = asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
-                # Wichtig: Task-Referenz behalten, damit sie nicht garbage-collected wird
-                task.add_done_callback(lambda t: logger.info(f"Comet worker task completed") if not t.exception() else logger.error(f"Comet worker task failed: {t.exception()}"))
+                # Starte Task als FastAPI Background Task (läuft NACH Response)
+                background_tasks.add_task(trigger_comet_worker, lat, lon, elevation, dt_utc)
                 comet_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load comets from cache: {e}")
             # Triggere trotzdem Comet-Worker
-            task = asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
-            task.add_done_callback(lambda t: logger.info(f"Comet worker task completed") if not t.exception() else logger.error(f"Comet worker task failed: {t.exception()}"))
+            background_tasks.add_task(trigger_comet_worker, lat, lon, elevation, dt_utc)
             comet_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}

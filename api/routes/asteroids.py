@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from api.helpers import parse_time_param, get_location_params
 from api.cache_interpolation import load_asteroids_with_interpolation
 from api.computation import LOADER, ts, eph
@@ -138,7 +138,7 @@ async def compute_asteroids_old(location_dict, dt_utc, max_magnitude):
 
 
 @router.get("/bright_asteroids")
-async def get_bright_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
+async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
@@ -173,16 +173,13 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             else:
                 # Cache-Miss: Triggere Asteroid-Worker
                 logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
-                # Starte Task im Hintergrund (fire-and-forget)
-                task = asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
-                # Wichtig: Task-Referenz behalten, damit sie nicht garbage-collected wird
-                task.add_done_callback(lambda t: logger.info(f"Asteroid worker task completed") if not t.exception() else logger.error(f"Asteroid worker task failed: {t.exception()}"))
+                # Starte Task als FastAPI Background Task (läuft NACH Response)
+                background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, dt_utc)
                 asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")
             # Triggere trotzdem Asteroid-Worker
-            task = asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
-            task.add_done_callback(lambda t: logger.info(f"Asteroid worker task completed") if not t.exception() else logger.error(f"Asteroid worker task failed: {t.exception()}"))
+            background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, dt_utc)
             asteroid_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
