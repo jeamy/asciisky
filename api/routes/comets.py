@@ -2,6 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param
 from api.cache_interpolation import load_comets_with_interpolation
+from api.computation import ts, eph
 import comets
 import settings
 import os
@@ -22,31 +23,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def trigger_rabbitmq_precompute_comets(lat, lon, elevation, dt_utc, hours_radius=12):
-    """Triggert RabbitMQ Background Tasks für Comet Precompute"""
+async def trigger_comet_worker(lat, lon, elevation, dt_utc):
+    """
+    Triggert Comet-Worker für On-Demand Berechnung
+    
+    Args:
+        lat, lon, elevation: Location
+        dt_utc: Zeit
+    """
     try:
-        publisher = get_task_publisher()
-        if not publisher:
-            logger.warning("TaskPublisher not available")
-            return
+        import pika
+        rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
         
-        location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        tasks = []
+        def publish_task():
+            params = pika.URLParameters(rabbitmq_url)
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
+            
+            # Stelle sicher dass Queue existiert
+            channel.queue_declare(queue='comet.compute', durable=True)
+            
+            # Task-Daten
+            task = {
+                'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                'time_bucket': dt_utc.isoformat(),
+                'magnitude': 14.0
+            }
+            
+            # Publiziere an comet.compute Queue
+            channel.basic_publish(
+                exchange='',
+                routing_key='comet.compute',
+                body=str(task),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # persistent
+                    priority=5
+                )
+            )
+            
+            connection.close()
+            logger.info(f"Published comet task to comet.compute queue")
         
-        for hour_offset in range(-hours_radius, hours_radius + 1):
-            time_bucket = dt_utc + timedelta(hours=hour_offset)
-            tasks.append({
-                'kind': 'comets',
-                'location': location,
-                'time_bucket': time_bucket.isoformat(),
-                'magnitude': 14.0,
-                'priority': 5
-            })
+        await asyncio.to_thread(publish_task)
         
-        await asyncio.to_thread(publisher.publish_batch, tasks)
-        logger.info(f"Published {len(tasks)} comet precompute tasks")
     except Exception as e:
-        logger.error(f"Failed to trigger comet precompute: {e}")
+        logger.error(f"Failed to trigger comet worker: {e}")
 
 
 async def compute_comets_rabbitmq(location_dict, dt_utc, max_magnitude):
@@ -132,34 +153,26 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         user_id = request.session.get('user_id', 'anonymous')
         use_rabbitmq_flag = use_rabbitmq_for('comets', user_id)
         
-        # Bei RabbitMQ: Cache-First + Background Tasks
-        if use_rabbitmq_flag:
-            logger.info(f"Using RabbitMQ architecture for comets: lat={lat}, lon={lon}")
-            try:
-                comet_list = load_comets_with_interpolation(
-                    lat, lon, elevation, dt_utc,
-                    bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
-                    ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
-                    use_postgres=True
-                )
-                
-                if isinstance(comet_list, list) and comet_list:
-                    logger.info(f"Cache hit for comets: {len(comet_list)} found")
-                else:
-                    logger.info("Cache miss - triggering RabbitMQ background task")
-                    asyncio.create_task(trigger_rabbitmq_precompute_comets(
-                        lat, lon, elevation, dt_utc, hours_radius=12
-                    ))
-                    comet_list = []
-            except Exception as e:
-                logger.warning(f"Cache read failed: {e}")
-                asyncio.create_task(trigger_rabbitmq_precompute_comets(
-                    lat, lon, elevation, dt_utc, hours_radius=12
-                ))
-                comet_list = []
-        else:
-            # RabbitMQ deaktiviert - sollte nicht passieren
-            logger.warning(f"RabbitMQ disabled for comets - returning empty")
+        # Cache-First Strategie mit asynchroner Berechnung
+        try:
+            comet_list = load_comets_with_interpolation(
+                lat, lon, elevation, dt_utc,
+                bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
+                ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
+                use_postgres=True
+            )
+            
+            if isinstance(comet_list, list) and comet_list:
+                logger.info(f"Cache hit for comets: {len(comet_list)} found")
+            else:
+                # Cache-Miss: Triggere Comet-Worker
+                logger.info("Cache miss - triggering comet worker")
+                asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
+                comet_list = []  # Gib zurück was im Cache ist (leer)
+        except Exception as e:
+            logger.error(f"Failed to load comets from cache: {e}")
+            # Triggere trotzdem Comet-Worker
+            asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
             comet_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}

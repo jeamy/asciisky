@@ -2,6 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
 from api.cache_interpolation import load_asteroids_with_interpolation
+from api.computation import LOADER, ts, eph
 import bright_asteroids
 import settings
 import asyncio
@@ -22,48 +23,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def trigger_rabbitmq_precompute(lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12):
+async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
     """
-    Triggert RabbitMQ Background Tasks für Precompute
+    Triggert Asteroid-Worker für On-Demand Berechnung
     
     Args:
         lat, lon, elevation: Location
-        dt_utc: Zentrale Zeit
-        kinds: Liste von Typen ('asteroids', 'comets', etc.)
-        hours_radius: Radius in Stunden um dt_utc
+        dt_utc: Zeit
     """
     try:
-        publisher = get_task_publisher()
-        if not publisher:
-            logger.warning("TaskPublisher not available, skipping RabbitMQ precompute")
-            return
+        import pika
+        rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
         
-        location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        
-        # Erstelle Tasks für Zeitfenster (±hours_radius)
-        tasks = []
-        for hour_offset in range(-hours_radius, hours_radius + 1):
-            time_bucket = dt_utc + timedelta(hours=hour_offset)
-            time_bucket_str = time_bucket.isoformat()
+        def publish_task():
+            params = pika.URLParameters(rabbitmq_url)
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
             
-            for kind in kinds:
-                # Magnitude basierend auf Kind
-                magnitude = 20.0 if kind == 'asteroids' else 14.0 if kind == 'comets' else None
-                
-                tasks.append({
-                    'kind': kind,
-                    'location': location,
-                    'time_bucket': time_bucket_str,
-                    'magnitude': magnitude,
-                    'priority': 5  # Normal priority
-                })
+            # Stelle sicher dass Queue existiert
+            channel.queue_declare(queue='asteroid.compute', durable=True)
+            
+            # Task-Daten
+            task = {
+                'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                'time_bucket': dt_utc.isoformat(),
+                'magnitude': 20.0
+            }
+            
+            # Publiziere an asteroid.compute Queue
+            channel.basic_publish(
+                exchange='',
+                routing_key='asteroid.compute',
+                body=str(task),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # persistent
+                    priority=5
+                )
+            )
+            
+            connection.close()
+            logger.info(f"Published asteroid task to asteroid.compute queue")
         
-        # Publiziere Tasks als Batch
-        await asyncio.to_thread(publisher.publish_batch, tasks)
-        logger.info(f"Published {len(tasks)} precompute tasks to RabbitMQ")
+        await asyncio.to_thread(publish_task)
         
     except Exception as e:
-        logger.error(f"Failed to trigger RabbitMQ precompute: {e}")
+        logger.error(f"Failed to trigger asteroid worker: {e}")
 
 
 async def compute_asteroids_rabbitmq(location_dict, dt_utc, max_magnitude):
@@ -144,34 +148,26 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         user_id = request.session.get('user_id', 'anonymous')
         use_rabbitmq_flag = use_rabbitmq_for('asteroids', user_id)
         
-        # Bei RabbitMQ: Cache-First + Background Tasks (wie bei Kometen)
-        if use_rabbitmq_flag:
-            logger.info(f"Using RabbitMQ architecture for asteroids: lat={lat}, lon={lon}")
-            try:
-                asteroid_list = load_asteroids_with_interpolation(
-                    lat, lon, elevation, dt_utc,
-                    bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_postgres=True
-                )
-                
-                if isinstance(asteroid_list, list) and asteroid_list:
-                    logger.info(f"Cache hit for asteroids: {len(asteroid_list)} found")
-                else:
-                    logger.info("Cache miss - triggering RabbitMQ background task")
-                    asyncio.create_task(trigger_rabbitmq_precompute(
-                        lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
-                    ))
-                    asteroid_list = []
-            except Exception as e:
-                logger.warning(f"Cache read failed: {e}")
-                asyncio.create_task(trigger_rabbitmq_precompute(
-                    lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
-                ))
-                asteroid_list = []
-        else:
-            # RabbitMQ deaktiviert - sollte nicht passieren
-            logger.warning(f"RabbitMQ disabled for asteroids - returning empty")
+        # Cache-First Strategie mit asynchroner Berechnung
+        try:
+            asteroid_list = load_asteroids_with_interpolation(
+                lat, lon, elevation, dt_utc,
+                bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
+                ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
+                use_postgres=True
+            )
+            
+            if isinstance(asteroid_list, list) and asteroid_list:
+                logger.info(f"Cache hit for asteroids: {len(asteroid_list)} found")
+            else:
+                # Cache-Miss: Triggere Asteroid-Worker
+                logger.info("Cache miss - triggering asteroid worker")
+                asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
+                asteroid_list = []  # Gib zurück was im Cache ist (leer)
+        except Exception as e:
+            logger.error(f"Failed to load asteroids from cache: {e}")
+            # Triggere trotzdem Asteroid-Worker
+            asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
             asteroid_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
