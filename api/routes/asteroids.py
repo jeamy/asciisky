@@ -151,6 +151,7 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
         
         # Cache-First Strategie mit asynchroner Berechnung
         try:
+            logger.info(f"Checking cache for asteroids: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
             asteroid_list = load_asteroids_with_interpolation(
                 lat, lon, elevation, dt_utc,
                 bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
@@ -159,10 +160,10 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             )
             
             if isinstance(asteroid_list, list) and asteroid_list:
-                logger.info(f"Cache hit for asteroids: {len(asteroid_list)} found")
+                logger.info(f"✅ Cache HIT for asteroids: {len(asteroid_list)} found")
             else:
                 # Cache-Miss: Triggere Asteroid-Worker
-                logger.info("Cache miss - triggering asteroid worker")
+                logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
                 asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
                 asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:

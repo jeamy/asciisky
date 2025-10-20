@@ -156,6 +156,7 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
         
         # Cache-First Strategie mit asynchroner Berechnung
         try:
+            logger.info(f"Checking cache for comets: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
             comet_list = load_comets_with_interpolation(
                 lat, lon, elevation, dt_utc,
                 bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
@@ -164,10 +165,10 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             )
             
             if isinstance(comet_list, list) and comet_list:
-                logger.info(f"Cache hit for comets: {len(comet_list)} found")
+                logger.info(f"✅ Cache HIT for comets: {len(comet_list)} found")
             else:
                 # Cache-Miss: Triggere Comet-Worker
-                logger.info("Cache miss - triggering comet worker")
+                logger.warning(f"❌ Cache MISS - triggering comet worker for {dt_utc.isoformat()}")
                 asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
                 comet_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
