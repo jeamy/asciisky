@@ -109,7 +109,7 @@ ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
 
 **Was passiert beim Setup?**
 - ✅ Du erstellst `.env` **lokal** (auf deinem Entwicklungsrechner)
-- ✅ Worker-Server: `git clone https://github.com/jeamy/asciisky.git` nach `~/docker/asciisky`
+- ✅ Worker-Server: `git clone https://github.com/jeamy/asciisky.git` nach `~/asciisky`
 - ✅ `setup-production.sh` kopiert `.env` **automatisch** auf alle Server
 - ✅ Alle Server verwenden die **gleichen Passwörter** (wichtig für Verbindungen!)
 
