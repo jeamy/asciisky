@@ -70,10 +70,11 @@ setup_host() {
         echo "📦 Building Docker image..."
         docker compose -f "$COMPOSE_FILE" build || error_exit "Build failed on $HOST"
         
-        echo "🚀 Starting services..."
+        echo "🚀 Starting services with worker scaling..."
+        # Verwende Env-Variablen für Worker-Anzahl (Fallback auf Defaults in docker-compose.yml)
         docker compose -f "$COMPOSE_FILE" up -d || error_exit "Startup failed on $HOST"
         
-        success "Services started on $HOST"
+        success "Services started on $HOST (Worker scaling via .env)"
     else
         # Remote Setup
         echo "📤 Copying files to $HOST..."
@@ -92,7 +93,7 @@ setup_host() {
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
         
-        success "Services started on $HOST"
+        success "Services started on $HOST (Worker scaling via .env)"
     fi
     
     echo ""

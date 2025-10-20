@@ -1,149 +1,10 @@
 # Docker Compose für rabbit-c.eibrain.org
-# Asteroid Worker 3+4, Comet Worker 3+4
+# Skalierbare Worker für Precompute, Asteroid, Comet
 
 services:
-  # ===== Asteroid Workers =====
-  asteroid-worker-3:
+  # ===== Precompute Worker (skalierbar) =====
+  precompute_worker:
     image: asciisky-web:latest
-    container_name: asciisky-asteroid-worker-3
-    command: ["python", "workers/asteroid_worker.py"]
-    volumes:
-      - ./cache:/app/cache
-      - ./data:/app/data
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - WORKER_ID=rabbit-c-asteroid-3
-      - LOG_LEVEL=info
-      
-      # PostgreSQL Configuration (Remote)
-      - POSTGRES_HOST=asciisky.eibrain.org
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      
-      # RabbitMQ Configuration (Remote)
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
-      - RABBITMQ_PREFETCH_COUNT=1
-      - RABBITMQ_HEARTBEAT=60
-      
-      # Magnitude Limits
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
-      
-    restart: unless-stopped
-    networks:
-      - worker-net
-
-  asteroid-worker-4:
-    image: asciisky-web:latest
-    container_name: asciisky-asteroid-worker-4
-    command: ["python", "workers/asteroid_worker.py"]
-    volumes:
-      - ./cache:/app/cache
-      - ./data:/app/data
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - WORKER_ID=rabbit-c-asteroid-4
-      - LOG_LEVEL=info
-      
-      # PostgreSQL Configuration (Remote)
-      - POSTGRES_HOST=asciisky.eibrain.org
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      
-      # RabbitMQ Configuration (Remote)
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
-      - RABBITMQ_PREFETCH_COUNT=1
-      - RABBITMQ_HEARTBEAT=60
-      
-      # Magnitude Limits
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
-      
-    restart: unless-stopped
-    networks:
-      - worker-net
-
-  # ===== Comet Workers =====
-  comet-worker-3:
-    image: asciisky-web:latest
-    container_name: asciisky-comet-worker-3
-    command: ["python", "workers/comet_worker.py"]
-    volumes:
-      - ./cache:/app/cache
-      - ./data:/app/data
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - WORKER_ID=rabbit-c-comet-3
-      - LOG_LEVEL=info
-      
-      # PostgreSQL Configuration (Remote)
-      - POSTGRES_HOST=asciisky.eibrain.org
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      
-      # RabbitMQ Configuration (Remote)
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
-      - RABBITMQ_PREFETCH_COUNT=1
-      - RABBITMQ_HEARTBEAT=60
-      
-      # Magnitude Limits
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
-      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
-      
-    restart: unless-stopped
-    networks:
-      - worker-net
-
-  comet-worker-4:
-    image: asciisky-web:latest
-    container_name: asciisky-comet-worker-4
-    command: ["python", "workers/comet_worker.py"]
-    volumes:
-      - ./cache:/app/cache
-      - ./data:/app/data
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - WORKER_ID=rabbit-c-comet-4
-      - LOG_LEVEL=info
-      
-      # PostgreSQL Configuration (Remote)
-      - POSTGRES_HOST=asciisky.eibrain.org
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      
-      # RabbitMQ Configuration (Remote)
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
-      - RABBITMQ_PREFETCH_COUNT=1
-      - RABBITMQ_HEARTBEAT=60
-      
-      # Magnitude Limits
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
-      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
-      
-    restart: unless-stopped
-    networks:
-      - worker-net
-
-  # ===== Precompute Worker =====
-  precompute-worker:
-    image: asciisky-web:latest
-    container_name: asciisky-precompute-worker-c
     command: ["python", "workers/precompute_worker.py"]
     volumes:
       - ./cache:/app/cache
@@ -151,31 +12,81 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - WORKER_ID=rabbit-c-precompute-1
-      
-      # PostgreSQL Configuration (Remote)
       - POSTGRES_HOST=asciisky.eibrain.org
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
       - POSTGRES_USER=asciisky
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      
-      # RabbitMQ Configuration (Remote)
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
-      
-      # Magnitude Limits
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
       - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
       - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
       - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
       - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
-      
     restart: unless-stopped
     networks:
       - worker-net
+    deploy:
+      replicas: ${PRECOMPUTE_WORKERS_C:-4}
+
+  # ===== Asteroid Worker (skalierbar) =====
+  asteroid_worker:
+    image: asciisky-web:latest
+    command: ["python", "workers/asteroid_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - LOG_LEVEL=info
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
+    restart: unless-stopped
+    networks:
+      - worker-net
+    deploy:
+      replicas: ${ASTEROID_WORKERS_C:-2}
+
+  # ===== Comet Worker (skalierbar) =====
+  comet_worker:
+    image: asciisky-web:latest
+    command: ["python", "workers/comet_worker.py"]
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - LOG_LEVEL=info
+      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=asciisky
+      - POSTGRES_USER=asciisky
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_PREFETCH_COUNT=1
+      - RABBITMQ_HEARTBEAT=60
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
+      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
+    restart: unless-stopped
+    networks:
+      - worker-net
+    deploy:
+      replicas: ${COMET_WORKERS_C:-2}
 
 networks:
   worker-net:

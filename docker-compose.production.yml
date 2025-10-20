@@ -160,10 +160,9 @@ services:
     networks:
       - asciisky-net
 
-  # ===== Precompute Worker (Hauptserver) =====
+  # ===== Precompute Worker (Hauptserver, skalierbar) =====
   precompute_worker:
     image: asciisky-web:latest
-    container_name: asciisky-precompute-worker
     command: ["python", "workers/precompute_worker.py"]
     volumes:
       - ./cache:/app/cache
@@ -171,7 +170,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - WORKER_ID=main-precompute-1
       
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
@@ -185,6 +183,14 @@ services:
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
       
+      # Magnitude Limits
+      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
+      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
+      
     depends_on:
       postgres:
         condition: service_healthy
@@ -193,6 +199,8 @@ services:
     restart: unless-stopped
     networks:
       - asciisky-net
+    deploy:
+      replicas: ${PRECOMPUTE_WORKERS:-4}  # Anzahl aus .env
 
 volumes:
   postgres_data:

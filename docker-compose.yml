@@ -121,7 +121,7 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
     restart: unless-stopped
 
-  # ===== Precompute Worker =====
+  # ===== Precompute Worker (skalierbar mit --scale precompute_worker=N) =====
   precompute_worker:
     image: asciisky-worker
     build: .
@@ -131,7 +131,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - WORKER_ID=local-precompute-1
+      # WORKER_ID wird automatisch von Docker gesetzt (Container-Name)
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -154,10 +154,12 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      replicas: ${PRECOMPUTE_WORKERS:-4}  # Anzahl aus .env (Default: 4)
 
-  # ===== RABBITMQ WORKER =====
+  # ===== RABBITMQ WORKER (skalierbar) =====
   
-  asteroid-worker-1:
+  asteroid-worker:
     image: asciisky-worker
     build: .
     command: ["python", "workers/asteroid_worker.py"]
@@ -172,7 +174,6 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - WORKER_ID=asteroid-worker-1
       - LOG_LEVEL=info
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
       - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
@@ -183,35 +184,10 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      replicas: ${ASTEROID_WORKERS:-2}  # Anzahl aus .env (Default: 2)
   
-  asteroid-worker-2:
-    image: asciisky-worker
-    build: .
-    command: ["python", "workers/asteroid_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
-      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - WORKER_ID=asteroid-worker-2
-      - LOG_LEVEL=info
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-  
-  comet-worker-1:
+  comet-worker:
     image: asciisky-worker
     build: .
     command: ["python", "workers/comet_worker.py"]
@@ -226,7 +202,6 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - WORKER_ID=comet-worker-1
       - LOG_LEVEL=info
       - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
       - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
@@ -237,33 +212,8 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
-  
-  comet-worker-2:
-    image: asciisky-worker
-    build: .
-    command: ["python", "workers/comet_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
-      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - WORKER_ID=comet-worker-2
-      - LOG_LEVEL=info
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
-      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
+    deploy:
+      replicas: ${COMET_WORKERS:-2}  # Anzahl aus .env (Default: 2)
   
 
 volumes:
