@@ -1,8 +1,17 @@
 # Docker Compose für rabbit-b.eibrain.org
-# Skalierbare Worker für Precompute, Asteroid, Comet
+# Worker für Precompute, Asteroid, Comet
+#
+# Worker-Typen:
+# - Precompute: Vorausberechnung für bekannte Locations (stündlich)
+# - Asteroid/Comet: On-Demand für API-Requests (neue Locations, Cache-Miss, etc.)
+#
+# Skalierung via .env:
+# PRECOMPUTE_WORKERS_B=4 (default)
+# ASTEROID_WORKERS_B=2 (default)
+# COMET_WORKERS_B=2 (default)
 
 services:
-  # ===== Precompute Worker (skalierbar) =====
+  # ===== Precompute Worker =====
   precompute_worker:
     image: asciisky-web:latest
     build: .
@@ -31,10 +40,8 @@ services:
     restart: unless-stopped
     networks:
       - worker-net
-    deploy:
-      replicas: ${PRECOMPUTE_WORKERS_B:-4}
 
-  # ===== Asteroid Worker (skalierbar) =====
+  # ===== Asteroid Worker =====
   asteroid_worker:
     image: asciisky-web:latest
     build: .
@@ -61,10 +68,8 @@ services:
     restart: unless-stopped
     networks:
       - worker-net
-    deploy:
-      replicas: ${ASTEROID_WORKERS_B:-2}
 
-  # ===== Comet Worker (skalierbar) =====
+  # ===== Comet Worker =====
   comet_worker:
     image: asciisky-web:latest
     build: .
@@ -91,8 +96,6 @@ services:
     restart: unless-stopped
     networks:
       - worker-net
-    deploy:
-      replicas: ${COMET_WORKERS_B:-2}
 
 networks:
   worker-net:

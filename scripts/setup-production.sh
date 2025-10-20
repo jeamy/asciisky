@@ -94,7 +94,15 @@ setup_host() {
         
         echo "🐳 Building and starting on remote host..."
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
-        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
+        
+        # Worker-Skalierung via --scale
+        if [[ "$COMPOSE_FILE" == *"worker-b"* ]]; then
+            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_B:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_B:-2} --scale comet_worker=\${COMET_WORKERS_B:-2}" || error_exit "Startup failed on $HOST"
+        elif [[ "$COMPOSE_FILE" == *"worker-c"* ]]; then
+            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_C:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_C:-2} --scale comet_worker=\${COMET_WORKERS_C:-2}" || error_exit "Startup failed on $HOST"
+        else
+            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
+        fi
         
         success "Services started on $HOST (Worker scaling via .env)"
     fi

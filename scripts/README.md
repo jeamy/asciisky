@@ -49,11 +49,13 @@ Automatisierte Setup- und Deployment-Skripte für ASCII Sky.
 
 **Was es macht:**
 - ✅ Deployed auf asciisky.eibrain.org (Hauptserver: Web, PostgreSQL, RabbitMQ, 4 Precompute Workers)
+- ✅ Cloned Repository via HTTPS auf Worker-Server (falls noch nicht vorhanden)
 - ✅ Deployed auf rabbit-b.eibrain.org (Worker-Server B: 4 Precompute + 2 Asteroid + 2 Comet Workers)
 - ✅ Deployed auf rabbit-c.eibrain.org (Worker-Server C: 4 Precompute + 2 Asteroid + 2 Comet Workers)
 - ✅ Richtet PostgreSQL ein (automatisch via init-postgres.sql)
 - ✅ Richtet RabbitMQ Queues ein (automatisch)
 - ✅ Kopiert .env automatisch auf alle Server
+- ✅ Skaliert Worker via `--scale` Parameter
 
 **Verwendung:**
 ```bash
@@ -390,6 +392,29 @@ git clone https://github.com/jeamy/asciisky.git
 ```
 
 Worker-Server brauchen **keine** GitHub SSH-Keys, da das Repository öffentlich ist.
+
+### Wie skaliere ich Worker manuell?
+
+**Auf Worker-Servern:**
+```bash
+# Worker-Server B
+ssh rabbit-b.eibrain.org
+cd ~/asciisky
+docker compose -f docker-compose.worker-b.yml up -d \
+  --scale precompute_worker=8 \
+  --scale asteroid_worker=4 \
+  --scale comet_worker=4
+
+# Worker-Server C
+ssh rabbit-c.eibrain.org
+cd ~/asciisky
+docker compose -f docker-compose.worker-c.yml up -d \
+  --scale precompute_worker=8 \
+  --scale asteroid_worker=4 \
+  --scale comet_worker=4
+```
+
+**Wichtig:** Die `--scale` Parameter überschreiben die `.env` Werte!
 
 ### Kann ich verschiedene .env für jeden Server haben?
 

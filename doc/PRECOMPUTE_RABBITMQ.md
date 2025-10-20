@@ -40,6 +40,33 @@ Default: 12 Worker total (4 pro Server)
 Skalierbar via .env: PRECOMPUTE_WORKERS, PRECOMPUTE_WORKERS_B/C
 ```
 
+**Wichtig:** Precompute-Worker sind für **Vorausberechnung** zuständig. Asteroid/Comet-Worker sind für **On-Demand API-Requests** (siehe unten).
+
+---
+
+## 🔄 Worker-Typen
+
+### 1. Precompute Worker (aktiv)
+- **Zweck:** Vorausberechnung für bekannte Locations
+- **Queue:** `precompute.tasks`
+- **Trigger:** Coordinator (stündlich)
+- **Berechnet:** Asteroids + Comets für alle Locations
+- **Status:** ✅ Immer aktiv
+
+### 2. Asteroid/Comet Worker (on-demand)
+- **Zweck:** On-Demand Berechnungen für API-Requests
+- **Queues:** `asteroid.compute`, `comet.compute`
+- **Trigger:** API-Request (wenn Location nicht im Cache)
+- **Feature Flag:** `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
+- **Status:** ✅ Aktiv (warten auf API-Requests)
+- **Verwendung:** Für unbekannte Locations, Cache-Miss, oder Zeiten außerhalb Precompute-Fenster
+
+**Warum sind Asteroid/Comet-Worker manchmal idle?**
+- Sie warten auf API-Requests für **nicht-precomputed** Locations
+- Precompute deckt nur bekannte Locations + 720h Zeitfenster ab
+- Sobald ein Benutzer eine andere Location/Zeit anfragt, werden sie aktiv
+- **Wichtig:** Diese Worker MÜSSEN laufen, sonst funktionieren API-Requests für neue Locations nicht!
+
 ---
 
 ## ✅ Vorteile
@@ -169,6 +196,33 @@ PRECOMPUTE_WORKERS_C=8
 ```
 
 **Performance:** ~5 min für 720h × 10 Locations
+
+---
+
+## 💡 Brauche ich Asteroid/Comet-Worker?
+
+**Kurze Antwort:** Ja! Sie sind wichtig für API-Requests.
+
+**Lange Antwort:**
+
+### Precompute-Worker (Vorausberechnung)
+- Berechnen bekannte Locations im Voraus (720h Fenster)
+- Speichern in PostgreSQL Cache
+- Laufen stündlich automatisch
+- **Abdeckung:** Nur Locations in `precompute_locations.json`
+
+### Asteroid/Comet-Worker (On-Demand)
+- Berechnen API-Requests für:
+  - ✅ Neue/unbekannte Locations
+  - ✅ Zeiten außerhalb des 720h Fensters
+  - ✅ Cache-Miss (z.B. nach Neustart)
+- Feature Flags: `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
+- **Wichtig:** Ohne diese Worker funktionieren API-Requests für nicht-precomputed Daten nicht!
+
+**Empfehlung:** 
+- **Minimum:** 2 Asteroid + 2 Comet Worker pro Server (Default)
+- **Optimal:** 4+ Worker pro Server bei hoher Last
+- **Idle ist normal:** Worker warten auf API-Requests, das ist OK!
 
 ---
 
