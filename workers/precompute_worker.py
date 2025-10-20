@@ -90,10 +90,10 @@ def process_task(task: Dict[str, Any]) -> bool:
         if kind == 'asteroids':
             # Lade und berechne Asteroiden
             from skyfield.api import Loader
-            from data_paths import DATA_DIR, DE421_PATH
+            from data_paths import DATA_DIR
             loader = Loader(str(DATA_DIR))
             ts = loader.timescale()
-            eph = loader(str(DE421_PATH))
+            eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
             
             # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
@@ -136,10 +136,10 @@ def process_task(task: Dict[str, Any]) -> bool:
         elif kind == 'comets':
             # Lade und berechne Kometen
             from skyfield.api import Loader
-            from data_paths import DATA_DIR, DE421_PATH
+            from data_paths import DATA_DIR
             loader = Loader(str(DATA_DIR))
             ts = loader.timescale()
-            eph = loader(str(DE421_PATH))
+            eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
             
             # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)

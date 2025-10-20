@@ -9,7 +9,7 @@ from data_paths import DATA_DIR, DE421_PATH
 # Load Skyfield data
 LOADER = Loader(str(DATA_DIR))
 ts = LOADER.timescale()
-eph = LOADER(str(DE421_PATH))
+eph = LOADER('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
 
 # Celestial bodies and their symbols
 CELESTIAL_BODIES = {
