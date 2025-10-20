@@ -66,50 +66,54 @@ def update_asteroid_data():
     """Download and process asteroid data"""
     logger.info("Updating asteroid data...")
     try:
+        import gzip
+        import pickle
+        import pandas as pd
+        from pathlib import Path
+        from skyfield.data import mpc
+        from db_utils import store_asteroid_dataframe, get_database_stats
         import bright_asteroids
-        from db_utils import get_database_stats
         
-        # Force download and reload
+        # Download latest data
+        mpcorb_file = Path('data/cache/MPCORB.DAT.gz')
         if bright_asteroids.download_mpcorb_file():
             logger.info("✓ Downloaded latest MPCORB.DAT")
-            
-            # Load and store in database
-            import gzip
-            from skyfield.data import mpc
-            import pandas as pd
-            from db_utils import store_asteroid_dataframe
-            
-            with gzip.open(bright_asteroids.MPCORB_FILE, 'rb') as f:
-                df = mpc.load_mpcorb_dataframe(f)
-            
-            df = df.iloc[:bright_asteroids.MAX_ASTEROIDS]
-            
-            # Convert types
-            numeric_cols = [
-                'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
-                'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
-                'mean_daily_motion_degrees', 'semimajor_axis_au'
-            ]
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-            
-            # Store in database
-            count = store_asteroid_dataframe(df)
-            logger.info(f"✓ Stored {count} asteroids in database")
-            
-            # Verify
-            stats = get_database_stats()
-            logger.info(f"✓ Database now contains {stats['asteroids_count']} asteroids")
-            return True
         else:
             logger.error("✗ Failed to download asteroid data")
             return False
+        
+        # Load and parse
+        with gzip.open(mpcorb_file, 'rb') as f:
+            df = mpc.load_mpcorb_dataframe(f)
+        
+        logger.info(f"✓ Loaded {len(df)} asteroids from MPCORB.DAT")
+        
+        # Convert types
+        numeric_cols = [
+            'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
+            'longitude_of_ascending_node_degrees', 'inclination_degrees', 'eccentricity',
+            'mean_daily_motion_degrees', 'semimajor_axis_au'
+        ]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
+        
+        # Store in database (as pickle)
+        df_pickle = pickle.dumps(df)
+        store_asteroid_dataframe(df_pickle)
+        logger.info(f"✓ Stored asteroid DataFrame in PostgreSQL")
+        
+        # Verify
+        stats = get_database_stats()
+        logger.info(f"✓ Database now contains {stats['asteroids_count']} asteroids")
+        return True
             
     except Exception as e:
         logger.error(f"✗ Error updating asteroid data: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -117,18 +121,20 @@ def update_comet_data():
     """Download and process comet data"""
     logger.info("Updating comet data...")
     try:
-        import comets
+        import pickle
         from db_utils import get_database_stats, store_comet_dataframe
+        import comets
         
-        # Force reload from file
+        # Load from file (comets.py handles download automatically)
         df = comets.load_comet_dataframe(use_cache=False)
         
         if df is not None and not df.empty:
-            logger.info(f"✓ Loaded {len(df)} comets from file")
+            logger.info(f"✓ Loaded {len(df)} comets from CometEls.txt")
             
-            # Store in database
-            count = store_comet_dataframe(df)
-            logger.info(f"✓ Stored {count} comets in database")
+            # Store in database (as pickle)
+            df_pickle = pickle.dumps(df)
+            store_comet_dataframe(df_pickle)
+            logger.info(f"✓ Stored comet DataFrame in PostgreSQL")
             
             # Verify
             stats = get_database_stats()
@@ -140,6 +146,8 @@ def update_comet_data():
             
     except Exception as e:
         logger.error(f"✗ Error updating comet data: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -200,10 +208,37 @@ def run_update_loop():
             time.sleep(CHECK_INTERVAL_SECONDS)
 
 
+def check_initial_data():
+    """Check if database has data, if not perform initial update"""
+    try:
+        from db_utils import get_asteroid_dataframe, get_comet_dataframe
+        
+        asteroid_df = get_asteroid_dataframe()
+        comet_df = get_comet_dataframe()
+        
+        if not asteroid_df and not comet_df:
+            logger.info("=" * 80)
+            logger.info("Database is empty - performing initial data load")
+            logger.info("=" * 80)
+            perform_nightly_update()
+            return True
+        else:
+            logger.info("Database has data - skipping initial load")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not check database status: {e}")
+        logger.info("Performing initial data load to be safe")
+        perform_nightly_update()
+        return True
+
+
 if __name__ == "__main__":
     # Allow manual trigger
     if len(sys.argv) > 1 and sys.argv[1] == "--now":
         logger.info("Manual update triggered")
         perform_nightly_update()
     else:
+        # Check if initial data load is needed
+        check_initial_data()
+        # Then start regular update loop
         run_update_loop()

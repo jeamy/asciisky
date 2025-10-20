@@ -2,7 +2,12 @@
 
 ## 🎯 Zweck
 
-Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** und speichert sie im Cache (SQLite/PostgreSQL). Dadurch sind API-Anfragen **sofort schnell**, ohne auf Berechnungen warten zu müssen.
+Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** und speichert sie im Cache (PostgreSQL). Dadurch sind API-Anfragen **sofort schnell**, ohne auf Berechnungen warten zu müssen.
+
+**Architektur:**
+- **Coordinator** (Hauptserver): Erstellt Tasks und publiziert in RabbitMQ Queue
+- **Worker** (alle Server): Holen Tasks aus Queue, berechnen, speichern in PostgreSQL
+- **Skalierbar**: Mehr Worker = schneller fertig (via `.env`)
 
 ---
 
@@ -10,14 +15,28 @@ Der Precompute-Worker berechnet Asteroid- und Kometen-Positionen **im Voraus** u
 
 ### Environment Variables
 
+**Worker-Skalierung (via .env):**
+```bash
+PRECOMPUTE_WORKERS=4        # Hauptserver
+PRECOMPUTE_WORKERS_B=4      # Worker-B
+PRECOMPUTE_WORKERS_C=4      # Worker-C
+```
+
+**Coordinator Environment Variables:**
+
 | Variable | Default | Beschreibung |
 |----------|---------|--------------|
-| `ASCII_SKY_PRECOMPUTE_HOURS` | 144 | Zeitfenster in Stunden (720 = 30 Tage) |
-| `ASCII_SKY_PRECOMPUTE_KINDS` | "asteroids,comets" | Welche Objekte berechnen |
-| `ASCII_SKY_PRECOMPUTE_WORKERS` | 3 | Parallele Worker-Threads |
-| `ASCII_SKY_ADAPTIVE_WORKERS` | 1 | Adaptive Worker-Skalierung (0=aus, 1=an) |
-| `ASCII_SKY_RETENTION_DAYS` | 0 | Cache-Aufbewahrung in Tagen (0=unbegrenzt) |
-| `ASCII_SKY_WORKER_RUN_ONCE` | 0 | Nur einmal ausführen und beenden (1=ja) |
+| `ASCII_SKY_PRECOMPUTE_HOURS` | 720 | Zeitfenster in Stunden (720 = 30 Tage) |
+| `PRECOMPUTE_COORDINATOR_INTERVAL` | 3600 | Wie oft Tasks erstellen (Sekunden) |
+| `RABBITMQ_URL` | amqp://... | RabbitMQ Verbindung |
+
+**Worker Environment Variables:**
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `RABBITMQ_URL` | amqp://... | RabbitMQ Verbindung |
+| `RABBITMQ_PREFETCH_COUNT` | 1 | Wie viele Tasks gleichzeitig |
+| `POSTGRES_HOST` | postgres | PostgreSQL Server |
 
 ### Aktuelle Konfiguration (docker-compose.yml)
 
@@ -81,14 +100,14 @@ Der Worker berechnet für folgende Standorte:
 
 ### 4. Cache-Speicherung
 
-**SQLite (Standard):**
+**PostgreSQL (Standard):**
 - Tabelle: `cached_positions`
 - Location Key: `lat+48.2082_lon+16.3738_el+0170`
 - Time Bucket: `20251019T12` (6-Stunden-Buckets)
 - TTL: 6 Stunden
 
 **PostgreSQL (Production):**
-- Gleiche Struktur wie SQLite
+- Gleiche Struktur wie PostgreSQL
 - Multi-Host-fähig
 - Bessere Concurrency
 
@@ -130,7 +149,7 @@ ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
    - Gesamt: 720h × 150 = **108.000 Berechnungen**
 
 4. **Speicherung:**
-   - SQLite: `cached_positions` Tabelle
+   - PostgreSQL: `cached_positions` Tabelle
    - Jede Position als BLOB (pickle-serialisiert)
 
 5. **Cleanup (nach 7 Tagen):**
@@ -154,7 +173,7 @@ ASCII_SKY_PRECOMPUTE_KINDS=asteroids,comets
 - Garbage Collection nach jedem Batch
 
 **Disk:**
-- SQLite: ~50-100 MB für 30 Tage Cache
+- PostgreSQL: ~50-100 MB für 30 Tage Cache
 - PostgreSQL: Ähnlich, aber besser komprimiert
 
 ### Durchsatz
@@ -189,7 +208,7 @@ AsciiSky precompute worker starting...
   horizon_hours=720
   max_workers=3
   adaptive_workers=True
-  SQLite database: 150 asteroids, 45 comets
+  PostgreSQL database: 150 asteroids, 45 comets
   Database size: 85.3 MB
 
 Precompute sweep start: 1 locations, 7+713 hours, kinds=['asteroids', 'comets']
@@ -204,7 +223,7 @@ Sleeping 3542s until next hour...
 
 ### Cache-Statistiken
 
-**SQLite:**
+**PostgreSQL:**
 ```bash
 docker exec asciisky-precompute-worker python -c "
 from db_utils import get_database_stats
@@ -376,7 +395,7 @@ docker restart asciisky-precompute-worker
 | **Priorisierung** | High: 0-6h, Low: 7-720h |
 | **Worker** | 3 (adaptiv 1-6) |
 | **Retention** | 7 Tage |
-| **Cache** | SQLite/PostgreSQL |
+| **Cache** | PostgreSQL/PostgreSQL |
 | **Speicher** | ~50-100 MB für 30 Tage |
 
 **Status:** ✅ Aktiv in `docker-compose.yml`

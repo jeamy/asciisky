@@ -11,6 +11,7 @@ from skyfield import almanac
 import os
 import time
 import logging
+import pickle
 from datetime import datetime, timedelta, timezone
 import gzip
 import urllib.request
@@ -27,7 +28,7 @@ from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
-from db_utils import get_db_connection, get_comets_by_magnitude, store_comet_dataframe, store_comet_positions, get_comet_positions
+from db_utils import get_db_connection, store_comet_dataframe, store_comet_positions, get_comet_positions
 from pathlib import Path
 from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
@@ -54,9 +55,8 @@ COMET_DF_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 MAX_COMETS_DEFAULT = 1000
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
-COMET_USE_SQLITE = True
 GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
-COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '50'))
+COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '300'))
 
 
 # Photometric filters (align with bright_asteroids thresholds)
@@ -324,8 +324,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         _comet_df_cache = comets
         _comet_df_timestamp = _now()
         
-        # SQLite only
-        logger.debug(f"Loaded {len(comets)} comets from MPC (stored in SQLite).")
+        logger.debug(f"Loaded {len(comets)} comets from MPC (stored in PostgreSQL).")
         return _comet_df_cache
     except Exception as e:
         logger.error(f"Error loading comet data: {e}")
@@ -427,47 +426,34 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
     # Per-location/time-bucket cache for final comet list (bucket based on simulated time if provided)
     if use_cache:
-        if COMET_USE_SQLITE:
-            # Try SQLite cache first
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
-            
-            try:
-                from db_utils import get_comet_positions
-                cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
-                if cached_positions:
-                    logger.debug(f"Loading SQLite comet cache for {loc_key}/{time_bucket}")
-                    return cached_positions[:max_comets]
-            except Exception as e:
-                logger.debug(f"SQLite comet cache failed: {e}")
-        
-    # Load comet dataframe - PREFER SQLite database over file
-    df = None
-    if COMET_USE_SQLITE:
+        # Try PostgreSQL cache first
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
         try:
-            from db_utils import load_comets_dataframe_from_db
-            df = load_comets_dataframe_from_db(max_h_magnitude=MAX_ABSOLUTE_MAGNITUDE)
-            if df is not None and not df.empty:
-                print(f"Loaded {len(df)} comets from SQLite database")
+            from db_utils import get_comet_positions
+            cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
+            if cached_positions:
+                logger.debug(f"Loading PostgreSQL comet cache for {loc_key}/{time_bucket}")
+                return cached_positions[:max_comets]
         except Exception as e:
-            print(f"Failed to load from SQLite, falling back to file: {e}")
-    
-    # Fallback: Load from file if DB is empty or disabled
-    if df is None or df.empty:
-        print("Loading comets from file (DB empty or disabled)")
-        df = load_comet_dataframe()
+            logger.debug(f"PostgreSQL comet cache failed: {e}")
         
-        # Store in SQLite for next time
-        if COMET_USE_SQLITE and df is not None and not df.empty:
-            try:
-                from db_utils import store_comet_dataframe
-                stored_count = store_comet_dataframe(df)
-                logger.debug(f"Stored {stored_count} comets in SQLite database")
-            except Exception as e:
-                logger.debug(f"Failed to store comets in SQLite: {e}")
-    
-    if df is None or df.empty:
+    # Load comet dataframe - PostgreSQL ONLY
+    df = None
+    try:
+        from db_utils import get_comet_dataframe
+        df_pickle = get_comet_dataframe()
+        if df_pickle:
+            df = pickle.loads(df_pickle)
+        if df is not None and not df.empty:
+            print(f"Loaded {len(df)} comets from PostgreSQL database")
+        else:
+            print("ERROR: No comets in PostgreSQL database! Run data_updater first.")
+            return []
+    except Exception as e:
+        print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
+        print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
         return []
 
     # Prefilter by photometric parameters to reduce heavy computations
@@ -491,7 +477,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
 
     comet_list: List[dict] = []
     count = 0
-    events_computed = 0
 
     for designation, row in df_pref.iterrows():
         if count >= max_comets:
@@ -666,56 +651,54 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()
 
-            # Rise/Set/Transit over next 24h, limited to top-N event computations
+            # Rise/Set/Transit over next 24h - berechne für ALLE Kometen
             rise_time, set_time, transit_time = None, None, None
-            if events_computed < COMET_EVENTS_MAX:
-                try:
-                    # Use local midnight as reference point, not UTC midnight
-                    local_dt = dt_utc.astimezone(tz)
-                    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    # Convert back to UTC for Skyfield
-                    utc_midnight = local_midnight.astimezone(timezone.utc)
-                    start_time = ts.from_datetime(utc_midnight)
-                    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
-                    
-                    rise_set_func = almanac.risings_and_settings(eph, target, location)
-                    times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+            try:
+                # Use local midnight as reference point, not UTC midnight
+                local_dt = dt_utc.astimezone(tz)
+                local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Convert back to UTC for Skyfield
+                utc_midnight = local_midnight.astimezone(timezone.utc)
+                start_time = ts.from_datetime(utc_midnight)
+                end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
+                
+                rise_set_func = almanac.risings_and_settings(eph, target, location)
+                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
-                    # Find rise/set events for the current local day
-                    today_local = local_dt.date()
-                    for ti, event in zip(times, events):
-                        event_local = ti.utc_datetime().replace(tzinfo=timezone.utc).astimezone(tz)
+                # Find rise/set events for the current local day
+                today_local = local_dt.date()
+                for ti, event in zip(times, events):
+                    event_local = ti.utc_datetime().replace(tzinfo=timezone.utc).astimezone(tz)
+                    if event_local.date() == today_local:
+                        if event == 1 and rise_time is None:
+                            rise_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        elif event == 0 and set_time is None:
+                            set_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
+
+                # Transit time (choose highest altitude for local day)
+                f = almanac.meridian_transits(eph, target, location)
+                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                chosen_local_dt = None
+                if len(t_times):
+                    candidates = []
+                    for ti, ev in zip(t_times, t_events):
+                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        event_local = utc_dt.astimezone(tz)
                         if event_local.date() == today_local:
-                            if event == 1 and rise_time is None:
-                                rise_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                            elif event == 0 and set_time is None:
-                                set_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
-
-                    # Transit time (choose highest altitude for local day)
-                    f = almanac.meridian_transits(eph, target, location)
-                    t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                    chosen_local_dt = None
-                    if len(t_times):
-                        candidates = []
-                        for ti, ev in zip(t_times, t_events):
-                            utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                            event_local = utc_dt.astimezone(tz)
-                            if event_local.date() == today_local:
-                                try:
-                                    alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                                except Exception:
-                                    alt_deg = float('-inf')
-                                candidates.append((utc_dt, alt_deg, int(ev)))
-                        if candidates:
-                            candidates.sort(key=lambda x: (-x[1], x[0]))
-                            chosen_local_dt = candidates[0][0]
-                    transit_time = chosen_local_dt
-                    events_computed += 1
-                except Exception as e:
-                    logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
-                    rise_time = None
-                    set_time = None
-                    transit_time = None
+                            try:
+                                alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
+                            except Exception:
+                                alt_deg = float('-inf')
+                            candidates.append((utc_dt, alt_deg, int(ev)))
+                    if candidates:
+                        candidates.sort(key=lambda x: (-x[1], x[0]))
+                        chosen_local_dt = candidates[0][0]
+                transit_time = chosen_local_dt
+            except Exception as e:
+                logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                rise_time = None
+                set_time = None
+                transit_time = None
         except Exception as e:
             logger.debug(f"Error processing comet {designation}: {e}")
             continue
@@ -744,19 +727,18 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
             count += 1
 
     # Save final list to cache for faster subsequent loads
-    if COMET_USE_SQLITE:
-        # Store in SQLite cache
-        try:
-            from db_utils import store_comet_positions
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
-            
-            # We need comet IDs for SQLite storage - use a dummy approach for now
-            # In a full implementation, we'd match comets to database IDs
-            store_comet_positions(0, loc_key, time_bucket, lat, lon, elevation, comet_list)
-            logger.debug(f"Saved {len(comet_list)} bright comets to SQLite cache ({loc_key}/{time_bucket})")
-        except Exception as e:
-            logger.debug(f"Failed to write SQLite comet cache: {e}")
+    # Store in PostgreSQL cache
+    try:
+        from db_utils import store_comet_positions
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
+        
+        # We need comet IDs for PostgreSQL storage - use a dummy approach for now
+        # In a full implementation, we'd match comets to database IDs
+        store_comet_positions(0, loc_key, time_bucket, lat, lon, elevation, comet_list)
+        logger.debug(f"Saved {len(comet_list)} bright comets to PostgreSQL cache ({loc_key}/{time_bucket})")
+    except Exception as e:
+        logger.debug(f"Failed to write PostgreSQL comet cache: {e}")
 
     return comet_list

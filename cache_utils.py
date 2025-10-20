@@ -2,7 +2,7 @@
 Shared utilities for per-location and time-bucketed caching.
 - Normalizes observer location (lat/lon to 4 decimals, elevation to nearest 10 m)
 - Generates 6-hour UTC time buckets (00, 06, 12, 18)
-- Location keys for SQLite cache
+- Location keys for PostgreSQL cache
 """
 from __future__ import annotations
 
@@ -53,5 +53,5 @@ def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_B
 
 def build_cache_path(kind: str, lat: float, lon: float, elevation: float,
                      dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:
-    """Legacy function - returns empty string. Use SQLite cache instead."""
+    """Legacy function - returns empty string. Use PostgreSQL cache instead."""
     return ""

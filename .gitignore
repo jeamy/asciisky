@@ -61,5 +61,8 @@ logs/
 CometEls.txt
 MPCORB.DAT*
 hipparcos.dat
+de421.bsp
 cache/
 .cache
+
+.env

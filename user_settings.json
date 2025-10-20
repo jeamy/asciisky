@@ -1,5 +1,5 @@
 {
-  "last_updated": "2025-10-16T21:23:21.256049",
+  "last_updated": "2025-10-19T18:53:31.004542",
   "location": {
     "latitude": 46.7631988,
     "longitude": 14.8416774,
@@ -8,6 +8,6 @@
   },
   "filters": {
     "asteroidMaxMagnitude": 10.0,
-    "cometMaxMagnitude": 15.0
+    "cometMaxMagnitude": 14.0
   }
 }

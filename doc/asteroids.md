@@ -13,7 +13,9 @@ This document explains how ASCII Sky computes positions and brightness for brigh
 - Rise/Set/Transit: Computed with Skyfield almanac for the composite `sun + orbit` target and the observer `Topos`.
 
 Backend entrypoint: `bright_asteroids.load_bright_asteroids()`.
-API endpoint: `/api/bright_asteroids` (see `main.py`).
+API endpoint: `/api/bright_asteroids` (see `api/routes/asteroids.py`).
+Worker: `workers/asteroid_worker.py` (RabbitMQ-based async computation).
+Cache: PostgreSQL database (`cached_positions` table).
 
 ## Data Loading
 

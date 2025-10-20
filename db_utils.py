@@ -1,8 +1,10 @@
 """
-SQLite database utilities for AsciiSky astronomical data caching.
+PostgreSQL database utilities for AsciiSky astronomical data caching.
 Provides efficient storage and retrieval of asteroid orbital data and computed positions.
+Multi-host compatible.
 """
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import pickle
 import json
 import os
@@ -11,701 +13,261 @@ from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 import threading
 
-# Database configuration
-DB_PATH = "cache/asciisky.db"
-DB_VERSION = 2
-SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get('SQLITE_BUSY_TIMEOUT_MS', '30000'))  # 30 seconds default
-SQLITE_ENABLE_WAL = os.environ.get('SQLITE_ENABLE_WAL', 'true').lower() == 'true'  # Enable WAL by default
+# PostgreSQL configuration from environment
+POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
+POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', '5432'))
+POSTGRES_DB = os.environ.get('POSTGRES_DB', 'asciisky')
+POSTGRES_USER = os.environ.get('POSTGRES_USER', 'asciisky')
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'changeme')
 
 # Thread-local storage for database connections
 _thread_local = threading.local()
-_connection_counter = 0
-_connection_lock = threading.Lock()
-_active_connections = {}  # Track connections by thread ID for cleanup
 
-def get_db_connection() -> sqlite3.Connection:
-    """Get thread-local database connection with proper configuration."""
-    global _connection_counter
-    
-    if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        # Increase default timeout to allow waiting for writer locks
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=max(1.0, SQLITE_BUSY_TIMEOUT_MS / 1000.0))
-        conn.row_factory = sqlite3.Row  # Enable dict-like access
-        # Skip WAL mode in Docker to avoid I/O issues
-        try:
-            conn.execute("PRAGMA busy_timeout={}".format(int(SQLITE_BUSY_TIMEOUT_MS)))
-        except Exception:
-            pass
-        conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/performance
-        conn.execute("PRAGMA cache_size=2000")  # Reduce cache size to 2MB
-        conn.execute("PRAGMA temp_store=MEMORY")  # Use RAM for temp tables
-        # Optionally enable WAL if explicitly requested (better read concurrency)
-        if SQLITE_ENABLE_WAL:
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except Exception:
-                pass
-        _thread_local.connection = conn
-        
-        # Track connection count and register for cleanup
-        thread_id = threading.get_ident()
-        with _connection_lock:
-            _connection_counter += 1
-            _active_connections[thread_id] = conn
-        
-        # Initialize schema if needed
-        init_database(conn)
-    
+def get_db_connection():
+    """Get thread-local PostgreSQL connection."""
+    if not hasattr(_thread_local, 'connection') or _thread_local.connection is None or _thread_local.connection.closed:
+        _thread_local.connection = psycopg2.connect(
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            cursor_factory=psycopg2.extras.RealDictCursor
+        )
+        _thread_local.connection.autocommit = False
     return _thread_local.connection
 
 @contextmanager
-def db_transaction(max_retries=3):
-    """Context manager for database transactions with automatic rollback on error and retry on lock."""
+def db_transaction():
+    """Context manager for PostgreSQL transactions."""
     conn = get_db_connection()
-    retries = 0
-    while retries < max_retries:
-        try:
-            conn.execute("BEGIN IMMEDIATE")  # Acquire write lock immediately
-            yield conn
-            conn.commit()
-            return
-        except sqlite3.OperationalError as e:
-            conn.rollback()
-            if 'database is locked' in str(e) and retries < max_retries - 1:
-                retries += 1
-                import time
-                time.sleep(0.1 * retries)  # Exponential backoff
-                continue
-            raise
-        except Exception:
-            conn.rollback()
-            raise
-
-def init_database(conn: sqlite3.Connection):
-    """Initialize database schema if not exists."""
-    
-    # Metadata table for schema versioning
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS db_metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
-    
-    # Check current schema version
-    cursor = conn.execute("SELECT value FROM db_metadata WHERE key = 'version'")
-    row = cursor.fetchone()
-    current_version = int(row[0]) if row else 0
-    
-    if current_version < DB_VERSION:
-        create_schema(conn)
-        conn.execute(
-            "INSERT OR REPLACE INTO db_metadata (key, value) VALUES ('version', ?)",
-            (str(DB_VERSION),)
-        )
+    try:
+        yield conn
         conn.commit()
-
-def create_schema(conn: sqlite3.Connection):
-    """Create database schema for asteroid and comet data."""
-    
-    # Asteroid orbital data table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS asteroids (
-            id INTEGER PRIMARY KEY,
-            designation TEXT UNIQUE NOT NULL,
-            number INTEGER,
-            magnitude_h REAL,
-            magnitude_g REAL,
-            epoch_packed TEXT,
-            mean_anomaly REAL,
-            argument_perihelion REAL,
-            longitude_node REAL,
-            inclination REAL,
-            eccentricity REAL,
-            mean_daily_motion REAL,
-            semimajor_axis REAL,
-            orbit_data BLOB,  -- Serialized mpcorb row for Skyfield
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Comet orbital data table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS comets (
-            id INTEGER PRIMARY KEY,
-            designation TEXT UNIQUE NOT NULL,
-            name TEXT,
-            magnitude_h REAL,
-            magnitude_g REAL,
-            epoch_packed TEXT,
-            perihelion_distance REAL,
-            eccentricity REAL,
-            argument_perihelion REAL,
-            longitude_node REAL,
-            inclination REAL,
-            orbit_data BLOB,  -- Serialized comet row for Skyfield
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Computed positions cache table (shared for asteroids and comets)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS asteroid_positions (
-            asteroid_id INTEGER,
-            location_key TEXT,
-            time_bucket TEXT,
-            observer_lat REAL,
-            observer_lon REAL,
-            observer_elevation REAL,
-            computed_at TIMESTAMP,
-            position_data BLOB,  -- Serialized position/magnitude/times data
-            PRIMARY KEY (asteroid_id, location_key, time_bucket),
-            FOREIGN KEY (asteroid_id) REFERENCES asteroids (id)
-        )
-    """)
-    
-    # Comet positions cache table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS comet_positions (
-            comet_id INTEGER,
-            location_key TEXT,
-            time_bucket TEXT,
-            observer_lat REAL,
-            observer_lon REAL,
-            observer_elevation REAL,
-            computed_at TIMESTAMP,
-            position_data BLOB,  -- Serialized position/magnitude/times data
-            PRIMARY KEY (comet_id, location_key, time_bucket),
-            FOREIGN KEY (comet_id) REFERENCES comets (id)
-        )
-    """)
-    
-    # Celestial bodies cache table (sun, moon, planets)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS celestial_snapshots (
-            location_key TEXT,
-            time_bucket TEXT,
-            observer_lat REAL,
-            observer_lon REAL,
-            observer_elevation REAL,
-            computed_at TIMESTAMP,
-            snapshot_data BLOB,  -- Serialized celestial snapshot
-            PRIMARY KEY (location_key, time_bucket)
-        )
-    """)
-    
-    # Create indexes for efficient queries
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_asteroids_designation ON asteroids (designation)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_asteroids_magnitude_h ON asteroids (magnitude_h)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_comets_designation ON comets (designation)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_comets_magnitude_h ON comets (magnitude_h)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_location_time ON asteroid_positions (location_key, time_bucket)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_computed_at ON asteroid_positions (computed_at)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_comet_positions_location_time ON comet_positions (location_key, time_bucket)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_comet_positions_computed_at ON comet_positions (computed_at)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_celestial_location_time ON celestial_snapshots (location_key, time_bucket)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_celestial_computed_at ON celestial_snapshots (computed_at)")
-
-def store_asteroid_dataframe(df) -> int:
-    """Store asteroid DataFrame in database, return count of stored records."""
-    with db_transaction() as conn:
-        stored_count = 0
-        
-        for index, row in df.iterrows():
-            try:
-                # Serialize the complete row for Skyfield compatibility
-                orbit_data = pickle.dumps(row)
-                
-                # Convert values to proper types for SQLite
-                import pandas as pd
-                number = None
-                if isinstance(index, (int, float)) and not pd.isna(index):
-                    number = int(index)
-                elif 'number' in row and not pd.isna(row['number']):
-                    number = int(row['number'])
-                
-                # Handle NaN values properly
-                def safe_float(val):
-                    return float(val) if not pd.isna(val) else None
-                
-                def safe_str(val):
-                    return str(val) if not pd.isna(val) else ''
-                
-                conn.execute("""
-                    INSERT OR REPLACE INTO asteroids (
-                        designation, number, magnitude_h, magnitude_g,
-                        epoch_packed, mean_anomaly, argument_perihelion,
-                        longitude_node, inclination, eccentricity,
-                        mean_daily_motion, semimajor_axis, orbit_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    safe_str(row.get('designation', '')),
-                    number,
-                    safe_float(row.get('magnitude_H')),
-                    safe_float(row.get('magnitude_G')),
-                    safe_str(row.get('epoch_packed', '')),
-                    safe_float(row.get('mean_anomaly_degrees')),
-                    safe_float(row.get('argument_of_perihelion_degrees')),
-                    safe_float(row.get('longitude_of_ascending_node_degrees')),
-                    safe_float(row.get('inclination_degrees')),
-                    safe_float(row.get('eccentricity')),
-                    safe_float(row.get('mean_daily_motion_degrees')),
-                    safe_float(row.get('semimajor_axis_au')),
-                    orbit_data
-                ))
-                stored_count += 1
-                
-            except sqlite3.OperationalError as e:
-                if 'database is locked' in str(e):
-                    # Skip silently on lock - will be retried later
-                    continue
-                print(f"Error storing asteroid {row.get('designation', 'unknown')}: {e}")
-                continue
-            except Exception as e:
-                print(f"Error storing asteroid {row.get('designation', 'unknown')}: {e}")
-                continue
-        
-        return stored_count
-
-def get_asteroids_by_magnitude(max_h_magnitude: float, limit: int = 1000) -> List[sqlite3.Row]:
-    """Retrieve asteroids filtered by H magnitude, ordered by brightness."""
-    conn = get_db_connection()
-    cursor = conn.execute("""
-        SELECT * FROM asteroids 
-        WHERE magnitude_h <= ? AND magnitude_h IS NOT NULL
-        ORDER BY magnitude_h ASC
-        LIMIT ?
-    """, (max_h_magnitude, limit))
-    
-    result = cursor.fetchall()
-    cursor.close()
-    return result
-
-def get_asteroid_orbit_data(asteroid_id: int) -> Optional[Any]:
-    """Get deserialized orbit data for Skyfield calculations."""
-    conn = get_db_connection()
-    cursor = conn.execute("SELECT orbit_data FROM asteroids WHERE id = ?", (asteroid_id,))
-    row = cursor.fetchone()
-    cursor.close()
-    
-    if row and row['orbit_data']:
-        return pickle.loads(row['orbit_data'])
-    return None
-
-def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: str,
-                           observer_lat: float, observer_lon: float, observer_elevation: float,
-                           position_data: List[Dict]) -> None:
-    """Store computed asteroid positions for a location/time bucket."""
-    with db_transaction() as conn:
-        serialized_data = pickle.dumps(position_data)
-        
-        conn.execute("""
-            INSERT OR REPLACE INTO asteroid_positions (
-                asteroid_id, location_key, time_bucket,
-                observer_lat, observer_lon, observer_elevation,
-                computed_at, position_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            int(asteroid_id), str(location_key), str(time_bucket),
-            float(observer_lat), float(observer_lon), float(observer_elevation),
-            datetime.now(timezone.utc).isoformat(), serialized_data
-        ))
-
-def get_asteroid_positions(location_key: str, time_bucket: str, 
-                         max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
-    """Retrieve cached asteroid positions for location/time if fresh enough."""
-    conn = get_db_connection()
-    
-    # Calculate cutoff time
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    
-    cursor = conn.execute("""
-        SELECT position_data FROM asteroid_positions
-        WHERE location_key = ? AND time_bucket = ?
-        AND strftime('%s', computed_at) > ?
-    """, (str(location_key), str(time_bucket), str(cutoff_time)))
-    
-    # Collect all asteroid positions for this location/time
-    # Use fetchone() in loop to avoid loading all BLOBs at once
-    all_positions = []
-    while True:
-        row = cursor.fetchone()
-        if not row:
-            break
-        if row and row['position_data']:
-            positions = pickle.loads(row['position_data'])
-            if isinstance(positions, list):
-                all_positions.extend(positions)
-    
-    cursor.close()
-    return all_positions if all_positions else None
-
-def has_asteroid_positions(location_key: str, time_bucket: str,
-                           max_age_seconds: int = 49 * 3600) -> bool:
-    """Fast existence check for cached asteroid positions without loading blobs."""
-    conn = get_db_connection()
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    cursor = conn.execute(
-        """
-        SELECT 1 FROM asteroid_positions
-        WHERE location_key = ? AND time_bucket = ?
-          AND strftime('%s', computed_at) > ?
-        LIMIT 1
-        """,
-        (str(location_key), str(time_bucket), str(cutoff_time))
-    )
-    row = cursor.fetchone()
-    cursor.close()
-    return bool(row)
-
-def cleanup_old_positions(retention_days: int = 30) -> int:
-    """Remove position cache entries older than retention period."""
-    with db_transaction() as conn:
-        cutoff_time = datetime.now(timezone.utc).timestamp() - (retention_days * 24 * 3600)
-        
-        cursor = conn.execute("""
-            DELETE FROM asteroid_positions 
-            WHERE strftime('%s', computed_at) < ?
-        """, (str(cutoff_time),))
-        
-        return cursor.rowcount
-
-def store_comet_dataframe(df) -> int:
-    """Store comet DataFrame in database, return count of stored records."""
-    with db_transaction() as conn:
-        stored_count = 0
-        
-        for index, row in df.iterrows():
-            try:
-                # Serialize the complete row for Skyfield compatibility
-                orbit_data = pickle.dumps(row)
-                
-                # Convert values to proper types for SQLite
-                import pandas as pd
-                def safe_float(val):
-                    return float(val) if not pd.isna(val) else None
-                
-                def safe_str(val):
-                    return str(val) if not pd.isna(val) else ''
-                
-                # designation is the index, not a column!
-                designation = str(index) if index else ''
-                
-                conn.execute("""
-                    INSERT OR REPLACE INTO comets (
-                        designation, name, magnitude_h, magnitude_g,
-                        epoch_packed, perihelion_distance, eccentricity,
-                        argument_perihelion, longitude_node, inclination, orbit_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    designation,
-                    safe_str(row.get('name', '')),
-                    safe_float(row.get('M1')),  # Comet absolute magnitude (not 'magnitude_H')
-                    safe_float(row.get('k1')),  # Comet activity parameter (not 'magnitude_G')
-                    safe_str(row.get('epoch_packed', '')),
-                    safe_float(row.get('perihelion_distance_au', row.get('q'))),  # Try both names
-                    safe_float(row.get('eccentricity', row.get('e'))),  # Try both names
-                    safe_float(row.get('argument_of_perihelion_degrees', row.get('w', row.get('peri')))),  # Try all aliases
-                    safe_float(row.get('longitude_of_ascending_node_degrees', row.get('om', row.get('node')))),  # Try all aliases
-                    safe_float(row.get('inclination_degrees', row.get('i', row.get('incl')))),  # Try all aliases
-                    orbit_data
-                ))
-                stored_count += 1
-                
-            except sqlite3.OperationalError as e:
-                if 'database is locked' in str(e):
-                    # Skip silently on lock - will be retried later
-                    continue
-                print(f"Error storing comet {row.get('designation', 'unknown')}: {e}")
-                continue
-            except Exception as e:
-                print(f"Error storing comet {row.get('designation', 'unknown')}: {e}")
-                continue
-        
-        return stored_count
-
-def get_comets_by_magnitude(max_h_magnitude: float, limit: int = 1000) -> List[sqlite3.Row]:
-    """Retrieve comets filtered by H magnitude, ordered by brightness."""
-    conn = get_db_connection()
-    cursor = conn.execute("""
-        SELECT * FROM comets
-        WHERE magnitude_h <= ?
-        ORDER BY magnitude_h ASC
-        LIMIT ?
-    """, (max_h_magnitude, limit))
-    
-    rows = cursor.fetchall()
-    cursor.close()
-    return rows
-
-def load_comets_dataframe_from_db(max_h_magnitude: float = 18.0) -> 'pd.DataFrame':
-    """Load comets from SQLite database and return as DataFrame.
-    Returns DataFrame with designation as index, ready for processing."""
-    import pandas as pd
-    import pickle
-    
-    conn = get_db_connection()
-    cursor = conn.execute("""
-        SELECT designation, orbit_data FROM comets
-        WHERE magnitude_h <= ?
-        ORDER BY magnitude_h ASC
-    """, (max_h_magnitude,))
-    
-    rows = cursor.fetchall()
-    cursor.close()
-    
-    if not rows:
-        return pd.DataFrame()
-    
-    # Deserialize orbit_data for each comet and build DataFrame
-    comet_data = []
-    for row in rows:
-        try:
-            designation = row['designation']
-            orbit_row = pickle.loads(row['orbit_data'])
-            # orbit_row is a pandas Series, convert to dict
-            comet_dict = orbit_row.to_dict() if hasattr(orbit_row, 'to_dict') else dict(orbit_row)
-            comet_dict['designation'] = designation
-            comet_data.append(comet_dict)
-        except Exception as e:
-            print(f"Error loading comet {row.get('designation', 'unknown')}: {e}")
-            continue
-    
-    if not comet_data:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(comet_data)
-    
-    # Set designation as index (same format as load_comet_dataframe)
-    if 'designation' in df.columns:
-        df = df.set_index('designation', drop=True)
-    
-    return df
-
-def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
-                         observer_lat: float, observer_lon: float, observer_elevation: float,
-                         position_data: List[Dict]) -> None:
-    """Store computed comet positions for a location/time bucket."""
-    with db_transaction() as conn:
-        serialized_data = pickle.dumps(position_data)
-        
-        conn.execute("""
-            INSERT OR REPLACE INTO comet_positions (
-                comet_id, location_key, time_bucket,
-                observer_lat, observer_lon, observer_elevation,
-                computed_at, position_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            int(comet_id), str(location_key), str(time_bucket),
-            float(observer_lat), float(observer_lon), float(observer_elevation),
-            datetime.now(timezone.utc).isoformat(), serialized_data
-        ))
-
-def get_comet_positions(location_key: str, time_bucket: str, 
-                       max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
-    """Retrieve cached comet positions for location/time if fresh enough."""
-    conn = get_db_connection()
-    
-    # Calculate cutoff time
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    
-    cursor = conn.execute("""
-        SELECT position_data FROM comet_positions
-        WHERE location_key = ? AND time_bucket = ?
-        AND strftime('%s', computed_at) > ?
-        LIMIT 1
-    """, (str(location_key), str(time_bucket), str(cutoff_time)))
-    
-    row = cursor.fetchone()
-    cursor.close()
-    
-    if row and row['position_data']:
-        return pickle.loads(row['position_data'])
-    
-    return None
-
-def has_comet_positions(location_key: str, time_bucket: str,
-                        max_age_seconds: int = 49 * 3600) -> bool:
-    """Fast existence check for cached comet positions without loading blobs."""
-    conn = get_db_connection()
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    cursor = conn.execute(
-        """
-        SELECT 1 FROM comet_positions
-        WHERE location_key = ? AND time_bucket = ?
-          AND strftime('%s', computed_at) > ?
-        LIMIT 1
-        """,
-        (str(location_key), str(time_bucket), str(cutoff_time))
-    )
-    row = cursor.fetchone()
-    cursor.close()
-    return bool(row)
-
-def store_celestial_snapshot(location_key: str, time_bucket: str,
-                            observer_lat: float, observer_lon: float, observer_elevation: float,
-                            snapshot_data: Dict) -> None:
-    """Store computed celestial snapshot for a location/time bucket."""
-    with db_transaction() as conn:
-        serialized_data = pickle.dumps(snapshot_data)
-        
-        conn.execute("""
-            INSERT OR REPLACE INTO celestial_snapshots (
-                location_key, time_bucket,
-                observer_lat, observer_lon, observer_elevation,
-                computed_at, snapshot_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            str(location_key), str(time_bucket),
-            float(observer_lat), float(observer_lon), float(observer_elevation),
-            datetime.now(timezone.utc).isoformat(), serialized_data
-        ))
-
-def get_celestial_snapshot(location_key: str, time_bucket: str, 
-                          max_age_seconds: int = 49 * 3600) -> Optional[Dict]:
-    """Retrieve cached celestial snapshot for location/time if fresh enough."""
-    conn = get_db_connection()
-    
-    # Calculate cutoff time
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    
-    cursor = conn.execute("""
-        SELECT snapshot_data FROM celestial_snapshots
-        WHERE location_key = ? AND time_bucket = ?
-        AND strftime('%s', computed_at) > ?
-        LIMIT 1
-    """, (str(location_key), str(time_bucket), str(cutoff_time)))
-    
-    row = cursor.fetchone()
-    cursor.close()
-    
-    if row and row['snapshot_data']:
-        return pickle.loads(row['snapshot_data'])
-    
-    return None
-
-def cleanup_old_positions(retention_days: int = 30) -> int:
-    """Remove position cache entries older than retention period."""
-    with db_transaction() as conn:
-        cutoff_time = datetime.now(timezone.utc).timestamp() - (retention_days * 24 * 3600)
-        
-        # Clean asteroid positions
-        cursor = conn.execute("""
-            DELETE FROM asteroid_positions 
-            WHERE strftime('%s', computed_at) < ?
-        """, (str(cutoff_time),))
-        
-        deleted_count = cursor.rowcount
-        
-        # Clean comet positions
-        cursor = conn.execute("""
-            DELETE FROM comet_positions 
-            WHERE strftime('%s', computed_at) < ?
-        """, (str(cutoff_time),))
-        
-        deleted_count += cursor.rowcount
-        
-        # Clean celestial snapshots
-        cursor = conn.execute("""
-            DELETE FROM celestial_snapshots 
-            WHERE strftime('%s', computed_at) < ?
-        """, (str(cutoff_time),))
-        
-        deleted_count += cursor.rowcount
-        
-        return deleted_count
-
-def get_database_stats() -> Dict[str, Any]:
-    """Get database statistics for monitoring."""
-    conn = get_db_connection()
-    
-    stats = {}
-    
-    # Count asteroids
-    cursor = conn.execute("SELECT COUNT(*) as count FROM asteroids")
-    stats['asteroids_count'] = cursor.fetchone()['count']
-    cursor.close()
-    
-    # Count comets
-    cursor = conn.execute("SELECT COUNT(*) as count FROM comets")
-    stats['comets_count'] = cursor.fetchone()['count']
-    cursor.close()
-    
-    # Count position cache entries
-    cursor = conn.execute("SELECT COUNT(*) as count FROM asteroid_positions")
-    stats['positions_count'] = cursor.fetchone()['count']
-    cursor.close()
-    
-    cursor = conn.execute("SELECT COUNT(*) as count FROM comet_positions")
-    stats['comet_positions_count'] = cursor.fetchone()['count']
-    cursor.close()
-    
-    # Count celestial snapshots
-    cursor = conn.execute("SELECT COUNT(*) as count FROM celestial_snapshots")
-    stats['celestial_snapshots_count'] = cursor.fetchone()['count']
-    cursor.close()
-    
-    # Database file size
-    if os.path.exists(DB_PATH):
-        stats['db_size_mb'] = os.path.getsize(DB_PATH) / (1024 * 1024)
-    
-    # Oldest and newest position cache entries
-    cursor = conn.execute("""
-        SELECT 
-            MIN(computed_at) as oldest,
-            MAX(computed_at) as newest
-        FROM asteroid_positions
-    """)
-    row = cursor.fetchone()
-    stats['cache_oldest'] = row['oldest']
-    stats['cache_newest'] = row['newest']
-    cursor.close()
-    
-    # Add connection counter for debugging
-    with _connection_lock:
-        stats['db_connections'] = _connection_counter
-    
-    return stats
-
+    except Exception as e:
+        conn.rollback()
+        raise e
 
 def close_db_connection():
-    """Close the thread-local database connection if it exists."""
-    global _connection_counter
-    
+    """Close thread-local PostgreSQL connection."""
     if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
         try:
             _thread_local.connection.close()
-            _thread_local.connection = None
-            
-            # Decrement counter and remove from tracking
-            thread_id = threading.get_ident()
-            with _connection_lock:
-                _connection_counter = max(0, _connection_counter - 1)
-                _active_connections.pop(thread_id, None)
-        except Exception as e:
-            print(f"Error closing database connection: {e}")
+        except Exception:
+            pass
+        _thread_local.connection = None
 
+# ===== Asteroid Functions =====
 
-def close_all_connections():
-    """Close all active database connections across all threads."""
-    global _connection_counter
+def store_asteroid_dataframe(df_pickle: bytes) -> None:
+    """Store asteroid DataFrame in PostgreSQL."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO asteroid_dataframes (computed_at, dataframe_pickle)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                computed_at = EXCLUDED.computed_at,
+                dataframe_pickle = EXCLUDED.dataframe_pickle
+        """, (datetime.now(timezone.utc), psycopg2.Binary(df_pickle)))
+
+def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+    """Retrieve cached asteroid DataFrame from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    with _connection_lock:
-        connections_to_close = list(_active_connections.values())
-        thread_ids = list(_active_connections.keys())
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
     
-    closed_count = 0
-    for conn in connections_to_close:
-        try:
-            conn.close()
-            closed_count += 1
-        except Exception as e:
-            print(f"Error closing connection: {e}")
+    cursor.execute("""
+        SELECT dataframe_pickle FROM asteroid_dataframes
+        WHERE EXTRACT(EPOCH FROM computed_at) > %s
+        ORDER BY computed_at DESC LIMIT 1
+    """, (cutoff_time,))
     
-    with _connection_lock:
-        for tid in thread_ids:
-            _active_connections.pop(tid, None)
-        _connection_counter = max(0, _connection_counter - closed_count)
+    row = cursor.fetchone()
+    return bytes(row['dataframe_pickle']) if row else None
+
+def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: str,
+                                observer_lat: float, observer_lon: float, observer_elevation: float,
+                                position_data: List[Dict]) -> None:
+    """Store computed asteroid positions in PostgreSQL."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        
+        cursor.execute("""
+            INSERT INTO cached_positions (
+                object_type, object_id, location_key, time_bucket,
+                observer_lat, observer_lon, observer_elevation,
+                computed_at, position_data
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (object_type, location_key, time_bucket)
+            DO UPDATE SET
+                computed_at = EXCLUDED.computed_at,
+                position_data = EXCLUDED.position_data
+        """, (
+            'asteroid', asteroid_id, location_key, time_bucket,
+            observer_lat, observer_lon, observer_elevation,
+            datetime.now(timezone.utc), serialized_data
+        ))
+
+def get_asteroid_positions(location_key: str, time_bucket: str,
+                              max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
+    """Retrieve cached asteroid positions from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    print(f"Closed {closed_count} database connections")
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    
+    cursor.execute("""
+        SELECT position_data FROM cached_positions
+        WHERE object_type = 'asteroid'
+          AND location_key = %s
+          AND time_bucket = %s
+          AND EXTRACT(EPOCH FROM computed_at) > %s
+        ORDER BY computed_at DESC LIMIT 1
+    """, (location_key, time_bucket, cutoff_time))
+    
+    row = cursor.fetchone()
+    if row and row['position_data']:
+        return pickle.loads(bytes(row['position_data']))
+    return None
+
+# ===== Comet Functions =====
+
+def store_comet_dataframe(df_pickle: bytes) -> None:
+    """Store comet DataFrame in PostgreSQL."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO comet_dataframes (computed_at, dataframe_pickle)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                computed_at = EXCLUDED.computed_at,
+                dataframe_pickle = EXCLUDED.dataframe_pickle
+        """, (datetime.now(timezone.utc), psycopg2.Binary(df_pickle)))
+
+def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+    """Retrieve cached comet DataFrame from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    
+    cursor.execute("""
+        SELECT dataframe_pickle FROM comet_dataframes
+        WHERE EXTRACT(EPOCH FROM computed_at) > %s
+        ORDER BY computed_at DESC LIMIT 1
+    """, (cutoff_time,))
+    
+    row = cursor.fetchone()
+    return bytes(row['dataframe_pickle']) if row else None
+
+def get_comets_by_magnitude(max_absolute_mag: float) -> List[Dict]:
+    """Get comets filtered by magnitude from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id, designation, m1_mag, orbit_data
+        FROM comet_elements
+        WHERE m1_mag <= %s
+        ORDER BY m1_mag ASC
+    """, (max_absolute_mag,))
+    
+    return [dict(row) for row in cursor.fetchall()]
+
+def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
+                             observer_lat: float, observer_lon: float, observer_elevation: float,
+                             position_data: List[Dict]) -> None:
+    """Store computed comet positions in PostgreSQL."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        
+        cursor.execute("""
+            INSERT INTO cached_positions (
+                object_type, object_id, location_key, time_bucket,
+                observer_lat, observer_lon, observer_elevation,
+                computed_at, position_data
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (object_type, location_key, time_bucket)
+            DO UPDATE SET
+                computed_at = EXCLUDED.computed_at,
+                position_data = EXCLUDED.position_data
+        """, (
+            'comet', comet_id, location_key, time_bucket,
+            observer_lat, observer_lon, observer_elevation,
+            datetime.now(timezone.utc), serialized_data
+        ))
+
+def get_comet_positions(location_key: str, time_bucket: str,
+                           max_age_seconds: int = 3600) -> Optional[List[Dict]]:
+    """Retrieve cached comet positions from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    
+    cursor.execute("""
+        SELECT position_data FROM cached_positions
+        WHERE object_type = 'comet'
+          AND location_key = %s
+          AND time_bucket = %s
+          AND EXTRACT(EPOCH FROM computed_at) > %s
+        ORDER BY computed_at DESC LIMIT 1
+    """, (location_key, time_bucket, cutoff_time))
+    
+    row = cursor.fetchone()
+    if row and row['position_data']:
+        return pickle.loads(bytes(row['position_data']))
+    return None
+
+# ===== Data Update Tracking =====
+
+def record_data_update(update_type: str, status: str, message: str = None) -> None:
+    """Record data update in PostgreSQL."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO data_updates (update_type, status, message, updated_at)
+            VALUES (%s, %s, %s, %s)
+        """, (update_type, status, message, datetime.now(timezone.utc)))
+
+def get_last_data_update(update_type: str = None) -> Optional[Dict]:
+    """Get last data update from PostgreSQL."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if update_type:
+        cursor.execute("""
+            SELECT * FROM data_updates
+            WHERE update_type = %s
+            ORDER BY updated_at DESC LIMIT 1
+        """, (update_type,))
+    else:
+        cursor.execute("""
+            SELECT * FROM data_updates
+            ORDER BY updated_at DESC LIMIT 1
+        """)
+    
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+def get_database_stats() -> dict:
+    """Get database statistics (asteroid/comet DataFrame availability)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if DataFrames exist (not individual elements)
+    cursor.execute("SELECT COUNT(*) as count FROM asteroid_dataframes")
+    asteroid_df_count = cursor.fetchone()['count']
+    
+    cursor.execute("SELECT COUNT(*) as count FROM comet_dataframes")
+    comet_df_count = cursor.fetchone()['count']
+    
+    return {
+        'asteroids_count': asteroid_df_count,
+        'comets_count': comet_df_count
+    }
+

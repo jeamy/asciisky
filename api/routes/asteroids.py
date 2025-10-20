@@ -138,79 +138,44 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             max_magnitude = filters.get("asteroidMaxMagnitude", bright_asteroids.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
-
-        if time is not None:
-            # Try loading with interpolation between cached buckets
-            try:
-                asteroid_list = load_asteroids_with_interpolation(
-                    lat, lon, elevation, dt_utc,
-                    bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
-                )
-                
-                if isinstance(asteroid_list, list) and asteroid_list:
-                    result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-                    for asteroid in asteroid_list:
-                        if isinstance(asteroid, dict) and "name" in asteroid:
-                            # Magnitude-Filter anwenden
-                            if asteroid.get("magnitude", 99) <= max_magnitude:
-                                # Use name as key without index to avoid duplicate keys when order changes
-                                result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
-                    return result
-            except Exception as e:
-                # Log error but continue to fallback
-                print(f"Interpolation failed: {e}")
-
-            # No cache available - RabbitMQ will handle this
-            # Return empty result immediately - data will appear on next poll (60s)
-            result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-            return result
-
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
         # Feature Flag: RabbitMQ oder alte Architektur?
         user_id = request.session.get('user_id', 'anonymous')
         use_rabbitmq_flag = use_rabbitmq_for('asteroids', user_id)
         
-        # Bei RabbitMQ: Versuche aus Cache zu lesen, triggere Background Task wenn leer
+        # Bei RabbitMQ: Cache-First + Background Tasks (wie bei Kometen)
         if use_rabbitmq_flag:
-            logger.info(f"Using RabbitMQ architecture: lat={lat}, lon={lon}")
-            
-            # Versuche aus Cache zu lesen (wie Legacy)
+            logger.info(f"Using RabbitMQ architecture for asteroids: lat={lat}, lon={lon}")
             try:
-                bright_asteroid_list = load_asteroids_with_interpolation(
+                asteroid_list = load_asteroids_with_interpolation(
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                     ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
-                    use_sqlite=getattr(bright_asteroids, 'ASTEROID_USE_SQLITE', False)
+                    use_postgres=True
                 )
                 
-                if isinstance(bright_asteroid_list, list) and bright_asteroid_list:
-                    # Cache Hit! Daten vorhanden
-                    logger.info(f"Cache hit for asteroids: {len(bright_asteroid_list)} found")
+                if isinstance(asteroid_list, list) and asteroid_list:
+                    logger.info(f"Cache hit for asteroids: {len(asteroid_list)} found")
                 else:
-                    # Cache Miss! Trigger Background Task
                     logger.info("Cache miss - triggering RabbitMQ background task")
                     asyncio.create_task(trigger_rabbitmq_precompute(
                         lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
                     ))
-                    bright_asteroid_list = []  # Leere Liste
-                    
+                    asteroid_list = []
             except Exception as e:
                 logger.warning(f"Cache read failed: {e}")
-                # Trigger Background Task
                 asyncio.create_task(trigger_rabbitmq_precompute(
                     lat, lon, elevation, dt_utc, kinds=['asteroids'], hours_radius=12
                 ))
-                bright_asteroid_list = []  # Leere Liste
+                asteroid_list = []
         else:
             # RabbitMQ deaktiviert - sollte nicht passieren
             logger.warning(f"RabbitMQ disabled for asteroids - returning empty")
-            bright_asteroid_list = []
+            asteroid_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
-        for asteroid in bright_asteroid_list:
+        for asteroid in asteroid_list:
             if isinstance(asteroid, dict) and "name" in asteroid:
                 # Magnitude-Filter anwenden (wichtig: load_bright_asteroids cached mit Mag 20, wir filtern hier)
                 if asteroid.get("magnitude", 99) <= max_magnitude:

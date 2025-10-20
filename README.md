@@ -33,7 +33,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Labels for bright asteroids, comets, and constellations
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
-- SQLite database backend for efficient data storage and retrieval
+- PostgreSQL database backend for efficient data storage and retrieval
 - Automatic nightly updates of asteroid and comet orbital data (2:00 AM)
 - DB-first loading strategy for optimal performance (10x faster than file parsing)
 
@@ -43,41 +43,76 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 ## Running the Application
 
-### Using Docker Compose (Recommended)
+### Development Setup (Local)
 
 1. Clone this repository
 2. Navigate to the project directory
-3. Run the following command:
+3. Run the setup script:
    ```bash
-   docker-compose up --build
+   ./scripts/setup-dev.sh
    ```
 4. Open your browser and navigate to `http://localhost:8000`
+
+The setup script automatically:
+- Creates `.env` file with default configuration
+- Builds Docker images
+- Starts all services (web, PostgreSQL, RabbitMQ, workers)
+- Initializes the database
+- Downloads initial asteroid/comet data
+
+### Production Deployment (Multi-Host)
+
+For production deployment across multiple servers:
+
+1. Configure `.env` file (see `.env.example`)
+2. Run the production setup script:
+   ```bash
+   ./scripts/setup-production.sh
+   ```
+
+This deploys:
+- **Main Server** (asciisky.eibrain.org): Web UI, PostgreSQL, RabbitMQ, Data Updater
+- **Worker Server B** (rabbit-b.eibrain.org): Scalable compute workers
+- **Worker Server C** (rabbit-c.eibrain.org): Scalable compute workers
+
+See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions.
 
 ### Docker Services
 
 The application runs multiple services:
 
 - **`web`** - FastAPI web server (port 8000)
-- **`rabbitmq`** - RabbitMQ message broker for async task processing
-- **`asteroid-worker-1/2`** - RabbitMQ workers for asteroid computations
-- **`comet-worker-1/2`** - RabbitMQ workers for comet computations
+- **`postgres`** - PostgreSQL database (port 5432)
+- **`rabbitmq`** - RabbitMQ message broker for async task processing (ports 5672, 15672)
+- **`precompute_worker`** - Scalable workers for precomputation tasks (configurable via `.env`)
+- **`asteroid_worker`** - Scalable workers for asteroid computations (configurable via `.env`)
+- **`comet_worker`** - Scalable workers for comet computations (configurable via `.env`)
+- **`precompute_coordinator`** - Coordinates precomputation tasks
 - **`data_updater`** - Nightly data update service (runs at 2:00 AM)
 
 All services restart automatically unless stopped.
 
+**Worker Scaling** (via `.env`):
+```bash
+PRECOMPUTE_WORKERS=4  # Number of precompute workers
+ASTEROID_WORKERS=2    # Number of asteroid workers
+COMET_WORKERS=2       # Number of comet workers
+```
+
 ### First Run and Data Management
 
-- **First Startup**: The app automatically downloads and stores MPC orbital data in SQLite database
+- **First Startup**: The app automatically downloads and stores MPC orbital data in PostgreSQL database
 - **Daily Updates**: The `data_updater` service automatically downloads fresh data at 2:00 AM local time
 - **Performance**: After initial setup, all data loads from database (10x faster than file parsing)
 
 ### Cache Architecture
 
-- **SQLite Database** (`cache/asciisky.db`)
+- **PostgreSQL Database**
   - All asteroid and comet orbital data (~2200 asteroids, ~1200 comets)
   - Pre-computed positions cached per location and time bucket
   - Automatic nightly updates via `data_updater` service
-  - See `doc/sqlite.md` and `doc/data-management.md` for details
+  - Multi-host capable: All workers connect to central PostgreSQL instance
+  - See `doc/postgresql.md` and `doc/data-management.md` for details
 
 - **RabbitMQ Task Queue**
   - Async computation of asteroid and comet positions
@@ -115,14 +150,22 @@ All services restart automatically unless stopped.
 - `main.py` - FastAPI application with celestial object calculation logic
 - `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
 - `comets.py` - Comet pipeline using MPC data with M1/k1 magnitude model
-- `db_utils.py` - SQLite database utilities for efficient data storage and retrieval
+- `db_utils.py` - PostgreSQL database utilities for efficient data storage and retrieval
 - `nightly_data_updater.py` - Automatic daily updates of asteroid and comet data (2:00 AM)
 - `settings.py` - User/location settings; persists to `user_settings.json`
 - `de421.bsp` - JPL ephemeris used by Skyfield
 
 ### RabbitMQ Workers
+- `workers/precompute_worker.py` - Async worker for precomputation tasks
 - `workers/asteroid_worker.py` - Async worker for asteroid computations
 - `workers/comet_worker.py` - Async worker for comet computations
+- `workers/precompute_coordinator.py` - Coordinates precomputation across workers
+
+### Deployment Scripts
+- `scripts/setup-dev.sh` - Development environment setup
+- `scripts/setup-production.sh` - Multi-host production deployment
+- `scripts/setup-firewall.sh` - Firewall configuration for production
+- `scripts/setup-rabbitmq-queues.sh` - RabbitMQ queue initialization
 
 ### Frontend
 - `templates/` - HTML templates
@@ -140,12 +183,16 @@ All services restart automatically unless stopped.
 - `doc/asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
 - `doc/comets.md` - Comet position and magnitude pipeline (M1/k1 model)
 - `doc/planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
-- `doc/sqlite.md` - SQLite database schema and implementation details
+- `doc/postgresql.md` - PostgreSQL database schema and implementation details
 - `doc/data-management.md` - Data loading strategy, nightly updates, and troubleshooting
 
 ### Configuration
 - `Dockerfile` - Docker configuration
-- `docker-compose.yml` - Docker Compose configuration with RabbitMQ
+- `docker-compose.yml` - Development Docker Compose configuration
+- `docker-compose.production.yml` - Production configuration (main server)
+- `docker-compose.worker-b.yml` - Worker server B configuration
+- `docker-compose.worker-c.yml` - Worker server C configuration
+- `.env.example` - Environment variables template
 - `requirements.txt` - Python dependencies
 
 ## API Endpoints
@@ -225,13 +272,14 @@ The application can be configured using the following environment variables in `
 - [Constellations](doc/constellations.md) - Star patterns and visualization (using data from [Stellarium](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
 
 ### Architecture
-- [SQLite Database](doc/sqlite.md) - Database schema and caching strategy
+- [PostgreSQL Database](doc/postgresql.md) - Database schema and caching strategy
 - [Data Management](doc/data-management.md) - DB-first loading, nightly updates, and troubleshooting
 - [Session Management](doc/sessionmgm.md) - User sessions and state handling
+- [Production Deployment](doc/PRODUCTION_DEPLOYMENT.md) - Multi-host deployment guide
 
 ## Technologies Used
 
-- **Backend**: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), SQLite
+- **Backend**: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), PostgreSQL
 - **Message Queue**: RabbitMQ 4.1 with async workers
 - **Frontend**: HTML, CSS, JavaScript
 - **Containerization**: Docker, Docker Compose

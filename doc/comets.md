@@ -22,6 +22,9 @@ This document explains how ASCII Sky computes positions and brightness for comet
 - API: `GET /api/comets` with optional `max_comets` parameter.
 
 Backend entrypoint: `comets.load_comets()`.
+API endpoint: `/api/comets` (see `api/routes/comets.py`).
+Worker: `workers/comet_worker.py` (RabbitMQ-based async computation).
+Cache: PostgreSQL database (`cached_positions` table).
 
 ## Data Loading and Normalization
 
