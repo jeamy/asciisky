@@ -68,7 +68,7 @@ warning "Worker-Server (rabbit-b/c) benötigen KEINE Firewall-Änderungen!"
 echo ""
 read -p "Fortfahren? (y/N) " -n 1 -r
 echo
-if [[ \! $REPLY =~ ^[Yy]$ ]]; then
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Abgebrochen."
     exit 0
 fi
