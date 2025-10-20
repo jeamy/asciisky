@@ -5,6 +5,8 @@ services:
   # ===== Precompute Worker (skalierbar) =====
   precompute_worker:
     image: asciisky-web:latest
+    build: .
+    pull_policy: never
     command: ["python", "workers/precompute_worker.py"]
     volumes:
       - ./cache:/app/cache
@@ -35,6 +37,8 @@ services:
   # ===== Asteroid Worker (skalierbar) =====
   asteroid_worker:
     image: asciisky-web:latest
+    build: .
+    pull_policy: never
     command: ["python", "workers/asteroid_worker.py"]
     volumes:
       - ./cache:/app/cache
@@ -63,6 +67,8 @@ services:
   # ===== Comet Worker (skalierbar) =====
   comet_worker:
     image: asciisky-web:latest
+    build: .
+    pull_policy: never
     command: ["python", "workers/comet_worker.py"]
     volumes:
       - ./cache:/app/cache

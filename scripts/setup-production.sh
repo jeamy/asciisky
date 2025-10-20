@@ -77,21 +77,27 @@ setup_host() {
         success "Services started on $HOST (Worker scaling via .env)"
     else
         # Remote Setup
-        echo "📤 Copying files to $HOST..."
+        echo "📤 Setting up $HOST..."
         
-        # Erstelle Remote-Verzeichnis
-        ssh "$HOST" "mkdir -p ~/asciisky" || error_exit "Failed to create directory on $HOST"
+        # Erstelle ~/docker Verzeichnis
+        ssh "$HOST" "mkdir -p ~/docker" || error_exit "Failed to create ~/docker on $HOST"
         
-        # Kopiere notwendige Dateien
-        rsync -avz --exclude='cache/' --exclude='data/' --exclude='__pycache__/' \
-            ./ "$HOST:~/asciisky/" || error_exit "Failed to copy files to $HOST"
+        # Prüfe ob Repository bereits existiert
+        if ssh "$HOST" "[ -d ~/docker/asciisky/.git ]"; then
+            echo "📥 Repository exists, pulling latest changes..."
+            ssh "$HOST" "cd ~/docker/asciisky && git pull" || error_exit "Git pull failed on $HOST"
+        else
+            echo "📥 Cloning repository from GitHub (HTTPS)..."
+            ssh "$HOST" "cd ~/docker && git clone https://github.com/jeamy/asciisky.git" || error_exit "Git clone failed on $HOST"
+        fi
         
         # Kopiere .env
-        scp .env "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
+        echo "📋 Copying .env..."
+        scp .env "$HOST:~/docker/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
         
         echo "🐳 Building and starting on remote host..."
-        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
-        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
+        ssh "$HOST" "cd ~/docker/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
+        ssh "$HOST" "cd ~/docker/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
         
         success "Services started on $HOST (Worker scaling via .env)"
     fi

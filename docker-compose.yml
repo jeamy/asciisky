@@ -45,6 +45,7 @@ services:
   web:
     image: asciisky-web
     build: .
+    pull_policy: never
     ports:
       - "8000:8000"
     volumes:
@@ -87,6 +88,7 @@ services:
   data_updater:
     image: asciisky-worker
     build: .
+    pull_policy: never
     command: ["python", "nightly_data_updater.py"]
     volumes:
       - .:/app
@@ -109,6 +111,7 @@ services:
   precompute_coordinator:
     image: asciisky-worker
     build: .
+    pull_policy: never
     command: ["python", "precompute_coordinator.py"]
     volumes:
       - .:/app
@@ -125,6 +128,7 @@ services:
   precompute_worker:
     image: asciisky-worker
     build: .
+    pull_policy: never
     command: ["python", "workers/precompute_worker.py"]
     volumes:
       - .:/app
@@ -162,6 +166,7 @@ services:
   asteroid-worker:
     image: asciisky-worker
     build: .
+    pull_policy: never
     command: ["python", "workers/asteroid_worker.py"]
     volumes:
       - .:/app
@@ -190,6 +195,7 @@ services:
   comet-worker:
     image: asciisky-worker
     build: .
+    pull_policy: never
     command: ["python", "workers/comet_worker.py"]
     volumes:
       - .:/app

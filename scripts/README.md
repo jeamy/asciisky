@@ -107,9 +107,10 @@ COMET_WORKERS_C=2
 ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
 ```
 
-**Was passiert mit .env?**
+**Was passiert beim Setup?**
 - ✅ Du erstellst `.env` **lokal** (auf deinem Entwicklungsrechner)
-- ✅ `setup-production.sh` kopiert sie **automatisch** auf alle 3 Server
+- ✅ Worker-Server: `git clone https://github.com/jeamy/asciisky.git` nach `~/docker/asciisky`
+- ✅ `setup-production.sh` kopiert `.env` **automatisch** auf alle Server
 - ✅ Alle Server verwenden die **gleichen Passwörter** (wichtig für Verbindungen!)
 
 ---
@@ -378,6 +379,17 @@ Password: <RABBITMQ_PASSWORD aus .env>
 - Port 15672 ist nur auf localhost beschränkt (Firewall)
 - Sicherer: Kein öffentlicher Zugriff
 - SSH-Tunnel verschlüsselt die Verbindung
+
+### Ist das Repository public oder private?
+
+**Public Repository** - Keine SSH-Keys nötig!
+
+Das Repository wird via HTTPS gecloned:
+```bash
+git clone https://github.com/jeamy/asciisky.git
+```
+
+Worker-Server brauchen **keine** GitHub SSH-Keys, da das Repository öffentlich ist.
 
 ### Kann ich verschiedene .env für jeden Server haben?
 
