@@ -33,42 +33,51 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
     """
     try:
         import pika
+        import json
         rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
+        logger.info(f"🚀 Triggering asteroid worker: url={rabbitmq_url}")
         
         def publish_task():
-            import json
-            params = pika.URLParameters(rabbitmq_url)
-            connection = pika.BlockingConnection(params)
-            channel = connection.channel()
-            
-            # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
-            
-            # Task-Daten
-            task = {
-                'task_id': f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-                'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
-                'time_bucket': dt_utc.isoformat(),
-                'magnitude': 20.0
-            }
-            
-            # Publiziere an asteroid.compute Queue
-            channel.basic_publish(
-                exchange='',
-                routing_key='asteroid.compute',
-                body=json.dumps(task),  # JSON statt str()
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # persistent
-                    priority=5
+            try:
+                logger.info(f"📡 Connecting to RabbitMQ...")
+                params = pika.URLParameters(rabbitmq_url)
+                connection = pika.BlockingConnection(params)
+                channel = connection.channel()
+                logger.info(f"✅ Connected to RabbitMQ")
+                
+                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
+                
+                # Task-Daten
+                task = {
+                    'task_id': f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}",
+                    'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                    'time_bucket': dt_utc.isoformat(),
+                    'magnitude': 20.0
+                }
+                
+                logger.info(f"📤 Publishing task: {task['task_id']}")
+                
+                # Publiziere an asteroid.compute Queue
+                channel.basic_publish(
+                    exchange='',
+                    routing_key='asteroid.compute',
+                    body=json.dumps(task),
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,  # persistent
+                        priority=5
+                    )
                 )
-            )
-            
-            connection.close()
-            logger.info(f"Published asteroid task to asteroid.compute queue")
+                
+                connection.close()
+                logger.info(f"✅ Published asteroid task {task['task_id']} to asteroid.compute queue")
+            except Exception as e:
+                logger.error(f"❌ Error in publish_task: {e}", exc_info=True)
+                raise
         
         await asyncio.to_thread(publish_task)
         
     except Exception as e:
-        logger.error(f"Failed to trigger asteroid worker: {e}")
+        logger.error(f"❌ Failed to trigger asteroid worker: {e}", exc_info=True)
 
 
 async def compute_asteroids_rabbitmq(location_dict, dt_utc, max_magnitude):
