@@ -173,8 +173,8 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
             else:
                 # Cache-Miss: Triggere Asteroid-Worker
                 logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
-                # Starte Task als FastAPI Background Task (läuft NACH Response)
-                background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, dt_utc)
+                # Triggere SOFORT (synchron) statt Background Task
+                await trigger_asteroid_worker(lat, lon, elevation, dt_utc)
                 asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")

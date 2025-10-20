@@ -178,8 +178,8 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
             else:
                 # Cache-Miss: Triggere Comet-Worker
                 logger.warning(f"❌ Cache MISS - triggering comet worker for {dt_utc.isoformat()}")
-                # Starte Task als FastAPI Background Task (läuft NACH Response)
-                background_tasks.add_task(trigger_comet_worker, lat, lon, elevation, dt_utc)
+                # Triggere SOFORT (synchron) statt Background Task
+                await trigger_comet_worker(lat, lon, elevation, dt_utc)
                 comet_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load comets from cache: {e}")
