@@ -173,12 +173,16 @@ async def get_bright_asteroids(request: Request, lat: float = None, lon: float =
             else:
                 # Cache-Miss: Triggere Asteroid-Worker
                 logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
-                asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
+                # Starte Task im Hintergrund (fire-and-forget)
+                task = asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
+                # Wichtig: Task-Referenz behalten, damit sie nicht garbage-collected wird
+                task.add_done_callback(lambda t: logger.info(f"Asteroid worker task completed") if not t.exception() else logger.error(f"Asteroid worker task failed: {t.exception()}"))
                 asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")
             # Triggere trotzdem Asteroid-Worker
-            asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
+            task = asyncio.create_task(trigger_asteroid_worker(lat, lon, elevation, dt_utc))
+            task.add_done_callback(lambda t: logger.info(f"Asteroid worker task completed") if not t.exception() else logger.error(f"Asteroid worker task failed: {t.exception()}"))
             asteroid_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}

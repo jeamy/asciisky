@@ -178,12 +178,16 @@ async def get_comets(request: Request, lat: float = None, lon: float = None, ele
             else:
                 # Cache-Miss: Triggere Comet-Worker
                 logger.warning(f"❌ Cache MISS - triggering comet worker for {dt_utc.isoformat()}")
-                asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
+                # Starte Task im Hintergrund (fire-and-forget)
+                task = asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
+                # Wichtig: Task-Referenz behalten, damit sie nicht garbage-collected wird
+                task.add_done_callback(lambda t: logger.info(f"Comet worker task completed") if not t.exception() else logger.error(f"Comet worker task failed: {t.exception()}"))
                 comet_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load comets from cache: {e}")
             # Triggere trotzdem Comet-Worker
-            asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
+            task = asyncio.create_task(trigger_comet_worker(lat, lon, elevation, dt_utc))
+            task.add_done_callback(lambda t: logger.info(f"Comet worker task completed") if not t.exception() else logger.error(f"Comet worker task failed: {t.exception()}"))
             comet_list = []
         
         result = {"time": dt_utc.isoformat(), "location": {"latitude": lat, "longitude": lon, "elevation": elevation}, "bodies": {}}
