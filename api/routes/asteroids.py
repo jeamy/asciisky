@@ -44,8 +44,23 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                 connection = pika.BlockingConnection(params)
                 channel = connection.channel()
                 logger.info(f"✅ Connected to RabbitMQ")
-                
-                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
+                # Ensure exchange exists (idempotent)
+                channel.exchange_declare(
+                    exchange='computation.direct',
+                    exchange_type='direct',
+                    durable=True
+                )
+                # Ensure queue exists as quorum and binding is present (idempotent)
+                channel.queue_declare(
+                    queue='asteroid.compute',
+                    durable=True,
+                    arguments={'x-queue-type': 'quorum'}
+                )
+                channel.queue_bind(
+                    exchange='computation.direct',
+                    queue='asteroid.compute',
+                    routing_key='compute.asteroid'
+                )
                 
                 # Task-Daten
                 task = {

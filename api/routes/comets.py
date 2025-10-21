@@ -6,6 +6,8 @@ from api.computation import ts, eph
 import comets
 import settings
 import os
+import time
+import uuid
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_comet_positions
 import asyncio
@@ -44,9 +46,25 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 connection = pika.BlockingConnection(params)
                 channel = connection.channel()
                 logger.info(f"✅ Connected to RabbitMQ")
-                
-                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
-                
+
+                # Ensure exchange exists (idempotent)
+                channel.exchange_declare(
+                    exchange='computation.direct',
+                    exchange_type='direct',
+                    durable=True
+                )
+                # Ensure queue exists as quorum and binding is present (idempotent)
+                channel.queue_declare(
+                    queue='comet.compute',
+                    durable=True,
+                    arguments={'x-queue-type': 'quorum'}
+                )
+                channel.queue_bind(
+                    exchange='computation.direct',
+                    queue='comet.compute',
+                    routing_key='compute.comet'
+                )
+
                 # Task-Daten
                 task = {
                     'task_id': f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}",
