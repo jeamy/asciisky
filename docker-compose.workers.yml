@@ -17,6 +17,8 @@ services:
     build: .
     pull_policy: never
     command: ["python", "workers/precompute_worker.py"]
+    extra_hosts:
+      - "asciisky.eibrain.org:152.53.239.133"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
@@ -47,6 +49,8 @@ services:
     build: .
     pull_policy: never
     command: ["python", "workers/asteroid_worker.py"]
+    extra_hosts:
+      - "asciisky.eibrain.org:152.53.239.133"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
@@ -75,6 +79,8 @@ services:
     build: .
     pull_policy: never
     command: ["python", "workers/comet_worker.py"]
+    extra_hosts:
+      - "asciisky.eibrain.org:152.53.239.133"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
