@@ -54,7 +54,7 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                 channel.queue_declare(
                     queue='asteroid.compute',
                     durable=True,
-                    arguments={'x-queue-type': 'quorum'}
+                    arguments={'x-queue-type': 'quorum', 'x-message-ttl': 3600000}
                 )
                 channel.queue_bind(
                     exchange='computation.direct',
