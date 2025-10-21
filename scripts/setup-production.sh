@@ -95,11 +95,9 @@ setup_host() {
         echo "🐳 Building and starting on remote host..."
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
         
-        # Worker-Skalierung via --scale
-        if [[ "$COMPOSE_FILE" == *"worker-b"* ]]; then
-            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_B:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_B:-2} --scale comet_worker=\${COMET_WORKERS_B:-2}" || error_exit "Startup failed on $HOST"
-        elif [[ "$COMPOSE_FILE" == *"worker-c"* ]]; then
-            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_C:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_C:-2} --scale comet_worker=\${COMET_WORKERS_C:-2}" || error_exit "Startup failed on $HOST"
+        # Worker-Skalierung via --scale (aus .env auf Remote-Host)
+        if [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
+            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Startup failed on $HOST"
         else
             ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
         fi
@@ -139,14 +137,14 @@ echo ""
 
 # ===== WORKER SERVER B: rabbit-b.eibrain.org =====
 if [ "$SETUP_WORKER_B" == "true" ]; then
-    setup_host "rabbit-b.eibrain.org" "docker-compose.worker-b.yml" "Worker Server B (4 Workers)"
+    setup_host "rabbit-b.eibrain.org" "docker-compose.workers.yml" "Worker Server B"
 else
     warning "Skipping Worker Server B (SETUP_WORKER_B not set to 'true' in .env)"
 fi
 
 # ===== WORKER SERVER C: rabbit-c.eibrain.org =====
 if [ "$SETUP_WORKER_C" == "true" ]; then
-    setup_host "rabbit-c.eibrain.org" "docker-compose.worker-c.yml" "Worker Server C (4 Workers)"
+    setup_host "rabbit-c.eibrain.org" "docker-compose.workers.yml" "Worker Server C"
 else
     warning "Skipping Worker Server C (SETUP_WORKER_C not set to 'true' in .env)"
 fi
@@ -161,11 +159,11 @@ echo "   Web UI:         http://asciisky.eibrain.org (nginx → Port 8000)"
 echo "   RabbitMQ UI:    ssh -L 15672:localhost:15672 asciisky.eibrain.org (SSH-Tunnel)"
 echo "   PostgreSQL:     asciisky.eibrain.org:5432 (nur von Worker-Servern)"
 echo ""
-echo "👷 Workers (configured via .env):"
+echo "👷 Workers (configured via .env on each host):"
 echo "   Main Server:          ${PRECOMPUTE_WORKERS:-4} precompute workers"
-echo "   rabbit-b.eibrain.org: ${PRECOMPUTE_WORKERS_B:-4} precompute + ${ASTEROID_WORKERS_B:-2} asteroid + ${COMET_WORKERS_B:-2} comet workers"
-echo "   rabbit-c.eibrain.org: ${PRECOMPUTE_WORKERS_C:-4} precompute + ${ASTEROID_WORKERS_C:-2} asteroid + ${COMET_WORKERS_C:-2} comet workers"
-echo "   Edit .env to change worker counts (PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS, etc.)"
+echo "   rabbit-b.eibrain.org: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
+echo "   rabbit-c.eibrain.org: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
+echo "   Edit .env on each host to change worker counts"
 echo ""
 echo "🔄 Precompute System:"
 echo "   Coordinator: Creates tasks every hour"

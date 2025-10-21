@@ -1,14 +1,14 @@
-# Docker Compose für rabbit-b.eibrain.org
+# Docker Compose für Worker-Hosts (rabbit-b.eibrain.org, rabbit-c.eibrain.org)
 # Worker für Precompute, Asteroid, Comet
 #
 # Worker-Typen:
 # - Precompute: Vorausberechnung für bekannte Locations (stündlich)
 # - Asteroid/Comet: On-Demand für API-Requests (neue Locations, Cache-Miss, etc.)
 #
-# Skalierung via .env:
-# PRECOMPUTE_WORKERS_B=4 (default)
-# ASTEROID_WORKERS_B=2 (default)
-# COMET_WORKERS_B=2 (default)
+# Skalierung via .env (je nach Host):
+# PRECOMPUTE_WORKERS=4 (default)
+# ASTEROID_WORKERS=2 (default)
+# COMET_WORKERS=2 (default)
 
 services:
   # ===== Precompute Worker =====

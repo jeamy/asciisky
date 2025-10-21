@@ -59,8 +59,8 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh rabbit-b.eibrain.org "cd ~/asciisky && git pull" || error_exit "Git pull failed on rabbit-b"
-    ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml build" || error_exit "Build failed on rabbit-b"
-    ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_B:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_B:-2} --scale comet_worker=\${COMET_WORKERS_B:-2}" || error_exit "Restart failed on rabbit-b"
+    ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on rabbit-b"
+    ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on rabbit-b"
     
     success "Worker B updated"
     echo ""
@@ -75,8 +75,8 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh rabbit-c.eibrain.org "cd ~/asciisky && git pull" || error_exit "Git pull failed on rabbit-c"
-    ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml build" || error_exit "Build failed on rabbit-c"
-    ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS_C:-4} --scale asteroid_worker=\${ASTEROID_WORKERS_C:-2} --scale comet_worker=\${COMET_WORKERS_C:-2}" || error_exit "Restart failed on rabbit-c"
+    ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on rabbit-c"
+    ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on rabbit-c"
     
     success "Worker C updated"
     echo ""
@@ -99,6 +99,6 @@ echo ""
 echo "📝 Useful commands:"
 echo "   docker logs -f asciisky-precompute-coordinator  # Precompute coordinator"
 echo "   docker compose -f docker-compose.production.yml logs -f precompute_worker  # Precompute worker (main)"
-echo "   ssh rabbit-b.eibrain.org 'cd ~/asciisky && docker compose -f docker-compose.worker-b.yml logs -f precompute_worker'"
-echo "   ssh rabbit-c.eibrain.org 'cd ~/asciisky && docker compose -f docker-compose.worker-c.yml logs -f precompute_worker'"
+echo "   ssh rabbit-b.eibrain.org 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f precompute_worker'"
+echo "   ssh rabbit-c.eibrain.org 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f precompute_worker'"
 echo ""
