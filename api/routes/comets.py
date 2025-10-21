@@ -6,8 +6,6 @@ from api.computation import ts, eph
 import comets
 import settings
 import os
-import time
-import uuid
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_comet_positions
 import asyncio
@@ -46,25 +44,9 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 connection = pika.BlockingConnection(params)
                 channel = connection.channel()
                 logger.info(f"✅ Connected to RabbitMQ")
-
-                # Ensure exchange exists (idempotent)
-                channel.exchange_declare(
-                    exchange='computation.direct',
-                    exchange_type='direct',
-                    durable=True
-                )
-                # Ensure queue exists as quorum and binding is present (idempotent)
-                channel.queue_declare(
-                    queue='comet.compute',
-                    durable=True,
-                    arguments={'x-queue-type': 'quorum', 'x-message-ttl': 3600000}
-                )
-                channel.queue_bind(
-                    exchange='computation.direct',
-                    queue='comet.compute',
-                    routing_key='compute.comet'
-                )
-
+                
+                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
+                
                 # Task-Daten
                 task = {
                     'task_id': f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}",
@@ -196,8 +178,8 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
             else:
                 # Cache-Miss: Triggere Comet-Worker
                 logger.warning(f"❌ Cache MISS - triggering comet worker for {dt_utc.isoformat()}")
-                # Triggere SOFORT (synchron) statt Background Task
-                await trigger_comet_worker(lat, lon, elevation, dt_utc)
+                # Starte Task als FastAPI Background Task (läuft NACH Response)
+                background_tasks.add_task(trigger_comet_worker, lat, lon, elevation, dt_utc)
                 comet_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load comets from cache: {e}")

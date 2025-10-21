@@ -44,23 +44,8 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                 connection = pika.BlockingConnection(params)
                 channel = connection.channel()
                 logger.info(f"✅ Connected to RabbitMQ")
-                # Ensure exchange exists (idempotent)
-                channel.exchange_declare(
-                    exchange='computation.direct',
-                    exchange_type='direct',
-                    durable=True
-                )
-                # Ensure queue exists as quorum and binding is present (idempotent)
-                channel.queue_declare(
-                    queue='asteroid.compute',
-                    durable=True,
-                    arguments={'x-queue-type': 'quorum', 'x-message-ttl': 3600000}
-                )
-                channel.queue_bind(
-                    exchange='computation.direct',
-                    queue='asteroid.compute',
-                    routing_key='compute.asteroid'
-                )
+                
+                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
                 
                 # Task-Daten
                 task = {
@@ -188,8 +173,8 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
             else:
                 # Cache-Miss: Triggere Asteroid-Worker
                 logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
-                # Triggere SOFORT (synchron) statt Background Task
-                await trigger_asteroid_worker(lat, lon, elevation, dt_utc)
+                # Starte Task als FastAPI Background Task (läuft NACH Response)
+                background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, dt_utc)
                 asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")
