@@ -334,10 +334,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
                     'symbol': '⚸'
                 }
                 
-                # Debug first asteroid
-                if len(asteroid_list) == 0:
-                    print(f"DEBUG First asteroid: {asteroid_data['name']}, distance={asteroid_data['distance']}, rise={asteroid_data['rise_time']}")
-                
                 asteroid_list.append(asteroid_data)
                 
             except Exception as e:
