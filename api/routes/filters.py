@@ -43,21 +43,20 @@ def invalidate_cache():
                 cursor.execute("DELETE FROM comet_positions")
                 deleted_comet_positions = cursor.rowcount
                 
-                # Delete asteroid dataframes (force reload with new magnitude limit)
-                cursor.execute("DELETE FROM asteroids")
-                deleted_asteroid_df = cursor.rowcount
+                # Delete precomputed snapshots (contain filtered data)
+                cursor.execute("DELETE FROM precomputed_snapshots")
+                deleted_snapshots = cursor.rowcount
                 
-                # Delete comet dataframes (force reload with new magnitude limit)
-                cursor.execute("DELETE FROM comets")
-                deleted_comet_df = cursor.rowcount
+                # NOTE: We do NOT delete asteroids/comets tables!
+                # They contain ALL objects up to Mag 20.0 and are reusable for any filter.
                 
                 conn.commit()
                 
                 print(f"Cleared PostgreSQL cache:")
                 print(f"  - Asteroid positions: {deleted_asteroid_positions}")
                 print(f"  - Comet positions: {deleted_comet_positions}")
-                print(f"  - Asteroid dataframes: {deleted_asteroid_df}")
-                print(f"  - Comet dataframes: {deleted_comet_df}")
+                print(f"  - Precomputed snapshots: {deleted_snapshots}")
+                print(f"  - DataFrames: NOT deleted (contain Mag 20.0, reusable)")
             finally:
                 conn.close()
         except Exception as e:

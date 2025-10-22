@@ -31,14 +31,18 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 **Datei:** `doc/ARCHITECTURE_FLOW_API.md`
 
 **Inhalt:**
-- Kompletter Request-Flow von Browser bis Response
+- **Drei verschiedene API-Endpoints:**
+  1. **Asteroiden** - RabbitMQ Worker + Cache
+  2. **Kometen** - RabbitMQ Worker + Cache (identisch wie Asteroiden)
+  3. **Planeten** - Direktberechnung (keine Worker, kein Cache)
+- Kompletter Request-Flow für alle drei Typen
 - Cache-Hit vs Cache-Miss Szenarien
-- RabbitMQ RPC-Pattern für On-Demand Berechnungen
-- Worker-Verarbeitung (Asteroid/Comet Worker)
-- Magnitude-Filter Anwendung
-- JSON Response-Formatierung
+- RabbitMQ RPC-Pattern für Asteroiden/Kometen
+- Direktberechnung für Planeten (synchron, ~50-200ms)
+- Vergleichstabelle: Asteroiden/Kometen vs Planeten
+- Performance-Vergleich
 
-**Ablauf:**
+**Asteroiden/Kometen Ablauf:**
 1. Browser → FastAPI Endpoint
 2. Precomputed Cache Check
 3. Bei Cache-Miss: RabbitMQ RPC (30s Timeout)
@@ -46,10 +50,18 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 5. Magnitude-Filter anwenden
 6. Response zurück an Browser
 
+**Planeten Ablauf:**
+1. Browser → FastAPI Endpoint
+2. Direktberechnung mit Skyfield (50-200ms)
+3. Response zurück an Browser
+
 **Wichtige Komponenten:**
-- `api/routes/asteroids.py:get_bright_asteroids()` - API Endpoint
-- `workers/asteroid_worker.py:process_asteroid_task()` - Worker-Logik
-- `settings.py:get_magnitude_filters()` - Filter aus user_settings.json
+- `api/routes/asteroids.py:get_bright_asteroids()` - Asteroiden Endpoint
+- `api/routes/comets.py:get_comets()` - Kometen Endpoint (gleicher Flow)
+- `api/routes/planets.py:get_planets()` - Planeten Endpoint (Direktberechnung)
+- `workers/asteroid_worker.py` - Asteroid Worker
+- `workers/comet_worker.py` - Comet Worker
+- `planets.py:get_planet_positions()` - Planeten Berechnung
 
 ---
 

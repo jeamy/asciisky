@@ -59,18 +59,69 @@ User ändert Magnitude-Filter (z.B. 14 → 18)
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 3. Lösche PostgreSQL Caches                                    │
+│ 3. Lösche gefilterte PostgreSQL Caches                        │
 │    DELETE FROM asteroid_positions;                             │
-│    DELETE FROM asteroids;                                      │
+│    DELETE FROM comet_positions;                                │
+│    DELETE FROM precomputed_snapshots;                          │
+│                                                                │
+│    NICHT gelöscht: asteroids, comets                           │
+│    (Enthalten ALLE Objekte bis Mag 20, wiederverwendbar!)     │
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 4. Nächster Request lädt neu mit Mag 20.0                     │
-│    Filterung auf neues Limit → neue Objekte erscheinen!       │
+│ 4. Nächster Request                                            │
+│    - DataFrame-Cache vorhanden (Mag 20.0)                     │
+│    - Keine Position-Caches                                     │
+│    - Worker berechnet Positionen neu                           │
+│    - API-Route filtert auf neues Limit (z.B. 18)              │
+│    - Neue Objekte (14-18) erscheinen!                         │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 **Code:** `api/routes/filters.py:44-71`
+
+### Cache-Strategie bei Filter-Änderung
+
+**Architektur:**
+- Worker laden **immer** mit Mag 20.0 (hart-codiert)
+- DataFrame-Cache enthält **alle** Objekte bis Mag 20
+- Filterung passiert **nur** in API-Routen basierend auf `user_settings.json`
+- **Ein Cache für alle Benutzer-Filter!**
+
+**Was passiert bei Filter-Änderung:**
+
+Bei Filter-Änderung (z.B. 14 → 18) werden **nur** die gefilterten Caches gelöscht:
+
+```
+DELETE FROM asteroid_positions;     ← Enthält gefilterte Positionen
+DELETE FROM comet_positions;        ← Enthält gefilterte Positionen
+DELETE FROM precomputed_snapshots;  ← Enthält gefilterte Snapshots
+```
+
+**Was NICHT gelöscht wird:**
+```
+asteroids   ← Bleibt! (Enthält alle Objekte bis Mag 20)
+comets      ← Bleibt! (Enthält alle Objekte bis Mag 20)
+```
+
+**Ablauf nach Filter-Änderung:**
+1. User ändert Filter von 14 → 18
+2. Gefilterte Caches werden gelöscht
+3. Nächster Request:
+   - DataFrame-Cache vorhanden (Mag 20.0)
+   - Keine Position-Caches
+   - Worker berechnet Positionen neu
+   - API filtert auf Mag 18.0
+   - Objekte 14-18 erscheinen!
+
+**Code-Referenzen:**
+- `workers/precompute_worker.py:305` - `max_magnitude=20.0`
+- `workers/asteroid_worker.py:40` - `max_magnitude=20.0`
+- `bright_asteroids.py:361-520` - `load_bright_asteroids(max_magnitude=20.0)`
+- `comets.py:748-850` - `load_comets(max_magnitude=20.0)`
+- `api/routes/asteroids.py:75-78` - Filterung auf user_settings
+- `api/routes/comets.py:75-78` - Filterung auf user_settings
+- `settings.py:get_magnitude_filters()` - Liest user_settings.json
 
 ## Performance-Metriken
 
