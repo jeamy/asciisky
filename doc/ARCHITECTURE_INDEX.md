@@ -79,12 +79,13 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 - Response-Zeiten: 10ms (Hit) bis 30s (Cold Start)
 
 **Cache-Invalidierung:**
-- User ändert Filter → Lösche alle Caches
-- Wichtig: Auch DataFrames löschen (enthalten alte Magnitude-Limits)
-- Nächster Request lädt neu mit Mag 20.0
-- Filterung auf neues Limit
+- User ändert Filter → Lösche nur gefilterte Caches
+- Nur `precomputed_snapshots` wird gelöscht (enthält gefilterte Daten)
+- Position-Caches bleiben (ungefiltert, wiederverwendbar)
+- DataFrames bleiben (MPC Orbitaldaten, Mag 20.0, wiederverwendbar)
+- Nächster Request: Sofortige Anzeige neuer Objekte ohne Neuberechnung!
 
-**Code:** `api/routes/filters.py:44-71`
+**Code:** `api/routes/filters.py:36-59`
 
 ---
 

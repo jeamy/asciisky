@@ -35,28 +35,19 @@ def invalidate_cache():
             try:
                 cursor = conn.cursor()
                 
-                # Delete all asteroid positions
-                cursor.execute("DELETE FROM asteroid_positions")
-                deleted_asteroid_positions = cursor.rowcount
-                
-                # Delete all comet positions
-                cursor.execute("DELETE FROM comet_positions")
-                deleted_comet_positions = cursor.rowcount
-                
-                # Delete precomputed snapshots (contain filtered data)
-                cursor.execute("DELETE FROM precomputed_snapshots")
-                deleted_snapshots = cursor.rowcount
-                
-                # NOTE: We do NOT delete asteroids/comets tables!
-                # They contain ALL objects up to Mag 20.0 and are reusable for any filter.
+                # NOTE: We do NOT delete ANY PostgreSQL caches!
+                # All caches contain unfiltered data:
+                # - asteroid_positions/comet_positions: All computed positions (unfiltered)
+                # - asteroids/comets: All objects up to Mag 20.0 (unfiltered)
+                # Filtering happens in API routes based on user_settings.json.
+                # All caches are reusable for any filter setting!
                 
                 conn.commit()
                 
-                print(f"Cleared PostgreSQL cache:")
-                print(f"  - Asteroid positions: {deleted_asteroid_positions}")
-                print(f"  - Comet positions: {deleted_comet_positions}")
-                print(f"  - Precomputed snapshots: {deleted_snapshots}")
-                print(f"  - DataFrames: NOT deleted (contain Mag 20.0, reusable)")
+                print(f"Cache invalidation:")
+                print(f"  - In-memory caches: Cleared")
+                print(f"  - PostgreSQL caches: NOT deleted (all unfiltered, reusable)")
+                print(f"  - Filtering: Happens in API routes based on user_settings.json")
             finally:
                 conn.close()
         except Exception as e:
