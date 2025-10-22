@@ -11,22 +11,22 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         ASCII Sky System                         │
+│                         ASCII Sky System                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
+│                                                                 │
 │  ┌──────────────────┐              ┌──────────────────┐         │
 │  │  Precompute      │              │  On-Demand       │         │
 │  │  (Stündlich)     │              │  (Bei Bedarf)    │         │
 │  └──────────────────┘              └──────────────────┘         │
-│           │                                  │                   │
+│           │                                  │                  │
 │           ├──────────────┬──────────────────┤                   │
 │           │              │                  │                   │
 │           ▼              ▼                  ▼                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
-│  │ PostgreSQL  │  │  RabbitMQ   │  │   Worker    │            │
-│  │   Cache     │  │   Queues    │  │   Cluster   │            │
-│  └─────────────┘  └─────────────┘  └─────────────┘            │
-│                                                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │ PostgreSQL  │  │  RabbitMQ   │  │   Worker    │              │
+│  │   Cache     │  │   Queues    │  │   Cluster   │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘              │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -45,16 +45,16 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
              │ 1. Lade Locations aus user_settings.json
              ▼
     ┌────────────────────────────────────────────────────────────┐
-    │ Für jede Location & nächste X Stunden:                    │
-    │ - X = ASCII_SKY_PRECOMPUTE_HOURS (default: 720 = 30 Tage) │
-    │ - Erstelle Task für jede Stunde                           │
+    │ Für jede Location & nächste X Stunden:                     │
+    │ - X = ASCII_SKY_PRECOMPUTE_HOURS (default: 720 = 30 Tage)  │
+    │ - Erstelle Task für jede Stunde                            │
     └────────┬───────────────────────────────────────────────────┘
              │
              │ 2. Publiziere Tasks zu RabbitMQ Queue: "precompute.tasks"
              ▼
     ┌────────────────────────────────────────┐
     │         RabbitMQ Queue                 │
-    │  [Task1] [Task2] [Task3] ... [TaskN]  │
+    │  [Task1] [Task2] [Task3] ... [TaskN]   │
     └────────┬───────────────────────────────┘
              │
              │ 3. Worker holen Tasks (12 Worker total)
