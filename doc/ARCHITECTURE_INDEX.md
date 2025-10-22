@@ -73,7 +73,7 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 
 **Inhalt:**
 - 3-Level Cache-Hierarchie (nur Asteroiden & Kometen)
-  - **Level 1:** Position Cache (Unbegrenzt) - `asteroid_positions`, `comet_positions`
+  - **Level 1:** Position Cache (Unbegrenzt) - `cached_positions`
   - **Level 2:** DataFrame Cache (31 Tage) - `asteroids`, `comets`
   - **Level 3:** MPC Download (Fallback) - MPCORB.DAT, CometEls.txt
 - Planeten: NICHT gecacht (Direktberechnung)
@@ -104,24 +104,20 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 
 **Tabellen:**
 
-#### `precomputed_snapshots`
-- Key: `(location_id, timestamp)`
-- TTL: 48 Stunden
-- Inhalt: Komplette Snapshots (Asteroiden + Kometen + Planeten)
-- Größe: ~50 KB pro Eintrag
-
-#### `asteroids` / `comets`
-- Inhalt: Pickle-serialisierte Pandas DataFrames
+#### `asteroids` / `comets` (DataFrame Cache)
+- Inhalt: Pickle-serialisierte Pandas DataFrames mit MPC Orbitaldaten
 - TTL: 31 Tage
 - Größe: ~20 MB (Asteroiden), ~1 MB (Kometen)
+- Quelle: MPCORB.DAT, CometEls.txt
 
-#### `asteroid_positions` / `comet_positions`
-- Key: `(location_hash, timestamp)`
-- TTL: 24 Stunden
-- Inhalt: Berechnete Positionen als JSON
+#### `cached_positions` (Position Cache)
+- Key: `(object_type, location_key, time_bucket)`
+- TTL: Unbegrenzt (Positionen sind unveränderlich)
+- Inhalt: Berechnete Positionen als Pickle (ungefiltert)
 - Größe: ~10 KB pro Eintrag
+- Enthält: Asteroiden und Kometen in einer Tabelle
 
-**Total:** ~50-100 MB für vollen Cache
+**Total:** ~25-60 MB für vollen Cache (ohne Planeten)
 
 ---
 
@@ -173,17 +169,16 @@ Browser → FastAPI → Cache Check
 ## 🗄️ Cache-Hierarchie
 
 ```
-Level 1: Precomputed Snapshots (48h)
+Level 1: Position Cache (Unbegrenzt)
     │ MISS
     ▼
-Level 2: DataFrame Cache (31d)
+Level 2: DataFrame Cache (31 Tage)
     │ MISS
     ▼
-Level 3: Position Cache (24h)
-    │ MISS
-    ▼
-Level 4: MPC Download (5-30s)
+Level 3: MPC Download (5-30s)
 ```
+
+**Hinweis:** Nur für Asteroiden & Kometen. Planeten werden direkt berechnet (kein Cache).
 
 **Siehe:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
 
@@ -193,10 +188,10 @@ Level 4: MPC Download (5-30s)
 
 | Szenario | Cache Level | Response Zeit | Beschreibung |
 |----------|-------------|---------------|--------------|
-| **Best Case** | Level 1 | 10-50ms | Precomputed Snapshot vorhanden |
-| **Cache Hit** | Level 3 | 100-200ms | Position Cache vorhanden |
-| **Cache Miss** | Level 2 | 2-5s | DataFrame vorhanden, Berechnung nötig |
-| **Cold Start** | Level 4 | 10-30s | MPC Download + Parse + Berechnung |
+| **Position Cache Hit** | Level 1 | 100-200ms | Berechnete Positionen vorhanden |
+| **DataFrame Cache Hit** | Level 2 | 2-5s | DataFrame vorhanden, Berechnung nötig |
+| **Cold Start** | Level 3 | 10-30s | MPC Download + Parse + Berechnung |
+| **Planeten** | Kein Cache | 50-200ms | Direktberechnung (nur 8 Objekte) |
 
 **Siehe:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
 

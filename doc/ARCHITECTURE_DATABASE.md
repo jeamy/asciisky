@@ -43,36 +43,32 @@ CREATE TABLE comets (
 
 ---
 
-### 2. asteroid_positions / comet_positions (Position Cache)
+### 2. cached_positions (Position Cache)
 
 Speichert berechnete Positionen für spezifische Location/Time Kombinationen.
+Verwendet **eine** Tabelle für Asteroiden und Kometen.
 
 ```sql
-CREATE TABLE asteroid_positions (
+CREATE TABLE cached_positions (
     id SERIAL PRIMARY KEY,
-    location_hash VARCHAR(64) NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
-    positions JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(location_hash, timestamp)
+    object_type VARCHAR(20) NOT NULL,      -- 'asteroid' oder 'comet'
+    object_id INTEGER NOT NULL,
+    location_key VARCHAR(100) NOT NULL,    -- 'lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ'
+    time_bucket VARCHAR(20) NOT NULL,      -- 'YYYYMMDDTHH' (1-hour buckets)
+    observer_lat DOUBLE PRECISION NOT NULL,
+    observer_lon DOUBLE PRECISION NOT NULL,
+    observer_elevation DOUBLE PRECISION NOT NULL,
+    computed_at TIMESTAMP NOT NULL,
+    position_data BYTEA NOT NULL,          -- Pickle-serialisierte Daten
+    UNIQUE(object_type, location_key, time_bucket)
 );
 
-CREATE TABLE comet_positions (
-    id SERIAL PRIMARY KEY,
-    location_hash VARCHAR(64) NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
-    positions JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(location_hash, timestamp)
-);
-
-CREATE INDEX idx_asteroid_positions_hash_time 
-    ON asteroid_positions(location_hash, timestamp);
-CREATE INDEX idx_comet_positions_hash_time 
-    ON comet_positions(location_hash, timestamp);
+CREATE INDEX idx_cached_loc_time ON cached_positions(location_key, time_bucket);
+CREATE INDEX idx_cached_computed ON cached_positions(computed_at);
+CREATE INDEX idx_cached_type ON cached_positions(object_type);
 ```
 
-**location_hash:** SHA256 von `f"{lat:.2f}_{lon:.2f}"`
+**location_key:** Format `lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ`
 
 **Inhalt:** Ungefilterte berechnete Positionen (alle Objekte bis Mag ~22)
 
@@ -101,9 +97,9 @@ CREATE INDEX idx_comet_positions_hash_time
 
 **Code:** 
 - `db_utils.py:store_asteroid_positions()` - Zeilen 90-112
-- `db_utils.py:store_comet_positions()` - Zeilen 180-202
-- `db_utils.py:get_asteroid_positions()` - Zeilen 114-134
-- `db_utils.py:get_comet_positions()` - Zeilen 204-224
+- `db_utils.py:store_comet_positions()` - Zeilen 180-206
+- `db_utils.py:get_asteroid_positions()` - Zeilen 114-138
+- `db_utils.py:get_comet_positions()` - Zeilen 208-232
 
 ---
 
@@ -127,7 +123,7 @@ Skyfield Position Calculation
          │
          │ Für jeden Ort/Zeit
          ▼
-PostgreSQL: asteroid_positions/comet_positions
+PostgreSQL: cached_positions
          │
          │ Ungefiltert (alle Objekte)
          ▼
@@ -143,7 +139,7 @@ API Response (JSON, gefiltert)
 | Tabelle | TTL | Grund |
 |---------|-----|-------|
 | asteroids/comets | 31 Tage | Orbital Elements ändern sich langsam |
-| asteroid_positions/comet_positions | Unbegrenzt | Positionen für spezifischen Zeitpunkt sind unveränderlich |
+| cached_positions | Unbegrenzt | Positionen für spezifischen Zeitpunkt sind unveränderlich |
 
 **Position Cache:**
 
@@ -165,7 +161,6 @@ Positionen für einen **spezifischen Zeitpunkt** (time_bucket) sind **unverände
 |---------|-------------|-------------|
 | asteroids | 20-50 MB | ~20 MB (DataFrame mit ~1M Objekten) |
 | comets | 1-5 MB | ~1 MB (DataFrame mit ~1000 Objekten) |
-| asteroid_positions | 100-500 KB | ~10 KB (JSON Array, ungefiltert) |
-| comet_positions | 10-50 KB | ~1 KB (JSON Array, ungefiltert) |
+| cached_positions | 100-500 KB | ~10 KB (Pickle Array, ungefiltert) |
 
 **Total:** ~25-60 MB für vollen Cache (ohne Planeten)

@@ -44,10 +44,11 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
              │
              │ 1. Lade Locations aus user_settings.json
              ▼
-    ┌────────────────────────────────────────┐
-    │ Für jede Location & nächste 48h:      │
-    │ - Erstelle Task für jede Stunde       │
-    └────────┬───────────────────────────────┘
+    ┌────────────────────────────────────────────────────────────┐
+    │ Für jede Location & nächste X Stunden:                    │
+    │ - X = ASCII_SKY_PRECOMPUTE_HOURS (default: 720 = 30 Tage) │
+    │ - Erstelle Task für jede Stunde                           │
+    └────────┬───────────────────────────────────────────────────┘
              │
              │ 2. Publiziere Tasks zu RabbitMQ Queue: "precompute.tasks"
              ▼
@@ -85,7 +86,7 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 │  D. Speichere in PostgreSQL                      │
 │     db_utils.py:store_asteroid_positions()       │
 │     db_utils.py:store_comet_positions()          │
-│     Tabellen: asteroid_positions, comet_positions│
+│     Tabelle: cached_positions                    │
 └──────────────────────────────────────────────────┘
 ```
 

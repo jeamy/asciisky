@@ -5,8 +5,8 @@
 ```
 Level 1: Position Cache (PostgreSQL)
 ┌────────────────────────────────────────────────────────────────┐
-│ Tabellen: asteroid_positions, comet_positions                  │
-│ Key: (location_key, time_bucket)                               │
+│ Tabelle: cached_positions                                      │
+│ Key: (object_type, location_key, time_bucket)                  │
 │ TTL: Unbegrenzt (Positionen sind unveränderlich)               │
 │ Inhalt: Berechnete Positionen (ungefiltert)                    │
 │ Erstellt von: Precompute Worker (stündlich) + On-Demand       │
