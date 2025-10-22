@@ -59,10 +59,10 @@ rabbit_amqqueue:declare(
 echo "🔄 Creating precompute.tasks queue..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
 rabbit_amqqueue:declare(
-    {resource, <<\"/\">>, queue, <<"precompute.tasks">>},
+    {resource, <<\"/\">>, queue, <<\"precompute.tasks\">>},
     true,
     false,
-    [{<<\"x-queue-type\">>, longstr, <<"quorum">>}, {<<\"x-max-priority\">>, long, 10}],
+    [{<<\"x-max-priority\">>, long, 10}],
     none
 ).
 " > /dev/null 2>&1 || echo "Queue already exists"
@@ -102,6 +102,6 @@ echo ""
 echo "📋 Created queues:"
 echo "   - asteroid.compute (Quorum, TTL 1h)"
 echo "   - comet.compute (Quorum, TTL 1h)"
-echo "   - precompute.tasks (Quorum, Priority 0-10)"
+echo "   - precompute.tasks (Classic, Priority 0-10)"
 echo "   - computation.results"
 echo "   - computation.status"

@@ -40,16 +40,17 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
     Cache HIT  Cache MISS
         │         │
         ▼         ▼
-    ┌────────┐  ┌──────────────────────────────────┐
-    │ Filter │  │  RabbitMQ: On-Demand Berechnung  │
-    │ + Ret. │  │                                  │
-    └────────┘  │  2. Publiziere zu RabbitMQ       │
+    ┌────────┐  ┌───────────────────────────────────┐
+    │ Filter │  │  RabbitMQ: On-Demand Berechnung   │
+    │ + Ret. │  │                                   │
+    └────────┘  │  2. Publiziere zu RabbitMQ        │
                 │     Exchange: "computation.direct"│
-                │     Queue: "asteroid.compute"    │
-                │                                  │
-                │  3. Warte auf Antwort (RPC)      │
-                │     Timeout: 30 Sekunden         │
-                └────────┬─────────────────────────┘
+                │     Queue (Quorum, TTL 1h):       │
+                │     "asteroid.compute"            │
+                │                                   │
+                │  3. Warte auf Antwort (RPC)       │
+                │     Timeout: 30 Sekunden          │
+                └────────┬──────────────────────────┘
                          │
                          ▼
                 ┌────────────────────────────────────┐
@@ -59,7 +60,7 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
                 │  A. Lade DataFrame aus PostgreSQL  │
                 │  B. Berechne Positionen (Mag 20.0) │
                 │  C. Speichere ungefiltert in Cache │
-                │     (asteroid_positions)           │
+                │     (cached_positions)             │
                 └────────┬───────────────────────────┘
                          │
                          │ 4. Sende Antwort zurück
@@ -104,11 +105,16 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
 
 **Unterschiede:**
 - Andere MPC-Datenquelle (MPCORB.DAT vs Comets Ephemerides)
-- Andere RabbitMQ Queue (`asteroid.compute` vs `comet.compute`)
+- Andere RabbitMQ Queue (Quorum, TTL 1h: `asteroid.compute` vs `comet.compute`)
 - Andere PostgreSQL Tabellen (`asteroids` vs `comets`)
 - **Gleiche Architektur, gleicher Ablauf!**
 
 ---
+
+### RabbitMQ Queues
+
+- Precompute: `precompute.tasks` (Classic, Priority 0–10)
+- On-Demand: `asteroid.compute`, `comet.compute` (Quorum, TTL 1h)
 
 ## Planeten (Direktberechnung)
 

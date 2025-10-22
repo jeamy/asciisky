@@ -166,6 +166,13 @@ Browser → FastAPI → Cache Check
 
 ---
 
+### RabbitMQ Queues
+
+- Precompute: `precompute.tasks` (Classic, Priority 0–10)
+- On-Demand: `asteroid.compute`, `comet.compute` (Quorum, TTL 1h)
+
+---
+
 ## 🗄️ Cache-Hierarchie
 
 ```

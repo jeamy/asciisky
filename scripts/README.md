@@ -149,7 +149,7 @@ UPDATE_WORKER_C=true  # Optional: Worker C updaten
 - ✅ Erstellt Exchange `computation.direct`
 - ✅ Erstellt Queue `asteroid.compute` (Quorum)
 - ✅ Erstellt Queue `comet.compute` (Quorum)
-- ✅ Erstellt Queue `precompute.tasks` (Quorum, Priority)
+- ✅ Erstellt Queue `precompute.tasks` (Classic, Priority)
 - ✅ Erstellt Result/Status Queues
 
 **Verwendung:**
