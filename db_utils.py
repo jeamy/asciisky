@@ -112,21 +112,25 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
         ))
 
 def get_asteroid_positions(location_key: str, time_bucket: str,
-                              max_age_seconds: int = 49 * 3600) -> Optional[List[Dict]]:
-    """Retrieve cached asteroid positions from PostgreSQL."""
+                              max_age_seconds: int = None) -> Optional[List[Dict]]:
+    """
+    Retrieve cached asteroid positions from PostgreSQL.
+    
+    Note: Positions for a specific time_bucket are immutable and can be cached indefinitely.
+    The max_age_seconds parameter is deprecated and ignored.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    
+    # Positions for a specific time_bucket are immutable - no TTL needed!
+    # We simply retrieve the most recent calculation for this location/time combination
     cursor.execute("""
         SELECT position_data FROM cached_positions
         WHERE object_type = 'asteroid'
           AND location_key = %s
           AND time_bucket = %s
-          AND EXTRACT(EPOCH FROM computed_at) > %s
         ORDER BY computed_at DESC LIMIT 1
-    """, (location_key, time_bucket, cutoff_time))
+    """, (location_key, time_bucket))
     
     row = cursor.fetchone()
     if row and row['position_data']:
@@ -202,21 +206,25 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
         ))
 
 def get_comet_positions(location_key: str, time_bucket: str,
-                           max_age_seconds: int = 3600) -> Optional[List[Dict]]:
-    """Retrieve cached comet positions from PostgreSQL."""
+                           max_age_seconds: int = None) -> Optional[List[Dict]]:
+    """
+    Retrieve cached comet positions from PostgreSQL.
+    
+    Note: Positions for a specific time_bucket are immutable and can be cached indefinitely.
+    The max_age_seconds parameter is deprecated and ignored.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cutoff_time = datetime.now(timezone.utc).timestamp() - max_age_seconds
-    
+    # Positions for a specific time_bucket are immutable - no TTL needed!
+    # We simply retrieve the most recent calculation for this location/time combination
     cursor.execute("""
         SELECT position_data FROM cached_positions
         WHERE object_type = 'comet'
           AND location_key = %s
           AND time_bucket = %s
-          AND EXTRACT(EPOCH FROM computed_at) > %s
         ORDER BY computed_at DESC LIMIT 1
-    """, (location_key, time_bucket, cutoff_time))
+    """, (location_key, time_bucket))
     
     row = cursor.fetchone()
     if row and row['position_data']:

@@ -22,8 +22,10 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 **Wichtige Komponenten:**
 - `api/background.py:precompute_coordinator()` - Stündlicher Coordinator
 - `workers/precompute_worker.py:process_precompute_task()` - Task-Verarbeitung
-- `bright_asteroids.py:load_bright_asteroids()` - Asteroid-Daten laden
-- `db_utils.py:store_precomputed_snapshot()` - Cache speichern
+- `bright_asteroids.py:load_bright_asteroids()` - Asteroiden-Daten laden
+- `comets.py:load_comets()` - Kometen-Daten laden
+- `db_utils.py:store_asteroid_positions()` - Position-Cache speichern
+- `db_utils.py:store_comet_positions()` - Position-Cache speichern
 
 ---
 
@@ -44,11 +46,12 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 
 **Asteroiden/Kometen Ablauf:**
 1. Browser → FastAPI Endpoint
-2. Precomputed Cache Check
+2. Position Cache Check
 3. Bei Cache-Miss: RabbitMQ RPC (30s Timeout)
-4. Worker berechnet Positionen
-5. Magnitude-Filter anwenden
-6. Response zurück an Browser
+4. Worker berechnet Positionen (Mag 20.0, ungefiltert)
+5. Worker speichert in Cache
+6. FastAPI: Magnitude-Filter anwenden (user_settings.json)
+7. Response zurück an Browser
 
 **Planeten Ablauf:**
 1. Browser → FastAPI Endpoint
@@ -69,23 +72,24 @@ Komplette Übersicht über die System-Architektur, Datenflüsse und Implementier
 **Datei:** `doc/ARCHITECTURE_CACHE.md`
 
 **Inhalt:**
-- 4-Level Cache-Hierarchie
-  - **Level 1:** Precomputed Snapshots (48h TTL)
-  - **Level 2:** DataFrame Cache (31 Tage TTL)
-  - **Level 3:** Position Cache (24h TTL)
-  - **Level 4:** MPC Download (Fallback)
+- 3-Level Cache-Hierarchie (nur Asteroiden & Kometen)
+  - **Level 1:** Position Cache (Unbegrenzt) - `asteroid_positions`, `comet_positions`
+  - **Level 2:** DataFrame Cache (31 Tage) - `asteroids`, `comets`
+  - **Level 3:** MPC Download (Fallback) - MPCORB.DAT, CometEls.txt
+- Planeten: NICHT gecacht (Direktberechnung)
 - Cache-Invalidierung bei Magnitude-Filter Änderung
 - Performance-Metriken pro Cache-Level
-- Response-Zeiten: 10ms (Hit) bis 30s (Cold Start)
+- Response-Zeiten: 100-200ms (Position Cache) bis 30s (Cold Start)
 
 **Cache-Invalidierung:**
-- User ändert Filter → Lösche nur gefilterte Caches
-- Nur `precomputed_snapshots` wird gelöscht (enthält gefilterte Daten)
-- Position-Caches bleiben (ungefiltert, wiederverwendbar)
-- DataFrames bleiben (MPC Orbitaldaten, Mag 20.0, wiederverwendbar)
+- User ändert Filter → **KEINE** PostgreSQL Caches gelöscht!
+- Alle Caches enthalten ungefilterte Daten (wiederverwendbar)
+- Position-Caches: Alle berechneten Positionen (bis Mag ~22)
+- DataFrames: MPC Orbitaldaten (Mag 20.0)
+- Filterung: Nur in API-Routen basierend auf user_settings.json
 - Nächster Request: Sofortige Anzeige neuer Objekte ohne Neuberechnung!
 
-**Code:** `api/routes/filters.py:36-59`
+**Code:** `api/routes/filters.py:36-57`
 
 ---
 
@@ -231,39 +235,51 @@ settings.py                   # user_settings.json
 
 ## 🎯 Wichtige Funktionen
 
-### Asteroid-Berechnung
+### Asteroiden-Berechnung
 **Datei:** `bright_asteroids.py`
 
 ```python
-load_bright_asteroids(max_magnitude=20.0)
-# Lädt DataFrame aus Cache oder MPC
-# Zeilen: 361-520
-
-compute_positions(df, location, time)
+load_bright_asteroids(loader, ts, eph, observer_loc, max_magnitude=20.0, current_dt=None)
+# Lädt DataFrame aus PostgreSQL Cache oder MPC MPCORB.DAT
 # Berechnet Positionen mit Skyfield
-# Zeilen: 200-300
+# Zeilen: 200-360
 ```
 
-### RabbitMQ RPC
-**Datei:** `api/routes/asteroids.py`
+### Kometen-Berechnung
+**Datei:** `comets.py`
 
 ```python
-async def get_bright_asteroids(lat, lon, time)
-# API Endpoint mit Cache-Check und RPC
-# Zeilen: 20-120
+load_comets(ts, eph, observer_loc, max_comets=100, max_magnitude=20.0, current_dt=None)
+# Lädt DataFrame aus PostgreSQL Cache oder MPC CometEls.txt
+# Berechnet Positionen mit Skyfield
+# Zeilen: 280-450
+```
+
+### Planeten-Berechnung
+**Datei:** `planets.py`
+
+```python
+get_planet_positions(lat, lon, elevation, time=None)
+# Direktberechnung (kein Cache)
+# Verwendet Skyfield's eingebaute Planeten-Ephemeris (de421.bsp)
+# Zeilen: 50-200
 ```
 
 ### Cache-Verwaltung
 **Datei:** `db_utils.py`
 
 ```python
-get_precomputed_snapshot(location_id, timestamp)
-# Holt Snapshot aus PostgreSQL
-# Zeilen: 185-200
+# DataFrame Cache
+store_asteroid_dataframe(df_pickle)  # Zeilen: 55-67
+get_asteroid_dataframe()             # Zeilen: 69-88
+store_comet_dataframe(df_pickle)     # Zeilen: 138-148
+get_comet_dataframe()                # Zeilen: 150-164
 
-store_precomputed_snapshot(location_id, timestamp, data)
-# Speichert Snapshot in PostgreSQL
-# Zeilen: 150-180
+# Position Cache
+store_asteroid_positions(asteroid_id, location_key, time_bucket, ...)  # Zeilen: 90-112
+get_asteroid_positions(location_key, time_bucket)                      # Zeilen: 114-134
+store_comet_positions(comet_id, location_key, time_bucket, ...)        # Zeilen: 180-202
+get_comet_positions(location_key, time_bucket)                         # Zeilen: 204-224
 ```
 
 ---

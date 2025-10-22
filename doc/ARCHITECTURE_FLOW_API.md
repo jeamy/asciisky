@@ -31,8 +31,8 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
              │ 1. Parse Request Parameter
              ▼
     ┌────────────────────────────────────────┐
-    │  Prüfe Precomputed Cache               │
-    │  db_utils.py:get_precomputed_snapshot()│
+    │  Prüfe Position Cache                  │
+    │  db_utils.py:get_asteroid_positions()  │
     └────────┬───────────────────────────────┘
              │
         ┌────┴────┐
@@ -41,8 +41,8 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
         │         │
         ▼         ▼
     ┌────────┐  ┌──────────────────────────────────┐
-    │ Return │  │  RabbitMQ: On-Demand Berechnung  │
-    │ Data   │  │                                  │
+    │ Filter │  │  RabbitMQ: On-Demand Berechnung  │
+    │ + Ret. │  │                                  │
     └────────┘  │  2. Publiziere zu RabbitMQ       │
                 │     Exchange: "computation.direct"│
                 │     Queue: "asteroid.compute"    │
@@ -57,19 +57,21 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
                 │  workers/asteroid_worker.py        │
                 │                                    │
                 │  A. Lade DataFrame aus PostgreSQL  │
-                │  B. Berechne Positionen            │
-                │  C. Wende Magnitude-Filter an      │
-                │  D. Speichere Positions-Cache      │
+                │  B. Berechne Positionen (Mag 20.0) │
+                │  C. Speichere ungefiltert in Cache │
+                │     (asteroid_positions)           │
                 └────────┬───────────────────────────┘
                          │
                          │ 4. Sende Antwort zurück
                          ▼
                 ┌────────────────────────────────────┐
-                │  FastAPI formatiert JSON Response  │
-                │  {                                 │
-                │    "asteroids": [...],             │
-                │    "count": 42                     │
-                │  }                                 │
+                │  FastAPI: Magnitude-Filterung      │
+                │  api/routes/asteroids.py:188-189   │
+                │                                    │
+                │  if asteroid['magnitude'] <= max:  │
+                │      result.add(asteroid)          │
+                │                                    │
+                │  Formatiert JSON Response          │
                 └────────┬───────────────────────────┘
                          │
                          ▼

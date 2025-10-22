@@ -71,18 +71,21 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 │  A. Lade Asteroiden-DataFrame                    │
 │     bright_asteroids.py:load_bright_asteroids()  │
 │     - Prüfe PostgreSQL Cache (TTL 31 Tage)       │
-│     - Falls fehlt: Download von MPC              │
+│     - Falls fehlt: Download von MPC MPCORB.DAT   │
 │                                                  │
 │  B. Lade Kometen-DataFrame                       │
 │     comets.py:load_comets()                      │
+│     - Prüfe PostgreSQL Cache (TTL 31 Tage)       │
+│     - Falls fehlt: Download MPC CometEls.txt     │
 │                                                  │
 │  C. Berechne Positionen                          │
-│     bright_asteroids.py:compute_positions()      │
-│     - Skyfield Berechnungen                      │
+│     - Skyfield Berechnungen für jeden Ort/Zeit   │
+│     - Asteroiden & Kometen                       │
 │                                                  │
 │  D. Speichere in PostgreSQL                      │
-│     db_utils.py:store_precomputed_snapshot()     │
-│     Tabelle: precomputed_snapshots               │
+│     db_utils.py:store_asteroid_positions()       │
+│     db_utils.py:store_comet_positions()          │
+│     Tabellen: asteroid_positions, comet_positions│
 └──────────────────────────────────────────────────┘
 ```
 
@@ -91,9 +94,11 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 | Komponente | Datei | Funktion | Zeilen |
 |------------|-------|----------|--------|
 | Coordinator | `api/background.py` | `precompute_coordinator()` | 130-195 |
-| Worker | `workers/precompute_worker.py` | `process_precompute_task()` | 200-350 |
-| Asteroid Load | `bright_asteroids.py` | `load_bright_asteroids()` | 361-520 |
-| DB Store | `db_utils.py` | `store_precomputed_snapshot()` | 150-180 |
+| Worker | `workers/precompute_worker.py` | `process_precompute_task()` | 80-190 |
+| Asteroid Load | `bright_asteroids.py` | `load_bright_asteroids()` | 200-360 |
+| Comet Load | `comets.py` | `load_comets()` | 280-450 |
+| Asteroid Store | `db_utils.py` | `store_asteroid_positions()` | 90-112 |
+| Comet Store | `db_utils.py` | `store_comet_positions()` | 180-202 |
 
 ---
 

@@ -2,49 +2,7 @@
 
 ## PostgreSQL Tabellen
 
-### 1. precomputed_snapshots
-
-Speichert vorberechnete komplette Snapshots für bekannte Locations.
-
-```sql
-CREATE TABLE precomputed_snapshots (
-    id SERIAL PRIMARY KEY,
-    location_id VARCHAR(255) NOT NULL,
-    timestamp TIMESTAMP NOT NULL,
-    data JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(location_id, timestamp)
-);
-
-CREATE INDEX idx_precomputed_location_time 
-    ON precomputed_snapshots(location_id, timestamp);
-```
-
-**Beispiel-Inhalt:**
-```json
-{
-  "asteroids": [
-    {
-      "name": "Ceres",
-      "magnitude": 7.2,
-      "alt": 45.3,
-      "az": 180.5,
-      "ra": "12h 34m 56s",
-      "dec": "+23° 45' 12\"",
-      "rise_time": "2025-10-22T18:30:00Z",
-      "set_time": "2025-10-23T06:15:00Z"
-    }
-  ],
-  "comets": [...],
-  "planets": [...]
-}
-```
-
-**Code:** `db_utils.py:150-180`
-
----
-
-### 2. asteroids / comets (DataFrame Cache)
+### 1. asteroids / comets (DataFrame Cache)
 
 Speichert Rohdaten von MPC als Pickle-serialisierte Pandas DataFrames.
 
@@ -77,11 +35,15 @@ CREATE TABLE comets (
 - n (Mean Daily Motion)
 - a (Semimajor Axis)
 
+**Quelle:**
+- Asteroiden: https://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT (~200 MB)
+- Kometen: https://minorplanetcenter.net/iau/Ephemerides/Comets/CometEls.txt (~100 KB)
+
 **Code:** `db_utils.py:55-90`
 
 ---
 
-### 3. asteroid_positions / comet_positions
+### 2. asteroid_positions / comet_positions (Position Cache)
 
 Speichert berechnete Positionen für spezifische Location/Time Kombinationen.
 
@@ -112,6 +74,8 @@ CREATE INDEX idx_comet_positions_hash_time
 
 **location_hash:** SHA256 von `f"{lat:.2f}_{lon:.2f}"`
 
+**Inhalt:** Ungefilterte berechnete Positionen (alle Objekte bis Mag ~22)
+
 **Beispiel-Inhalt:**
 ```json
 [
@@ -120,59 +84,88 @@ CREATE INDEX idx_comet_positions_hash_time
     "magnitude": 7.2,
     "alt": 45.3,
     "az": 180.5,
-    "visible": true
+    "ra": 12.5,
+    "dec": 23.8,
+    "distance": 2.3,
+    "rise_time": "18:30",
+    "transit_time": "00:15",
+    "set_time": "06:00",
+    "type": "asteroid",
+    "symbol": "⚸"
   },
   ...
 ]
 ```
 
-**Code:** `db_utils.py:95-145`
+**Wichtig:** Enthält ALLE berechneten Objekte (ungefiltert)! Filterung passiert in API-Routen.
+
+**Code:** 
+- `db_utils.py:store_asteroid_positions()` - Zeilen 90-112
+- `db_utils.py:store_comet_positions()` - Zeilen 180-202
+- `db_utils.py:get_asteroid_positions()` - Zeilen 114-134
+- `db_utils.py:get_comet_positions()` - Zeilen 204-224
 
 ---
 
 ## Datenfluss
 
 ```
-MPC Download (MPCORB.DAT)
+MPC Download
+├─ MPCORB.DAT (Asteroiden, ~200 MB)
+└─ CometEls.txt (Kometen, ~100 KB)
          │
          ▼
 Pandas DataFrame (Orbital Elements)
          │
          │ Pickle Serialization
          ▼
-PostgreSQL: asteroids/comets Tabelle
+PostgreSQL: asteroids/comets Tabellen
          │
          │ Load & Deserialize
          ▼
 Skyfield Position Calculation
          │
+         │ Für jeden Ort/Zeit
          ▼
 PostgreSQL: asteroid_positions/comet_positions
          │
-         │ Aggregate
+         │ Ungefiltert (alle Objekte)
          ▼
-PostgreSQL: precomputed_snapshots
+API Routes (asteroids.py, comets.py)
          │
+         │ Filterung basierend auf user_settings.json
          ▼
-API Response (JSON)
+API Response (JSON, gefiltert)
 ```
 
 ## TTL (Time-To-Live)
 
 | Tabelle | TTL | Grund |
 |---------|-----|-------|
-| precomputed_snapshots | 48h | Rolling Window für Precompute |
 | asteroids/comets | 31 Tage | Orbital Elements ändern sich langsam |
-| asteroid_positions/comet_positions | 24h | Positionen ändern sich täglich |
+| asteroid_positions/comet_positions | Unbegrenzt | Positionen für spezifischen Zeitpunkt sind unveränderlich |
+
+**Position Cache:**
+
+Positionen für einen **spezifischen Zeitpunkt** (time_bucket) sind **unveränderlich**:
+- Die Position von Ceres am 25.12.2025 um 12:00 UTC ändert sich nie mehr
+- Werden unbegrenzt gecacht
+- Spart massive Rechenzeit für wiederholte Abfragen
+
+**Speicherplatz-Management:**
+- Bei Bedarf können alte Positionen manuell gelöscht werden
+- Empfehlung: Positionen für `time_bucket` < now() - 1 Jahr löschen
+- Typischer Speicherverbrauch: ~10 KB pro Location/Time Kombination
+
+**Planeten:** Werden NICHT gecacht (Direktberechnung bei jedem Request)
 
 ## Speicherverbrauch
 
 | Tabelle | Größe (ca.) | Pro Eintrag |
 |---------|-------------|-------------|
-| precomputed_snapshots | 1-5 MB | ~50 KB (komprimiertes JSON) |
 | asteroids | 20-50 MB | ~20 MB (DataFrame mit ~1M Objekten) |
 | comets | 1-5 MB | ~1 MB (DataFrame mit ~1000 Objekten) |
-| asteroid_positions | 100-500 KB | ~10 KB (JSON Array) |
-| comet_positions | 10-50 KB | ~1 KB (JSON Array) |
+| asteroid_positions | 100-500 KB | ~10 KB (JSON Array, ungefiltert) |
+| comet_positions | 10-50 KB | ~1 KB (JSON Array, ungefiltert) |
 
-**Total:** ~50-100 MB für vollen Cache
+**Total:** ~25-60 MB für vollen Cache (ohne Planeten)

@@ -7,7 +7,7 @@ Level 1: Position Cache (PostgreSQL)
 ┌────────────────────────────────────────────────────────────────┐
 │ Tabellen: asteroid_positions, comet_positions                  │
 │ Key: (location_key, time_bucket)                               │
-│ TTL: 49 Stunden                                                │
+│ TTL: Unbegrenzt (Positionen sind unveränderlich)               │
 │ Inhalt: Berechnete Positionen (ungefiltert)                    │
 │ Erstellt von: Precompute Worker (stündlich) + On-Demand       │
 │ Verwendet von: Alle API-Requests (erste Prüfung)              │
@@ -131,9 +131,18 @@ Alle PostgreSQL Caches enthalten **ungefilterte** Daten:
 
 ## Performance-Metriken
 
+### Asteroiden & Kometen
+
 | Szenario | Cache | Zeit |
 |----------|-------|------|
-| Precomputed Hit | Level 1 | 10-50ms |
-| Position Cache | Level 3 | 100-200ms |
-| DataFrame Cache | Level 2 | 2-5s |
-| Cold Start | Level 4 | 10-30s |
+| Position Cache Hit | Level 1 | 100-200ms |
+| DataFrame Cache Hit | Level 2 | 2-5s |
+| Cold Start (MPC Download) | Level 3 | 10-30s |
+
+### Planeten
+
+| Szenario | Cache | Zeit |
+|----------|-------|------|
+| Direktberechnung | Kein Cache | 50-200ms |
+
+**Hinweis:** Planeten sind schneller als Asteroiden/Kometen bei Cache-Miss, da nur 8 Objekte berechnet werden müssen.
