@@ -211,17 +211,6 @@ success "DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass!)"
 # Mache DOCKER-USER Regeln persistent via UFW after.rules
 echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules hinzu..."
 
-# Entferne alte systemd-basierte Lösung (falls vorhanden)
-if [ -f /etc/systemd/system/restore-docker-firewall.service ]; then
-    echo "🧹 Entferne alte systemd-basierte Firewall-Regeln..."
-    sudo systemctl stop restore-docker-firewall.service 2>/dev/null || true
-    sudo systemctl disable restore-docker-firewall.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/restore-docker-firewall.service
-    sudo rm -f /usr/local/bin/restore-docker-firewall.sh
-    sudo systemctl daemon-reload
-    success "Alte systemd-Services entfernt"
-fi
-
 # Backup der originalen after.rules
 if [ ! -f /etc/ufw/after.rules.backup ]; then
     sudo cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
@@ -232,26 +221,21 @@ fi
 sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/,/# ASCII Sky DOCKER-USER rules - END/d' /etc/ufw/after.rules
 
 # Füge neue DOCKER-USER Regeln am Ende hinzu (vor COMMIT)
+# WICHTIG: Keine *filter oder :DOCKER-USER - Chain existiert bereits!
 sudo sed -i '/^COMMIT$/i \
 # ASCII Sky DOCKER-USER rules - START\
 # Diese Regeln verhindern dass Docker die UFW-Firewall umgeht\
-*filter\
-:DOCKER-USER - [0:0]\
-\
 # Erlaube Worker-B und Worker-C auf RabbitMQ und PostgreSQL\
 -A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"\
 -A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"\
 -A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"\
 -A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"\
-\
 # Erlaube localhost auf RabbitMQ Management UI\
 -A DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"\
-\
 # BLOCKIERE alle anderen auf diesen Ports\
 -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"\
 -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"\
 -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"\
-\
 # RETURN (lässt andere Verbindungen durch)\
 -A DOCKER-USER -j RETURN\
 # ASCII Sky DOCKER-USER rules - END\
