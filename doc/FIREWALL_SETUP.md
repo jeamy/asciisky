@@ -1,95 +1,95 @@
-# UFW Firewall Setup für ASCII Sky
+# UFW Firewall Setup for ASCII Sky
 
-## 🔥 Übersicht
+## 🔥 Overview
 
-Firewall-Konfiguration für das Multi-Host Production Deployment.
+Firewall configuration for the multi-host production deployment.
 
-### Port-Übersicht
+### Port overview
 
-| Server | Port | Service | Zugriff | Beschreibung |
+| Server | Port | Service | Access | Description |
 |--------|------|---------|---------|--------------|
-| **$RABBITMQ_MAIN** | 22 | SSH | Bereits konfiguriert | Server-Administration |
-| | 80/443 | Web UI (nginx) | Öffentlich | ASCII Sky Web-Interface |
-| | 8000 | FastAPI | Intern (nginx) | Backend (nicht öffentlich) |
-| | 5672 | RabbitMQ AMQP | NUR Worker-B/C IPs | Message Queue |
-| | 5432 | PostgreSQL | NUR Worker-B/C IPs | Datenbank |
-| | 15672 | RabbitMQ UI | NUR localhost | Management Interface (SSH-Tunnel) |
-| **$RABBITMQ_B** | 22 | SSH | Bereits konfiguriert | Server-Administration |
-| **$RABBITMQ_C** | 22 | SSH | Bereits konfiguriert | Server-Administration |
+| **$RABBITMQ_MAIN** | 22 | SSH | Already configured | Server administration |
+| | 80/443 | Web UI (nginx) | Public | ASCII Sky web interface |
+| | 8000 | FastAPI | Internal (nginx) | Backend (not public) |
+| | 5672 | RabbitMQ AMQP | ONLY Worker-B/C IPs | Message queue |
+| | 5432 | PostgreSQL | ONLY Worker-B/C IPs | Database |
+| | 15672 | RabbitMQ UI | ONLY localhost | Management interface (SSH tunnel) |
+| **$RABBITMQ_B** | 22 | SSH | Already configured | Server administration |
+| **$RABBITMQ_C** | 22 | SSH | Already configured | Server administration |
 
 ---
 
-## 🚀 Schnellstart
+## 🚀 Quick start
 
-### Automatisches Setup (Empfohlen)
+### Automatic setup (recommended)
 
-**NUR auf $RABBITMQ_MAIN ausführen:**
+**Run ONLY on $RABBITMQ_MAIN:**
 
 ```bash
 chmod +x scripts/setup-firewall.sh
 sudo ./scripts/setup-firewall.sh
 ```
 
-Das Script:
-- ✅ Ermittelt automatisch IPs via DNS
-- ✅ Beschränkt Port 5672 (RabbitMQ) auf Worker-B/C IPs
-- ✅ Beschränkt Port 5432 (PostgreSQL) auf Worker-B/C IPs
-- ✅ Beschränkt Port 15672 (RabbitMQ UI) auf localhost
-- ✅ Worker-Server benötigen KEINE Firewall-Änderungen
+The script:
+- ✅ Automatically discovers IPs via DNS
+- ✅ Restricts port 5672 (RabbitMQ) to Worker-B/C IPs
+- ✅ Restricts port 5432 (PostgreSQL) to Worker-B/C IPs
+- ✅ Restricts port 15672 (RabbitMQ UI) to localhost
+- ✅ Worker servers require NO firewall changes
 
-**Wichtig:** Port 80/443 (nginx) und SSH werden als bereits konfiguriert vorausgesetzt!
+**Important:** Ports 80/443 (nginx) and SSH are assumed to be already configured!
 
 ---
 
-## 🔧 Manuelle Konfiguration
+## 🔧 Manual configuration
 
-### Auf $RABBITMQ_MAIN (Hauptserver)
+### On $RABBITMQ_MAIN (main server)
 
-**Empfehlung:** Verwende das automatische Script (siehe oben)!
+**Recommendation:** Use the automatic script (see above)!
 
-**Manuelle Konfiguration:**
+**Manual configuration:**
 
 ```bash
-# IPs ermitteln
+# Discover IPs
 WORKER_B_IP=$(dig +short $RABBITMQ_B | tail -n1)
 WORKER_C_IP=$(dig +short $RABBITMQ_C | tail -n1)
 
 echo "Worker-B IP: $WORKER_B_IP"
 echo "Worker-C IP: $WORKER_C_IP"
 
-# RabbitMQ AMQP (NUR von Worker-Servern)
+# RabbitMQ AMQP (ONLY from worker servers)
 sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
 
-# PostgreSQL (NUR von Worker-Servern)
+# PostgreSQL (ONLY from worker servers)
 sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
 
-# RabbitMQ Management UI (NUR localhost)
+# RabbitMQ Management UI (ONLY localhost)
 sudo ufw allow from 127.0.0.1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost'
 
-# UFW neu laden
+# Reload UFW
 sudo ufw reload
 
-# Status prüfen
+# Check status
 sudo ufw status verbose
 ```
 
-**Hinweis:** Port 80/443 (nginx), SSH und andere Ports werden als bereits konfiguriert vorausgesetzt.
+**Note:** Ports 80/443 (nginx), SSH, and other ports are assumed to be already configured.
 
-### Auf $RABBITMQ_B und $RABBITMQ_C (Worker Server)
+### On $RABBITMQ_B and $RABBITMQ_C (worker servers)
 
-**Keine Firewall-Änderungen nötig!**
+**No firewall changes required!**
 
-Worker-Server:
-- ✅ Ausgehende Verbindungen sind bereits erlaubt (`default allow outgoing`)
-- ✅ Verbinden sich zu $RABBITMQ_MAIN:5672 (RabbitMQ)
-- ✅ Verbinden sich zu $RABBITMQ_MAIN:5432 (PostgreSQL)
-- ✅ Benötigen keine eingehenden Ports (außer SSH)
+Worker servers:
+- ✅ Outbound connections are already allowed (`default allow outgoing`)
+- ✅ Connect to $RABBITMQ_MAIN:5672 (RabbitMQ)
+- ✅ Connect to $RABBITMQ_MAIN:5432 (PostgreSQL)
+- ✅ Do not require inbound ports (except SSH)
 
-**Falls UFW noch nicht konfiguriert:**
+**If UFW is not yet configured:**
 ```bash
-# Nur falls UFW noch nicht aktiv ist
+# Only if UFW is not yet active
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw enable
@@ -97,25 +97,25 @@ sudo ufw enable
 
 ---
 
-## 🔐 Sicherheits-Empfehlungen
+## 🔐 Security recommendations
 
-### 1. RabbitMQ und PostgreSQL auf Worker-IPs beschränken
+### 1. Restrict RabbitMQ and PostgreSQL to worker IPs
 
-**Status:** ✅ Wird automatisch durch `setup-firewall.sh` konfiguriert!
+**Status:** ✅ Automatically configured by `setup-firewall.sh`!
 
-**Manuelle Prüfung:**
+**Manual verification:**
 ```bash
-# Auf $RABBITMQ_MAIN
+# On $RABBITMQ_MAIN
 sudo ufw status numbered | grep -E '5672|5432'
 
-# Sollte zeigen:
+# Should show:
 # [X] 5672/tcp ALLOW IN <Worker-B-IP>
 # [Y] 5672/tcp ALLOW IN <Worker-C-IP>
 # [Z] 5432/tcp ALLOW IN <Worker-B-IP>
 # [W] 5432/tcp ALLOW IN <Worker-C-IP>
 ```
 
-**Falls manuell konfiguriert werden muss:**
+**If you need to configure manually:**
 ```bash
 # IPs automatisch ermitteln
 WORKER_B_IP=$(dig +short $RABBITMQ_B | tail -n1)
@@ -128,92 +128,92 @@ sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL 
 sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
 ```
 
-### 2. RabbitMQ Management UI absichern
+### 2. Secure RabbitMQ Management UI
 
-**Status:** ✅ Wird automatisch durch `setup-firewall.sh` auf localhost beschränkt!
+**Status:** ✅ Automatically restricted to localhost by `setup-firewall.sh`!
 
-**Zugriff via SSH-Tunnel (empfohlen):**
+**Access via SSH tunnel (recommended):**
 ```bash
-# Von deinem lokalen Rechner
+# From your local machine
 ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
-# Dann im Browser öffnen:
+# Then open in the browser:
 http://localhost:15672
 
 User: admin
-Password: <RABBITMQ_PASSWORD aus .env>
+Password: <RABBITMQ_PASSWORD from .env>
 ```
 
-**Prüfung:**
+**Check:**
 ```bash
 # Auf $RABBITMQ_MAIN
 sudo ufw status | grep 15672
 
-# Sollte zeigen:
+# Should show:
 # 15672/tcp ALLOW IN 127.0.0.1
 ```
 
-### 3. SSH absichern (Optional)
+### 3. Secure SSH (optional)
 
-**Hinweis:** SSH wird als bereits konfiguriert vorausgesetzt!
+**Note:** SSH is assumed to be already configured!
 
-**Optionale Verbesserungen:**
+**Optional improvements:**
 ```bash
-# Rate Limiting aktivieren
+# Enable rate limiting
 sudo ufw limit 22/tcp comment 'SSH with rate limiting'
 
-# Nur von vertrauenswürdigen IPs (falls gewünscht)
+# Only from trusted IPs (if desired)
 sudo ufw delete allow 22/tcp
 sudo ufw allow from <admin-IP> to any port 22 proto tcp comment 'SSH from Admin'
 ```
 
-### 4. Port 8000 (FastAPI) nicht öffentlich
+### 4. Port 8000 (FastAPI) not public
 
-**Status:** ✅ Port 8000 sollte NICHT öffentlich erreichbar sein!
+**Status:** ✅ Port 8000 should NOT be publicly reachable!
 
 **Prüfung:**
 ```bash
 # Auf $RABBITMQ_MAIN
 sudo ufw status | grep 8000
 
-# Sollte NICHTS zeigen oder nur localhost
+# Should show NOTHING or only localhost
 ```
 
-**Warum?**
-- Web UI läuft über nginx (Port 80/443)
-- nginx leitet intern zu Port 8000 weiter
-- Port 8000 muss nicht öffentlich sein
+**Why?**
+- Web UI runs via nginx (ports 80/443)
+- nginx forwards internally to port 8000
+- Port 8000 does not need to be public
 
 ---
 
 ## 📊 Monitoring
 
-### UFW Status prüfen
+### Check UFW status
 
 ```bash
-# Ausführlicher Status
+# Verbose status
 sudo ufw status verbose
 
-# Nummerierte Regeln
+# Numbered rules
 sudo ufw status numbered
 
-# Logging aktivieren
+# Enable logging
 sudo ufw logging on
 
-# Logs anzeigen
+# Show logs
 sudo tail -f /var/log/ufw.log
 ```
 
-### Offene Ports prüfen
+### Check open ports
 
 ```bash
-# Alle offenen Ports
+# All open ports
 sudo netstat -tulpn | grep LISTEN
 
-# Oder mit ss
+# Or with ss
 sudo ss -tulpn | grep LISTEN
 
-# Nur Docker-Container
+# Only Docker containers
 docker ps --format "table {{.Names}}\t{{.Ports}}"
 ```
 
@@ -221,54 +221,54 @@ docker ps --format "table {{.Names}}\t{{.Ports}}"
 
 ## 🛠️ Troubleshooting
 
-### Problem: Kein Zugriff auf Web UI
+### Issue: No access to Web UI
 
 ```bash
-# Prüfe nginx
+# Check nginx
 sudo systemctl status nginx
 
-# Prüfe nginx Konfiguration
+# Check nginx configuration
 sudo nginx -t
 
-# Prüfe ob Port 80/443 offen ist
+# Check if ports 80/443 are open
 sudo ufw status | grep -E '80|443'
 
-# Prüfe ob Web-Container läuft
+# Check if web container is running
 docker ps | grep asciisky-web
 
-# Prüfe ob Port 8000 intern erreichbar ist
+# Check if port 8000 is reachable internally
 curl http://localhost:8000/api/celestial?lat=48.2&lon=16.3
 ```
 
-### Problem: Worker können sich nicht verbinden
+### Issue: Workers cannot connect
 
 ```bash
-# Auf $RABBITMQ_MAIN: Prüfe Ports 5672 und 5432
+# On $RABBITMQ_MAIN: Check ports 5672 and 5432
 sudo ufw status | grep -E '5672|5432'
 
-# Teste Verbindung von Worker-Server
-# Auf $RABBITMQ_B:
+# Test connection from worker server
+# On $RABBITMQ_B:
 telnet $RABBITMQ_MAIN 5672
 telnet $RABBITMQ_MAIN 5432
 
-# Prüfe RabbitMQ Logs
+# Check RabbitMQ logs
 docker logs asciisky-rabbitmq | tail -50
 
-# Prüfe PostgreSQL Logs
+# Check PostgreSQL logs
 docker logs asciisky-postgres | tail -50
 ```
 
-### Problem: UFW blockiert Docker-Container
+### Issue: UFW blocks Docker containers
 
-Docker manipuliert iptables direkt und kann UFW-Regeln umgehen.
+Docker manipulates iptables directly and can bypass UFW rules.
 
-**Lösung:** UFW für Docker konfigurieren:
+**Solution:** Configure UFW for Docker:
 
 ```bash
-# /etc/ufw/after.rules bearbeiten
+# Edit /etc/ufw/after.rules
 sudo nano /etc/ufw/after.rules
 
-# Am Ende hinzufügen:
+# Add at the end:
 # BEGIN UFW AND DOCKER
 *filter
 :ufw-user-forward - [0:0]
@@ -293,71 +293,71 @@ sudo ufw reload
 
 ---
 
-## 🔄 UFW Befehle Cheat Sheet
+## 🔄 UFW commands cheat sheet
 
 ```bash
 # Status
-sudo ufw status                    # Einfacher Status
-sudo ufw status verbose            # Ausführlicher Status
-sudo ufw status numbered           # Mit Regel-Nummern
+sudo ufw status                    # Simple status
+sudo ufw status verbose            # Verbose status
+sudo ufw status numbered           # With rule numbers
 
-# Aktivieren/Deaktivieren
-sudo ufw enable                    # UFW aktivieren
-sudo ufw disable                   # UFW deaktivieren
-sudo ufw reload                    # UFW neu laden
+# Enable/Disable
+sudo ufw enable                    # Enable UFW
+sudo ufw disable                   # Disable UFW
+sudo ufw reload                    # Reload UFW
 
-# Regeln hinzufügen
-sudo ufw allow 8000/tcp            # Port erlauben
-sudo ufw allow from 1.2.3.4        # IP erlauben
-sudo ufw allow from 1.2.3.4 to any port 5432  # IP zu Port
-sudo ufw limit 22/tcp              # Rate Limiting
+# Add rules
+sudo ufw allow 8000/tcp            # Allow port
+sudo ufw allow from 1.2.3.4        # Allow IP
+sudo ufw allow from 1.2.3.4 to any port 5432  # IP to port
+sudo ufw limit 22/tcp              # Rate limiting
 
-# Regeln löschen
-sudo ufw delete allow 8000/tcp     # Nach Regel
-sudo ufw delete 5                  # Nach Nummer
-sudo ufw status numbered           # Nummern anzeigen
+# Delete rules
+sudo ufw delete allow 8000/tcp     # By rule
+sudo ufw delete 5                  # By number
+sudo ufw status numbered           # Show numbers
 
-# Zurücksetzen
-sudo ufw reset                     # Alle Regeln löschen
+# Reset
+sudo ufw reset                    # Delete all rules
 
 # Logging
-sudo ufw logging on                # Logging aktivieren
-sudo ufw logging off               # Logging deaktivieren
-sudo tail -f /var/log/ufw.log      # Logs anzeigen
+sudo ufw logging on                # Enable logging
+sudo ufw logging off               # Disable logging
+sudo tail -f /var/log/ufw.log      # Show logs
 
 # Default Policies
-sudo ufw default deny incoming     # Eingehend blockieren
-sudo ufw default allow outgoing    # Ausgehend erlauben
+sudo ufw default deny incoming     # Deny incoming
+sudo ufw default allow outgoing    # Allow outgoing
 ```
 
 ---
 
-## 📋 Checkliste für Production
+## 📋 Production checklist
 
-**Hauptserver ($RABBITMQ_MAIN):**
-- [ ] `setup-firewall.sh` ausgeführt
-- [ ] Port 80/443 (nginx) öffentlich erreichbar
-- [ ] Port 8000 (FastAPI) NICHT öffentlich
-- [ ] RabbitMQ (Port 5672) NUR von Worker-B/C IPs erreichbar
-- [ ] PostgreSQL (Port 5432) NUR von Worker-B/C IPs erreichbar
-- [ ] RabbitMQ UI (Port 15672) NUR via SSH-Tunnel
-- [ ] UFW Status geprüft: `sudo ufw status verbose`
+**Main server ($RABBITMQ_MAIN):**
+- [ ] `setup-firewall.sh` executed
+- [ ] Ports 80/443 (nginx) publicly reachable
+- [ ] Port 8000 (FastAPI) NOT public
+- [ ] RabbitMQ (port 5672) ONLY reachable from Worker-B/C IPs
+- [ ] PostgreSQL (port 5432) ONLY reachable from Worker-B/C IPs
+- [ ] RabbitMQ UI (port 15672) ONLY via SSH tunnel
+- [ ] UFW status checked: `sudo ufw status verbose`
 
-**Worker-Server ($RABBITMQ_B und $RABBITMQ_C):**
-- [ ] Keine Firewall-Änderungen nötig (ausgehende Verbindungen erlaubt)
-- [ ] Verbindung zu RabbitMQ getestet: `telnet $RABBITMQ_MAIN 5672`
-- [ ] Verbindung zu PostgreSQL getestet: `telnet $RABBITMQ_MAIN 5432`
+**Worker servers ($RABBITMQ_B and $RABBITMQ_C):**
+- [ ] No firewall changes needed (outgoing connections allowed)
+- [ ] Connection to RabbitMQ tested: `telnet $RABBITMQ_MAIN 5672`
+- [ ] Connection to PostgreSQL tested: `telnet $RABBITMQ_MAIN 5432`
 
 **Tests:**
-- [ ] Web UI von extern erreichbar: `http://$RABBITMQ_MAIN`
-- [ ] RabbitMQ UI via SSH-Tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
-- [ ] Worker können Tasks verarbeiten (RabbitMQ UI prüfen)
-- [ ] PostgreSQL von Workern erreichbar
+- [ ] Web UI reachable externally: `http://$RABBITMQ_MAIN`
+- [ ] RabbitMQ UI via SSH tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
+- [ ] Workers can process tasks (check RabbitMQ UI)
+- [ ] PostgreSQL reachable from workers
 
 ---
 
-## 🔗 Weiterführende Links
+## 🔗 Further reading
 
-- [UFW Dokumentation](https://help.ubuntu.com/community/UFW)
-- [Docker und UFW](https://github.com/chaifeng/ufw-docker)
-- [iptables Grundlagen](https://www.netfilter.org/documentation/)
+- [UFW documentation](https://help.ubuntu.com/community/UFW)
+- [Docker and UFW](https://github.com/chaifeng/ufw-docker)
+- [iptables basics](https://www.netfilter.org/documentation/)

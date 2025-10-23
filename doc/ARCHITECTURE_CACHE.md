@@ -1,17 +1,17 @@
-# Cache-Strategie
+# Cache Strategy
 
-## Cache-Hierarchie
+## Cache Hierarchy
 
 ```
 Level 1: Position Cache (PostgreSQL)
 ┌────────────────────────────────────────────────────────────────┐
 │ Tabelle: cached_positions                                      │
 │ Key: (object_type, location_key, time_bucket)                  │
-│ TTL: Unbegrenzt (Positionen sind unveränderlich)               │
-│ Inhalt: Berechnete Positionen (ungefiltert)                    │
-│ Erstellt von: Precompute Worker (stündlich) + On-Demand       │
-│ Verwendet von: Alle API-Requests (erste Prüfung)              │
-│ Planeten: NICHT gecacht (Direktberechnung)                     │
+│ TTL: Unlimited (positions are immutable)                       │
+│ Contents: Computed positions (unfiltered)                      │
+│ Created by: Precompute workers (hourly) + on-demand            │
+│ Used by: All API requests (first check)                        │
+│ Planets: NOT cached (direct computation)                       │
 └────────────────────────────────────────────────────────────────┘
          │ Cache MISS
          ▼
@@ -36,39 +36,42 @@ Level 3: Download von MPC
 └────────────────────────────────────────────────────────────────┘
 ```
 
-## Cache-Invalidierung
+## Cache Invalidation
 
 ```
-User ändert Magnitude-Filter (z.B. 14 → 18)
+User changes Magnitude Filter (e.g., 14 → 18)
          │
          │ POST /api/filters
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Speichere neue Filter in user_settings.json                │
+│ 1. Store new filters in user_settings.json                     │
 │    settings.py:set_magnitude_filters()                         │
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 2. Lösche In-Memory Caches                                     │
+│ 2. Clear in-memory caches                                      │
 │    bright_asteroids.py:clear_in_memory_cache()                 │
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 3. KEINE PostgreSQL Caches gelöscht!                          │
+│ 3. NO PostgreSQL caches are deleted!                           │
 │                                                                │
-│    Alle Caches bleiben:                                       │
-│    - asteroid_positions (ungefiltert, wiederverwendbar)        │
-│    - comet_positions (ungefiltert, wiederverwendbar)           │
-│    - asteroids (MPC MPCORB.DAT, Mag 20.0)                      │
-│    - comets (MPC CometEls.txt, Mag 20.0)                       │
+│    All caches remain:                                          │
+│    - asteroid_positions (unfiltered, reusable)                 │
+│    - comet_positions (unfiltered, reusable)                    │
+│    - asteroids (MPC MPCORB.DAT, mag 20.0)                      │
+│    - comets (MPC CometEls.txt, mag 20.0)                       │
 │                                                                │
-│    Filterung passiert in API-Routen!                          │
+│    Filtering happens in API routes!                             │
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 4. Nächster Request                                            │
-│    - DataFrame-Cache vorhanden (Mag 20.0)                     │
-│    - Position-Cache vorhanden (ungefiltert)                    │
+│ 4. Next Request                                            │
+│    - DataFrame cache available (mag 20.0)                     │
+│    - Position cache available (unfiltered)                    │
+│    - API filters to mag 18.0
+│    - Objects 14–18 appear immediately!
+│    - No recomputation required!
 │    - API-Route filtert auf neues Limit (z.B. 18)              │
 │    - Neue Objekte (14-18) erscheinen sofort!                  │
 │    - Keine Neuberechnung nötig!                                │
@@ -77,72 +80,72 @@ User ändert Magnitude-Filter (z.B. 14 → 18)
 
 **Code:** `api/routes/filters.py:44-71`
 
-### Cache-Strategie bei Filter-Änderung
+### Cache Strategy when Filters Change
 
-**Architektur:**
-- Worker laden **immer** mit Mag 20.0 (hart-codiert)
-- DataFrame-Cache enthält **alle** Objekte bis Mag 20
-- Filterung passiert **nur** in API-Routen basierend auf `user_settings.json`
-- **Ein Cache für alle Benutzer-Filter!**
+**Architecture:**
+- Workers always compute with mag 20.0 (hard-coded)
+- DataFrame cache contains **all** objects up to mag 20
+- Filtering happens **only** in API routes based on `user_settings.json`
+- **One cache for all user filters!**
 
-**Was passiert bei Filter-Änderung:**
+**What happens when filters change:**
 
-Bei Filter-Änderung (z.B. 14 → 18) werden **KEINE** PostgreSQL Caches gelöscht!
+On filter change (e.g., 14 → 18) **NO** PostgreSQL caches are deleted!
 
-**Alle Caches bleiben:**
+**All caches remain:**
 ```
-asteroid_positions  ← Ungefiltert, enthält ALLE berechneten Positionen
-comet_positions     ← Ungefiltert, enthält ALLE berechneten Positionen
-asteroids           ← MPC MPCORB.DAT - Orbitaldaten, Mag 20
-comets              ← MPC CometEls.txt - Orbitaldaten, Mag 20
+asteroid_positions  ← Unfiltered, contains ALL computed positions
+comet_positions     ← Unfiltered, contains ALL computed positions
+asteroids           ← MPC MPCORB.DAT - orbital data, mag 20
+comets              ← MPC CometEls.txt - orbital data, mag 20
 ```
 
-**Warum werden Caches NICHT gelöscht?**
+**Why are caches NOT deleted?**
 
-Alle PostgreSQL Caches enthalten **ungefilterte** Daten:
-- Position-Caches: Alle berechneten Positionen (bis Mag ~22)
-- DataFrame-Caches: Alle Objekte bis Mag 20.0
-- Filterung passiert **nur** in API-Routen (Zeile 188-189 in `asteroids.py`)
-- **Wiederverwendbar für alle Filter-Einstellungen!**
+All PostgreSQL caches contain **unfiltered** data:
+- Position caches: all computed positions (up to mag ~22)
+- DataFrame caches: all objects up to mag 20.0
+- Filtering happens **only** in API routes (lines 188–189 in `asteroids.py`)
+- **Reusable for all filter settings!**
 
-**Ablauf nach Filter-Änderung:**
-1. User ändert Filter von 14 → 18
-2. **Keine** Caches werden gelöscht
-3. Nächster Request:
-   - DataFrame-Cache vorhanden (Mag 20.0) ✅
-   - Position-Cache vorhanden (ungefiltert) ✅
-   - API filtert auf Mag 18.0
-   - Objekte 14-18 erscheinen **sofort**!
-   - **Keine Neuberechnung nötig!** 🚀
+**Sequence after a filter change:**
+1. User changes filter from 14 → 18
+2. **No** caches are deleted
+3. Next request:
+   - DataFrame cache available (mag 20.0) ✅
+   - Position cache available (unfiltered) ✅
+   - API filters to mag 18.0
+   - Objects 14–18 appear **immediately**!
+   - **No recomputation required!** 🚀
 
-**Planeten:**
-- Werden **nicht** gecacht
-- Direktberechnung bei jedem Request (~50-200ms)
-- Nur 8 Objekte, schnell genug ohne Cache
+**Planets:**
+- Are **not** cached
+- Direct computation for each request (~50–200ms)
+- Only 8 bodies, fast enough without cache
 
-**Code-Referenzen:**
-- `workers/precompute_worker.py:305` - `max_magnitude=20.0`
-- `workers/asteroid_worker.py:40` - `max_magnitude=20.0`
-- `bright_asteroids.py:361-520` - `load_bright_asteroids(max_magnitude=20.0)`
-- `comets.py:748-850` - `load_comets(max_magnitude=20.0)`
-- `api/routes/asteroids.py:75-78` - Filterung auf user_settings
-- `api/routes/comets.py:75-78` - Filterung auf user_settings
-- `settings.py:get_magnitude_filters()` - Liest user_settings.json
+**Code references:**
+- `workers/precompute_worker.py:305` — `max_magnitude=20.0`
+- `workers/asteroid_worker.py:40` — `max_magnitude=20.0`
+- `bright_asteroids.py:361-520` — `load_bright_asteroids(max_magnitude=20.0)`
+- `comets.py:748-850` — `load_comets(max_magnitude=20.0)`
+- `api/routes/asteroids.py:75-78` — filtering based on user_settings
+- `api/routes/comets.py:75-78` — filtering based on user_settings
+- `settings.py:get_magnitude_filters()` — reads user_settings.json
 
-## Performance-Metriken
+## Performance Metrics
 
-### Asteroiden & Kometen
+### Asteroids & Comets
+
+| Scenario | Cache | Time |
+|----------|-------|------|
+| Position cache hit | Level 1 | 100–200ms |
+| DataFrame cache hit | Level 2 | 2–5s |
+| Cold start (MPC download) | Level 3 | 10–30s |
+
+### Planets
 
 | Szenario | Cache | Zeit |
 |----------|-------|------|
-| Position Cache Hit | Level 1 | 100-200ms |
-| DataFrame Cache Hit | Level 2 | 2-5s |
-| Cold Start (MPC Download) | Level 3 | 10-30s |
+| Direct computation | No cache | 50–200ms |
 
-### Planeten
-
-| Szenario | Cache | Zeit |
-|----------|-------|------|
-| Direktberechnung | Kein Cache | 50-200ms |
-
-**Hinweis:** Planeten sind schneller als Asteroiden/Kometen bei Cache-Miss, da nur 8 Objekte berechnet werden müssen.
+**Note:** Planets are faster than asteroids/comets on cache miss because only 8 bodies are computed.

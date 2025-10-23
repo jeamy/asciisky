@@ -1,12 +1,12 @@
 # ASCII Sky - Production Deployment Guide
 
-## 🏗️ Multi-Host Architektur
+## 🏗️ Multi-Host Architecture
 
-### Server-Übersicht
+### Server Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ $RABBITMQ_MAIN (Hauptserver)                                 │
+│ $RABBITMQ_MAIN (Main server)                                  │
 │ ┌─────────────┐  ┌──────────────┐  ┌──────────────┐        │
 │ │   Web UI    │  │  RabbitMQ    │  │  PostgreSQL  │        │
 │ │  (FastAPI)  │  │   (4.1)      │  │    (16)      │        │
@@ -19,7 +19,7 @@
 │ │  (Nightly)  │  │ Coordinator  │                          │
 │ └─────────────┘  └──────────────┘                          │
 │ ┌───────────────────────────────────────────────┐          │
-│ │ Precompute Workers x4 (skalierbar via .env)   │          │
+│ │ Precompute Workers x4 (scalable via .env)     │          │
 │ └───────────────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -34,24 +34,24 @@
 │ │Precompute x4     │ │            │ │Precompute x4     │ │
 │ │Asteroid x2       │ │            │ │Asteroid x2       │ │
 │ │Comet x2          │ │            │ │Comet x2          │ │
-│ │(skalierbar)      │ │            │ │(skalierbar)      │ │
+│ │(scalable)        │ │            │ │(scalable)        │ │
 │ └──────────────────┘ │            │ └──────────────────┘ │
 └──────────────────────┘            └──────────────────────┘
 ```
 
-### Komponenten-Verteilung
+### Component distribution
 
-| Server | Komponenten | Ports | Zweck |
+| Server | Components | Ports | Purpose |
 |--------|-------------|-------|-------|
-| **$RABBITMQ_MAIN** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Hauptserver mit UI und Datenbanken |
-| **$RABBITMQ_B** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool B (skalierbar) |
-| **$RABBITMQ_C** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool C (skalierbar) |
+| **$RABBITMQ_MAIN** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Main server with UI and databases |
+| **$RABBITMQ_B** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker pool B (scalable) |
+| **$RABBITMQ_C** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker pool C (scalable) |
 
-**Gesamt (Default): 12 Precompute + 4 Asteroid + 4 Comet Workers**
+**Total (default): 12 Precompute + 4 Asteroid + 4 Comet Workers**
 
-**Worker-Skalierung** via `.env`:
+**Worker scaling** via `.env`:
 ```bash
-# Hauptserver
+# Main server
 PRECOMPUTE_WORKERS=4
 
 # Worker Server B
@@ -67,89 +67,89 @@ COMET_WORKERS_C=2
 
 ---
 
-## 📋 Voraussetzungen
+## 📋 Prerequisites
 
-### Auf allen Servern
+### On all servers
 
 - Docker Engine 24.0+
 - Docker Compose v2.20+
-- SSH-Zugriff (für Remote-Deployment)
-- Mindestens 2 GB RAM pro Server
-- 10 GB freier Speicher
+- SSH access (for remote deployment)
+- At least 2 GB RAM per server
+- 10 GB free disk space
 
-### Netzwerk-Anforderungen
+### Network requirements
 
-**Firewall-Regeln:**
+**Firewall rules:**
 
 ```bash
-# $RABBITMQ_MAIN (Hauptserver)
-Eingehend: 80, 443 (Web UI - öffentlich)
-Eingehend: 5672 (RabbitMQ - NUR von Worker-B/C IPs)
-Eingehend: 5432 (PostgreSQL - NUR von Worker-B/C IPs)
-Eingehend: 15672 (RabbitMQ UI - NUR localhost/SSH-Tunnel)
-Ausgehend: 80, 443 (HTTP/HTTPS für Daten-Downloads)
+# $RABBITMQ_MAIN (Main server)
+Inbound: 80, 443 (Web UI - public)
+Inbound: 5672 (RabbitMQ - ONLY from Worker-B/C IPs)
+Inbound: 5432 (PostgreSQL - ONLY from Worker-B/C IPs)
+Inbound: 15672 (RabbitMQ UI - ONLY localhost/SSH tunnel)
+Outbound: 80, 443 (HTTP/HTTPS for data downloads)
 
-# $RABBITMQ_B / $RABBITMQ_C (Worker-Server)
-Ausgehend: 5432 (PostgreSQL zu Hauptserver)
-Ausgehend: 5672 (RabbitMQ zu Hauptserver)
+# $RABBITMQ_B / $RABBITMQ_C (Worker servers)
+Outbound: 5432 (PostgreSQL to main server)
+Outbound: 5672 (RabbitMQ to main server)
 ```
 
-**Automatisches Firewall-Setup:**
+**Automatic firewall setup:**
 ```bash
-# Nur auf $RABBITMQ_MAIN ausführen:
+# Run only on $RABBITMQ_MAIN:
 sudo ./scripts/setup-firewall.sh
 ```
 
-Das Script:
-- Ermittelt automatisch IPs via DNS
-- Beschränkt Port 5672 (RabbitMQ) auf Worker-IPs
-- Beschränkt Port 5432 (PostgreSQL) auf Worker-IPs
-- Beschränkt Port 15672 (RabbitMQ UI) auf localhost (SSH-Tunnel)
-- Worker-Server benötigen KEINE Firewall-Änderungen
+The script:
+- Automatically discovers IPs via DNS
+- Restricts port 5672 (RabbitMQ) to worker IPs
+- Restricts port 5432 (PostgreSQL) to worker IPs
+- Restricts port 15672 (RabbitMQ UI) to localhost (SSH tunnel)
+- Worker servers require NO firewall changes
 
 ---
 
 ## 🚀 Installation
 
-### 1. Vorbereitung
+### 1. Preparation
 
 ```bash
-# Auf dem Entwicklungsrechner (LOKAL)
+# On your local development machine
 cd /path/to/asciisky
 
-# Erstelle .env aus Vorlage
+# Create .env from template
 cp .env.example .env
 
-# Bearbeite .env und setze sichere Passwörter
+# Edit .env and set strong passwords
 nano .env
 ```
 
-**⚠️ WICHTIG: .env Konfiguration**
+**⚠️ IMPORTANT: .env configuration**
 
-Die `.env` Datei wird **automatisch** auf alle Server kopiert!
+The `.env` file is **automatically** copied to all servers!
 
-**Setze starke Passwörter für:**
-- `POSTGRES_PASSWORD` - **Muss auf allen Servern identisch sein!**
-- `RABBITMQ_PASSWORD` - **Muss auf allen Servern identisch sein!**
-- `SESSION_SECRET` - Nur für Hauptserver (generiere mit: `openssl rand -hex 32`)
+**Set strong passwords for:**
+- `POSTGRES_PASSWORD` — **Must be identical on all servers!**
+- `RABBITMQ_PASSWORD` — **Must be identical on all servers!**
+- `SESSION_SECRET` — Main server only (generate with: `openssl rand -hex 32`)
 
-**Warum identische Passwörter?**
-- Worker-Server (rabbit-b/c) verbinden sich zu PostgreSQL auf Hauptserver
-- Worker-Server (rabbit-b/c) verbinden sich zu RabbitMQ auf Hauptserver
-- Authentifizierung funktioniert nur mit gleichen Credentials
+**Why identical passwords?**
+- Worker servers (rabbit-b/c) connect to PostgreSQL on the main server
+- Worker servers (rabbit-b/c) connect to RabbitMQ on the main server
+- Authentication only works with matching credentials
 
-**Beispiel .env:**
+**Example .env:**
 ```bash
-# Gleiche Passwörter auf ALLEN Servern
+# Same passwords on ALL servers
 POSTGRES_PASSWORD=SuperSicheres_PG_Passwort_123!
 RABBITMQ_PASSWORD=SuperSicheres_RMQ_Passwort_456!
 SESSION_SECRET=a1b2c3d4e5f6...  # openssl rand -hex 32
 
-# Deployment-Optionen
+# Deployment options
 SETUP_WORKER_B=true
 SETUP_WORKER_C=true
 
-# Worker-Skalierung
+# Worker scaling
 PRECOMPUTE_WORKERS=4
 ASTEROID_WORKERS=2
 COMET_WORKERS=2
@@ -162,94 +162,94 @@ PRECOMPUTE_WORKERS_C=4
 ASTEROID_WORKERS_C=2
 COMET_WORKERS_C=2
 
-# Precompute Settings
-ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
+# Precompute settings
+ASCII_SKY_PRECOMPUTE_HOURS=720  # precompute 30 days ahead
 ```
 
-### 2. SSH-Zugriff einrichten
+### 2. Set up SSH access
 
 ```bash
-# SSH-Keys zu Worker-Servern kopieren
+# Copy SSH keys to worker servers
 ssh-copy-id $RABBITMQ_B
 ssh-copy-id $RABBITMQ_C
 
-# Teste Verbindung
+# Test connection
 ssh $RABBITMQ_B "echo 'Connection OK'"
 ssh $RABBITMQ_C "echo 'Connection OK'"
 ```
 
-### 3. Automatisches Deployment
+### 3. Automatic deployment
 
 ```bash
-# Setup-Skript ausführbar machen
+# Make setup script executable
 chmod +x scripts/setup-production.sh
 
-# Deployment starten
+# Start deployment
 ./scripts/setup-production.sh
 ```
 
-Das Skript:
-1. ✅ Baut Docker-Images
-2. ✅ Startet PostgreSQL und RabbitMQ auf $RABBITMQ_MAIN
-3. ✅ Initialisiert PostgreSQL-Schema
-4. ✅ Erstellt RabbitMQ-Queues
-5. ✅ Startet Precompute Coordinator und Workers
-6. ✅ **Kopiert .env auf $RABBITMQ_B** (automatisch via scp)
-7. ✅ Deployed Worker auf $RABBITMQ_B
-8. ✅ **Kopiert .env auf $RABBITMQ_C** (automatisch via scp)
-9. ✅ Deployed Worker auf $RABBITMQ_C
+The script:
+1. ✅ Builds Docker images
+2. ✅ Starts PostgreSQL and RabbitMQ on $RABBITMQ_MAIN
+3. ✅ Initializes PostgreSQL schema
+4. ✅ Creates RabbitMQ queues
+5. ✅ Starts precompute coordinator and workers
+6. ✅ **Copies .env to $RABBITMQ_B** (automatically via scp)
+7. ✅ Deploys workers on $RABBITMQ_B
+8. ✅ **Copies .env to $RABBITMQ_C** (automatically via scp)
+9. ✅ Deploys workers on $RABBITMQ_C
 
-**Wichtig:** Die `.env` Datei wird automatisch von deinem lokalen Rechner auf alle Server kopiert. Du musst sie **nicht manuell** auf jeden Server kopieren!
+**Important:** The `.env` file is automatically copied from your local machine to all servers. You do **not** need to copy it manually to each server!
 
 **Nach dem Deployment:**
 ```bash
-# Firewall auf Hauptserver konfigurieren
+# Configure firewall on main server
 ssh $RABBITMQ_MAIN
 sudo ./scripts/setup-firewall.sh
 ```
 
 ---
 
-## 🔧 Manuelle Installation
+## 🔧 Manual installation
 
-### Auf $RABBITMQ_MAIN
+### On $RABBITMQ_MAIN
 
 ```bash
-# 1. Repository klonen
+# 1. Clone repository
 git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
-# 2. .env erstellen
+# 2. Create .env
 cp .env.example .env
 nano .env
 
-# 3. Services starten
+# 3. Start services
 docker compose -f docker-compose.production.yml build
 docker compose -f docker-compose.production.yml up -d
 
-# 4. RabbitMQ Queues einrichten
+# 4. Set up RabbitMQ queues
 ./scripts/setup-rabbitmq-queues.sh
 
-# 5. Initiale Daten laden
+# 5. Load initial data
 docker exec asciisky-data-updater python nightly_data_updater.py
 ```
 
-### Auf $RABBITMQ_B
+### On $RABBITMQ_B
 
 ```bash
 # 1. Repository klonen
 git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
-# 2. .env von Hauptserver kopieren
+# 2. Copy .env from main server
 scp $RABBITMQ_MAIN:~/asciisky/.env .env
 
-# 3. Worker starten
+# 3. Start workers
 docker compose -f docker-compose.worker-b.yml build
 docker compose -f docker-compose.worker-b.yml up -d
 ```
 
-### Auf $RABBITMQ_C
+### On $RABBITMQ_C
 
 ```bash
 # 1. Repository klonen
@@ -268,47 +268,47 @@ docker compose -f docker-compose.worker-c.yml up -d
 
 ## 🔍 Monitoring
 
-### Service-Status prüfen
+### Check service status
 
 ```bash
-# Auf $RABBITMQ_MAIN
+# On $RABBITMQ_MAIN
 docker compose -f docker-compose.production.yml ps
 docker compose -f docker-compose.production.yml logs -f web
 
-# Auf $RABBITMQ_B
+# On $RABBITMQ_B
 ssh $RABBITMQ_B "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml ps"
 
-# Auf $RABBITMQ_C
+# On $RABBITMQ_C
 ssh $RABBITMQ_C "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml ps"
 ```
 
 ### RabbitMQ Management UI
 
-**Zugriff via SSH-Tunnel:**
+**Access via SSH tunnel:**
 ```bash
-# Von deinem lokalen Rechner:
+# From your local machine:
 ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
-# Dann im Browser öffnen:
+# Then open in the browser:
 http://localhost:15672
 
 User: admin
-Password: <RABBITMQ_PASSWORD aus .env>
+Password: <RABBITMQ_PASSWORD from .env>
 ```
 
-**Prüfe:**
-- ✅ 20 Worker verbunden (12 Precompute + 4 Asteroid + 4 Comet)
+**Check:**
+- ✅ 20 workers connected (12 Precompute + 4 Asteroid + 4 Comet)
 - ✅ Queues: `precompute.tasks`, `asteroid.compute`, `comet.compute`
-- ✅ Messages werden verarbeitet
-- ✅ Precompute Coordinator läuft
+- ✅ Messages are being processed
+- ✅ Precompute coordinator running
 
-### PostgreSQL Status
+### PostgreSQL status
 
 ```bash
-# Verbindung testen
+# Test connection
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT version();"
 
-# Datenbank-Statistiken
+# Database statistics
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "
 SELECT 
     schemaname,
@@ -319,7 +319,7 @@ WHERE schemaname = 'public'
 ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
 "
 
-# Cache-Statistiken
+# Cache statistics
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT * FROM cache_statistics;"
 ```
 
@@ -327,13 +327,13 @@ docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT * FROM cac
 
 ## 🔄 Updates
 
-### Code-Update auf allen Servern
+### Code update on all servers
 
 ```bash
-# Auf Entwicklungsrechner
+# On your development machine
 cd /path/to/asciisky
 
-# Update-Skript erstellen
+# Create update script
 cat > scripts/update-production.sh << 'EOF'
 #!/bin/bash
 set -e
@@ -363,21 +363,21 @@ chmod +x scripts/update-production.sh
 
 ---
 
-## 🛠️ Wartung
+## 🛠️ Maintenance
 
-### Cache leeren
+### Clear cache
 
 ```bash
-# PostgreSQL Cache leeren
+# Clear PostgreSQL cache
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "
 DELETE FROM cached_positions WHERE expires_at < CURRENT_TIMESTAMP;
 "
 ```
 
-### Logs rotieren
+### Rotate logs
 
 ```bash
-# Docker Logs begrenzen (in docker-compose*.yml)
+# Limit Docker logs (in docker-compose*.yml)
 logging:
   driver: "json-file"
   options:
@@ -388,7 +388,7 @@ logging:
 ### Backup
 
 ```bash
-# PostgreSQL Backup
+# PostgreSQL backup
 docker exec asciisky-postgres pg_dump -U asciisky asciisky > backup_$(date +%Y%m%d).sql
 
 # Restore
@@ -399,33 +399,33 @@ cat backup_20250119.sql | docker exec -i asciisky-postgres psql -U asciisky asci
 
 ## 🚨 Troubleshooting
 
-### Worker verbinden sich nicht
+### Workers do not connect
 
 ```bash
-# Prüfe Netzwerk-Verbindung
+# Check network connectivity
 ssh $RABBITMQ_B "telnet $RABBITMQ_MAIN 5672"
 
-# Prüfe RabbitMQ Logs
+# Check RabbitMQ logs
 docker logs asciisky-rabbitmq
 
-# Prüfe Worker Logs
+# Check worker logs
 ssh $RABBITMQ_B "docker logs asciisky-asteroid-worker-1"
 ```
 
-### PostgreSQL Verbindungsfehler
+### PostgreSQL connection error
 
 ```bash
-# Prüfe PostgreSQL läuft
+# Check PostgreSQL is running
 docker exec asciisky-postgres pg_isready -U asciisky
 
-# Prüfe Firewall
+# Check firewall
 sudo ufw status
 
-# Prüfe PostgreSQL Config
+# Check PostgreSQL config
 docker exec asciisky-postgres cat /var/lib/postgresql/data/pg_hba.conf
 ```
 
-### Performance-Probleme
+### Performance issues
 
 ```bash
 # PostgreSQL Connections
@@ -433,54 +433,54 @@ docker exec asciisky-postgres psql -U asciisky -d asciisky -c "
 SELECT count(*) FROM pg_stat_activity WHERE state = 'active';
 "
 
-# RabbitMQ Queue Länge
+# RabbitMQ queue length
 docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
 ```
 
 ---
 
-## 📊 Performance-Erwartungen
+## 📊 Performance expectations
 
-| Metrik | Wert |
+| Metric | Value |
 |--------|------|
-| Worker-Durchsatz | ~50-100 Berechnungen/Minute |
-| API-Response-Zeit | < 200ms (cached) |
-| Cache-Hit-Rate | > 90% |
-| PostgreSQL Connections | < 20 gleichzeitig |
-| RabbitMQ Messages/sec | ~10-20 |
+| Worker throughput | ~50-100 computations/minute |
+| API response time | < 200ms (cached) |
+| Cache hit rate | > 90% |
+| PostgreSQL connections | < 20 concurrent |
+| RabbitMQ messages/sec | ~10-20 |
 
 ---
 
-## 🔐 Sicherheit
+## 🔐 Security
 
-### Empfohlene Maßnahmen
+### Recommended measures
 
-1. **Firewall konfigurieren (WICHTIG!)**
+1. **Configure firewall (IMPORTANT!)**
    ```bash
    # Auf $RABBITMQ_MAIN:
 sudo ./scripts/setup-firewall.sh
    ```
    
-   Das Script:
-   - ✅ Beschränkt Port 5672 (RabbitMQ) auf Worker-B/C IPs
-   - ✅ Beschränkt Port 5432 (PostgreSQL) auf Worker-B/C IPs
-   - ✅ Beschränkt Port 15672 (RabbitMQ UI) auf localhost
-   - ✅ Ermittelt IPs automatisch via DNS
-   - ✅ Worker-Server benötigen KEINE Änderungen
+   The script:
+   - ✅ Restricts port 5672 (RabbitMQ) to Worker-B/C IPs
+   - ✅ Restricts port 5432 (PostgreSQL) to Worker-B/C IPs
+   - ✅ Restricts port 15672 (RabbitMQ UI) to localhost
+   - ✅ Automatically discovers IPs via DNS
+   - ✅ Worker servers require NO changes
 
-2. **RabbitMQ UI Zugriff**
-   - ✅ Nur via SSH-Tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
-   - ✅ Nicht öffentlich erreichbar
+2. **RabbitMQ UI access**
+   - ✅ Only via SSH tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
+   - ✅ Not publicly reachable
 
-3. **PostgreSQL Zugriff**
-   - ✅ Nur von Worker-IPs erlaubt (via Firewall)
-   - ✅ Starkes Passwort in `.env`
+3. **PostgreSQL access**
+   - ✅ Only allowed from worker IPs (via firewall)
+   - ✅ Strong password in `.env`
 
 4. **Web UI**
-   - ✅ Läuft über nginx (Port 80/443)
-   - ✅ Port 8000 nicht öffentlich (intern)
+   - ✅ Runs via nginx (port 80/443)
+   - ✅ Port 8000 not publicly exposed (internal)
 
-5. **Regelmäßige Updates**
+5. **Regular updates**
    ```bash
    docker compose pull
    docker compose up -d
@@ -490,7 +490,7 @@ sudo ./scripts/setup-firewall.sh
 
 ## 📞 Support
 
-Bei Problemen:
-1. Prüfe Logs: `docker compose logs -f`
-2. Prüfe RabbitMQ UI: http://$RABBITMQ_MAIN:15672
-3. Prüfe PostgreSQL: `docker exec asciisky-postgres psql -U asciisky`
+If you have issues:
+1. Check logs: `docker compose logs -f`
+2. Check RabbitMQ UI: http://$RABBITMQ_MAIN:15672
+3. Check PostgreSQL: `docker exec asciisky-postgres psql -U asciisky`

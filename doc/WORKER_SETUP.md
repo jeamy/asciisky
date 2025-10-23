@@ -1,12 +1,12 @@
 # Worker Setup Guide
 
-## Architektur
+## Architecture
 
-ASCII Sky verwendet eine Multi-Host Worker-Architektur mit RabbitMQ:
+ASCII Sky uses a multi-host worker architecture with RabbitMQ:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Hauptserver ($RABBITMQ_MAIN)                                 │
+│ Main server ($RABBITMQ_MAIN)                                  │
 │ - Web (FastAPI)                                              │
 │ - RabbitMQ (Message Broker)                                  │
 │ - PostgreSQL (Cache/DB)                                      │
@@ -28,57 +28,57 @@ ASCII Sky verwendet eine Multi-Host Worker-Architektur mit RabbitMQ:
 └──────────────────┘              └──────────────────┘
 ```
 
-## Worker-Typen
+## Worker Types
 
 ### Precompute Worker
-- **Zweck:** Vorausberechnung für bekannte Locations
-- **Trigger:** Coordinator erstellt Tasks stündlich
+- **Purpose:** Precompute for known locations
+- **Trigger:** Coordinator creates tasks hourly
 - **Queue:** `precompute.tasks`
-- **Hosts:** Hauptserver + B + C (total 12 Worker)
+- **Hosts:** Main server + B + C (total 12 workers)
 
 ### Asteroid Worker
-- **Zweck:** On-Demand Berechnung bei Cache-Miss
-- **Trigger:** API-Request ohne Cache-Hit
+- **Purpose:** On-demand computation on cache miss
+- **Trigger:** API request without cache hit
 - **Queue:** `asteroid.compute` (via Exchange `computation.direct`)
-- **Hosts:** B + C (total 4 Worker)
+- **Hosts:** B + C (total 4 workers)
 
 ### Comet Worker
-- **Zweck:** On-Demand Berechnung bei Cache-Miss
-- **Trigger:** API-Request ohne Cache-Hit
+- **Purpose:** On-demand computation on cache miss
+- **Trigger:** API request without cache hit
 - **Queue:** `comet.compute` (via Exchange `computation.direct`)
 - **Hosts:** B + C (total 4 Worker)
 
-## Konfiguration
+## Configuration
 
-### .env Dateien
+### .env files
 
-Jeder Host hat seine **eigene** `.env` Datei mit generischen Variablen:
+Each host has its **own** `.env` file with generic variables:
 
-**Wichtig:** Alle Hosts verwenden die **gleichen** Passwörter (für PostgreSQL/RabbitMQ Zugriff).
+**Important:** All hosts use the **same** passwords (for PostgreSQL/RabbitMQ access).
 
-#### Hauptserver (.env)
+#### Main server (.env)
 ```bash
 # Worker Setup
 SETUP_WORKER_B=true
 SETUP_WORKER_C=true
 
-# Worker Scaling (nur Precompute auf Hauptserver)
+# Worker scaling (precompute only on main server)
 PRECOMPUTE_WORKERS=4
-ASTEROID_WORKERS=0  # Nicht verwendet auf Hauptserver
-COMET_WORKERS=0     # Nicht verwendet auf Hauptserver
+ASTEROID_WORKERS=0  # Not used on main server
+COMET_WORKERS=0     # Not used on main server
 ```
 
-#### Worker Host B (.env auf $RABBITMQ_B)
+#### Worker host B (.env on $RABBITMQ_B)
 ```bash
-# Worker Scaling (unterschiedlich pro Host konfigurierbar)
+# Worker scaling (configurable per host)
 PRECOMPUTE_WORKERS=4
 ASTEROID_WORKERS=2
 COMET_WORKERS=2
 ```
 
-#### Worker Host C (.env auf $RABBITMQ_C)
+#### Worker host C (.env on $RABBITMQ_C)
 ```bash
-# Worker Scaling (unterschiedlich pro Host konfigurierbar)
+# Worker scaling (configurable per host)
 PRECOMPUTE_WORKERS=4
 ASTEROID_WORKERS=2
 COMET_WORKERS=2
@@ -86,58 +86,58 @@ COMET_WORKERS=2
 
 ## Deployment
 
-### Initial Setup
+### Initial setup
 
 ```bash
-# Auf Hauptserver
+# On main server
 cd /media/docker/asciisky
 cp .env.example .env
-# Bearbeite .env (Passwörter, etc.)
+# Edit .env (passwords, etc.)
 
-# Setup ausführen (deployed auf alle Hosts)
+# Run setup (deploys to all hosts)
 ./scripts/setup-production.sh
 ```
 
-Das Script:
-1. Deployed Hauptserver (Web, RabbitMQ, PostgreSQL, Precompute-Worker)
-2. Kopiert `.env` auf Worker-Hosts B und C
-3. Deployed Worker auf B und C
+The script:
+1. Deploys main server (Web, RabbitMQ, PostgreSQL, precompute workers)
+2. Copies `.env` to worker hosts B and C
+3. Deploys workers on B and C
 
 ### Updates
 
 ```bash
-# Auf Hauptserver
+# On main server
 cd /media/docker/asciisky
 git pull
 
-# Update auf allen Hosts
+# Update on all hosts
 ./scripts/update-production.sh
 ```
 
-### Manuelle Worker-Skalierung
+### Manual worker scaling
 
-Wenn du die Worker-Anzahl ändern möchtest:
+If you want to change the number of workers:
 
-**Auf Hauptserver:**
+**On main server:**
 ```bash
-# .env bearbeiten
+# Edit .env
 nano .env
-# PRECOMPUTE_WORKERS=8  # Erhöhe auf 8
+# PRECOMPUTE_WORKERS=8  # Increase to 8
 
-# Neu starten
+# Restart
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=8
 ```
 
-**Auf Worker-Host B:**
+**On worker host B:**
 ```bash
 ssh $RABBITMQ_B
 cd ~/asciisky
 
-# .env bearbeiten
+# Edit .env
 nano .env
-# ASTEROID_WORKERS=4  # Erhöhe auf 4
+# ASTEROID_WORKERS=4  # Increase to 4
 
-# Neu starten
+# Restart
 docker compose -f docker-compose.workers.yml up -d --scale asteroid_worker=4
 ```
 
@@ -146,27 +146,27 @@ docker compose -f docker-compose.workers.yml up -d --scale asteroid_worker=4
 ### RabbitMQ Management UI
 
 ```bash
-# SSH-Tunnel erstellen
+# Create SSH tunnel
 ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
-# Browser öffnen
+# Open browser
 http://localhost:15672
 # Login: admin / <RABBITMQ_PASSWORD>
 ```
 
-**Was zu prüfen:**
-- **Connections:** Sollte ~12 Connections zeigen (alle Worker)
+**What to check:**
+- **Connections:** Should show ~12 connections (all workers)
 - **Queues:** `precompute.tasks`, `asteroid.compute`, `comet.compute`
-- **Messages:** Pending/Processing Messages
+- **Messages:** Pending/Processing messages
 
 ### Worker Logs
 
-**Hauptserver:**
+**Main server:**
 ```bash
 docker compose -f docker-compose.production.yml logs -f precompute_worker
 ```
 
-**Worker Host B:**
+**Worker host B:**
 ```bash
 ssh $RABBITMQ_B
 cd ~/asciisky
@@ -175,7 +175,7 @@ docker compose -f docker-compose.workers.yml logs -f comet_worker
 docker compose -f docker-compose.workers.yml logs -f precompute_worker
 ```
 
-**Worker Host C:**
+**Worker host C:**
 ```bash
 ssh $RABBITMQ_C
 cd ~/asciisky
@@ -186,16 +186,16 @@ docker compose -f docker-compose.workers.yml logs -f precompute_worker
 
 ## Troubleshooting
 
-### Worker bekommen keine Tasks
+### Workers do not receive tasks
 
-**Symptom:** Logs zeigen "Waiting for messages..." aber keine Tasks werden verarbeitet.
+**Symptom:** Logs show "Waiting for messages..." but no tasks are processed.
 
-**Prüfen:**
-1. RabbitMQ Management UI → Connections (alle Worker verbunden?)
-2. RabbitMQ Management UI → Queues (Messages in Queue?)
-3. Exchange Bindings korrekt? (`computation.direct` → `asteroid.compute`)
+**Check:**
+1. RabbitMQ Management UI → Connections (all workers connected?)
+2. RabbitMQ Management UI → Queues (messages in queue?)
+3. Exchange bindings correct? (`computation.direct` → `asteroid.compute`)
 
-**Lösung:**
+**Solution:**
 ```bash
 # Worker neu starten
 ssh $RABBITMQ_B
@@ -203,23 +203,23 @@ cd ~/asciisky
 docker compose -f docker-compose.workers.yml restart
 ```
 
-### Cache-Miss aber keine Berechnung
+### Cache miss but no computation
 
-**Symptom:** API-Logs zeigen "Cache MISS" aber Worker werden nicht getriggert.
+**Symptom:** API logs show "Cache MISS" but workers are not triggered.
 
-**Prüfen:**
-1. API-Logs: "Published asteroid task" erscheint?
-2. RabbitMQ: Messages in `asteroid.compute` Queue?
-3. Worker-Logs: "Processing task" erscheint?
+**Check:**
+1. API logs: Do you see "Published asteroid task"?
+2. RabbitMQ: Messages in `asteroid.compute` queue?
+3. Worker logs: Do you see "Processing task"?
 
-**Häufige Ursachen:**
-- Exchange/Routing Key falsch konfiguriert
-- Worker nicht gestartet
-- RabbitMQ Connection-Problem
+**Common causes:**
+- Exchange/routing key misconfigured
+- Worker not started
+- RabbitMQ connection problem
 
-### PostgreSQL Connection Error
+### PostgreSQL connection error
 
-**Symptom:** Worker können nicht auf PostgreSQL zugreifen.
+**Symptom:** Workers cannot access PostgreSQL.
 
 **Prüfen:**
 ```bash
@@ -228,69 +228,69 @@ ssh $RABBITMQ_B
 telnet $RABBITMQ_MAIN 5432
 ```
 
-**Lösung:**
-- Firewall-Regeln prüfen
-- PostgreSQL `listen_addresses` prüfen
-- PostgreSQL `pg_hba.conf` prüfen
+**Solution:**
+- Check firewall rules
+- Check PostgreSQL `listen_addresses`
+- Check PostgreSQL `pg_hba.conf`
 
-## Performance Tuning
+## Performance tuning
 
-### Worker-Anzahl optimieren
+### Optimize number of workers
 
-**Faustregel:**
-- **Precompute:** 1 Worker pro CPU-Kern (I/O-bound)
-- **Asteroid/Comet:** 2-4 Worker pro Host (CPU-bound, Skyfield-Berechnungen)
+**Rule of thumb:**
+- **Precompute:** 1 worker per CPU core (I/O-bound)
+- **Asteroid/Comet:** 2-4 workers per host (CPU-bound, Skyfield computations)
 
 **Monitoring:**
 ```bash
-# CPU-Auslastung prüfen
+# Check CPU utilization
 htop
 
-# Worker-Performance
+# Worker performance
 docker stats
 ```
 
-### RabbitMQ Prefetch
+### RabbitMQ prefetch
 
-Standardmäßig: `prefetch_count=1` (ein Task pro Worker gleichzeitig)
+Default: `prefetch_count=1` (one task per worker at a time)
 
-Für schnellere Tasks erhöhen:
+Increase for faster tasks:
 ```python
 # In worker.py
 self.channel.basic_qos(prefetch_count=2)
 ```
 
-## Sicherheit
+## Security
 
 ### Firewall
 
-Nur Worker-IPs dürfen auf RabbitMQ/PostgreSQL zugreifen:
+Only worker IPs may access RabbitMQ/PostgreSQL:
 
 ```bash
 # Auf Hauptserver
 sudo ./scripts/setup-firewall.sh
 ```
 
-### Passwörter
+### Passwords
 
-Verwende starke Passwörter in `.env`:
+Use strong passwords in `.env`:
 ```bash
-# Generieren
+# Generate
 openssl rand -base64 32
 ```
 
 ## Backup
 
-### PostgreSQL Backup
+### PostgreSQL backup
 
 ```bash
 # Auf Hauptserver
 docker exec asciisky-postgres pg_dump -U asciisky asciisky > backup.sql
 ```
 
-### RabbitMQ Backup
+### RabbitMQ backup
 
 ```bash
-# Definitions exportieren
+# Export definitions
 curl -u admin:password http://localhost:15672/api/definitions > rabbitmq-backup.json
 ```

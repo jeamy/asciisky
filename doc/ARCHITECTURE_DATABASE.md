@@ -1,10 +1,10 @@
-# Datenbank-Schema
+# Database Schema
 
-## PostgreSQL Tabellen
+## PostgreSQL Tables
 
-### 1. asteroids / comets (DataFrame Cache)
+### 1. asteroids / comets (DataFrame cache)
 
-Speichert Rohdaten von MPC als Pickle-serialisierte Pandas DataFrames.
+Stores raw MPC data as pickled Pandas DataFrames.
 
 ```sql
 CREATE TABLE asteroids (
@@ -22,7 +22,7 @@ CREATE TABLE comets (
 );
 ```
 
-**Inhalt:** Pickle-serialisierte Pandas DataFrames mit Orbital Elements:
+**Contents:** Pickle-serialized Pandas DataFrames with orbital elements:
 - Designation (Name)
 - H (Absolute Magnitude)
 - G (Slope Parameter)
@@ -35,23 +35,23 @@ CREATE TABLE comets (
 - n (Mean Daily Motion)
 - a (Semimajor Axis)
 
-**Quelle:**
-- Asteroiden: https://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT (~200 MB)
-- Kometen: https://minorplanetcenter.net/iau/Ephemerides/Comets/CometEls.txt (~100 KB)
+**Source:**
+- Asteroids: https://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT (~200 MB)
+- Comets: https://minorplanetcenter.net/iau/Ephemerides/Comets/CometEls.txt (~100 KB)
 
 **Code:** `db_utils.py:55-90`
 
 ---
 
-### 2. cached_positions (Position Cache)
+### 2. cached_positions (Position cache)
 
-Speichert berechnete Positionen für spezifische Location/Time Kombinationen.
-Verwendet **eine** Tabelle für Asteroiden und Kometen.
+Stores computed positions for specific location/time combinations.
+Uses a single table for both asteroids and comets.
 
 ```sql
 CREATE TABLE cached_positions (
     id SERIAL PRIMARY KEY,
-    object_type VARCHAR(20) NOT NULL,      -- 'asteroid' oder 'comet'
+    object_type VARCHAR(20) NOT NULL,      -- 'asteroid' or 'comet'
     object_id INTEGER NOT NULL,
     location_key VARCHAR(100) NOT NULL,    -- 'lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ'
     time_bucket VARCHAR(20) NOT NULL,      -- 'YYYYMMDDTHH' (1-hour buckets)
@@ -59,7 +59,7 @@ CREATE TABLE cached_positions (
     observer_lon DOUBLE PRECISION NOT NULL,
     observer_elevation DOUBLE PRECISION NOT NULL,
     computed_at TIMESTAMP NOT NULL,
-    position_data BYTEA NOT NULL,          -- Pickle-serialisierte Daten
+    position_data BYTEA NOT NULL,          -- Pickle-serialized data
     UNIQUE(object_type, location_key, time_bucket)
 );
 
@@ -70,9 +70,9 @@ CREATE INDEX idx_cached_type ON cached_positions(object_type);
 
 **location_key:** Format `lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ`
 
-**Inhalt:** Ungefilterte berechnete Positionen (alle Objekte bis Mag ~22)
+**Contents:** Unfiltered computed positions (all objects up to mag ~22)
 
-**Beispiel-Inhalt:**
+**Example content:**
 ```json
 [
   {
@@ -93,17 +93,17 @@ CREATE INDEX idx_cached_type ON cached_positions(object_type);
 ]
 ```
 
-**Wichtig:** Enthält ALLE berechneten Objekte (ungefiltert)! Filterung passiert in API-Routen.
+**Important:** Contains ALL computed objects (unfiltered)! Filtering happens in API routes.
 
 **Code:** 
-- `db_utils.py:store_asteroid_positions()` - Zeilen 90-112
-- `db_utils.py:store_comet_positions()` - Zeilen 180-206
-- `db_utils.py:get_asteroid_positions()` - Zeilen 114-138
-- `db_utils.py:get_comet_positions()` - Zeilen 208-232
+- `db_utils.py:store_asteroid_positions()` — lines 90–112
+- `db_utils.py:store_comet_positions()` — lines 180–206
+- `db_utils.py:get_asteroid_positions()` — lines 114–138
+- `db_utils.py:get_comet_positions()` — lines 208–232
 
 ---
 
-## Datenfluss
+## Data Flow
 
 ```
 MPC Download
@@ -121,46 +121,45 @@ PostgreSQL: asteroids/comets Tabellen
          ▼
 Skyfield Position Calculation
          │
-         │ Für jeden Ort/Zeit
+         │ For each location/time
          ▼
 PostgreSQL: cached_positions
          │
-         │ Ungefiltert (alle Objekte)
+         │ Unfiltered (all objects)
          ▼
 API Routes (asteroids.py, comets.py)
          │
-         │ Filterung basierend auf user_settings.json
-         ▼
-API Response (JSON, gefiltert)
+         │ Filtering based on user_settings.json
+         │ API Response (JSON, filtered)
 ```
 
 ## TTL (Time-To-Live)
 
-| Tabelle | TTL | Grund |
-|---------|-----|-------|
-| asteroids/comets | 31 Tage | Orbital Elements ändern sich langsam |
-| cached_positions | Unbegrenzt | Positionen für spezifischen Zeitpunkt sind unveränderlich |
+| Table | TTL | Reason |
+|-------|-----|--------|
+| asteroids/comets | 31 days | Orbital elements change slowly |
+| cached_positions | Unlimited | Positions for a specific timestamp are immutable |
 
-**Position Cache:**
+**Position cache:**
 
-Positionen für einen **spezifischen Zeitpunkt** (time_bucket) sind **unveränderlich**:
-- Die Position von Ceres am 25.12.2025 um 12:00 UTC ändert sich nie mehr
-- Werden unbegrenzt gecacht
-- Spart massive Rechenzeit für wiederholte Abfragen
+Positions for a **specific timestamp** (time_bucket) are **immutable**:
+- The position of Ceres on 2025-12-25 at 12:00 UTC never changes
+- Cached indefinitely
+- Saves significant compute time for repeated queries
 
-**Speicherplatz-Management:**
-- Bei Bedarf können alte Positionen manuell gelöscht werden
-- Empfehlung: Positionen für `time_bucket` < now() - 1 Jahr löschen
-- Typischer Speicherverbrauch: ~10 KB pro Location/Time Kombination
+**Storage management:**
+- Old positions can be pruned manually if needed
+- Recommendation: delete positions with `time_bucket` < now() - 1 year
+- Typical storage: ~10 KB per location/time combination
 
-**Planeten:** Werden NICHT gecacht (Direktberechnung bei jedem Request)
+**Planets:** NOT cached (direct computation for each request)
 
-## Speicherverbrauch
+## Storage Usage
 
-| Tabelle | Größe (ca.) | Pro Eintrag |
-|---------|-------------|-------------|
-| asteroids | 20-50 MB | ~20 MB (DataFrame mit ~1M Objekten) |
-| comets | 1-5 MB | ~1 MB (DataFrame mit ~1000 Objekten) |
-| cached_positions | 100-500 KB | ~10 KB (Pickle Array, ungefiltert) |
+| Table | Size (approx.) | Per entry |
+|-------|-----------------|-----------|
+| asteroids | 20–50 MB | ~20 MB (DataFrame with ~1M objects) |
+| comets | 1–5 MB | ~1 MB (DataFrame with ~1000 objects) |
+| cached_positions | 100–500 KB | ~10 KB (pickled array, unfiltered) |
 
-**Total:** ~25-60 MB für vollen Cache (ohne Planeten)
+**Total:** ~25–60 MB for a full cache (excluding planets)

@@ -1,18 +1,18 @@
-# Precompute mit RabbitMQ - Einfache Koordination
+# Precompute with RabbitMQ - Simple Coordination
 
-## 🎯 Konzept
+## 🎯 Concept
 
-**Problem gelöst:** Keine manuelle Location-Aufteilung mehr nötig!
+**Problem solved:** No manual location partitioning needed anymore!
 
-**Lösung:** RabbitMQ Queue-basierte Koordination
+**Solution:** RabbitMQ queue-based coordination
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Coordinator (Hauptserver)                               │
-│ ├─ Liest Locations (user_settings.json + precompute_   │
+│ Coordinator (Main server)                               │
+│ ├─ Reads locations (user_settings.json + precompute_    │
 │ │  locations.json)                                      │
-│ ├─ Erstellt Tasks für alle Locations × Zeiten          │
-│ └─ Publiziert Tasks in RabbitMQ Queue                  │
+│ ├─ Creates tasks for all locations × times              │
+│ └─ Publishes tasks to RabbitMQ queue                    │
 └─────────────────────────────────────────────────────────┘
                         │
                         ▼
@@ -27,103 +27,103 @@
         ▼               ▼               ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
 │ Workers x4   │ │ Workers x4   │ │ Workers x4   │
-│ (Hauptserver)│ │ (rabbit-b)   │ │ (rabbit-c)   │
-│ (skalierbar) │ │ (skalierbar) │ │ (skalierbar) │
+│ (Main)       │ │ (rabbit-b)   │ │ (rabbit-c)   │
+│ (scalable)   │ │ (scalable)   │ │ (scalable)   │
 │              │ │              │ │              │
-│ Holt Task    │ │ Holt Task    │ │ Holt Task    │
-│ Berechnet    │ │ Berechnet    │ │ Berechnet    │
-│ Speichert DB │ │ Speichert DB │ │ Speichert DB │
+│ Fetches task │ │ Fetches task │ │ Fetches task │
+│ Computes     │ │ Computes     │ │ Computes     │
+│ Stores in DB │ │ Stores in DB │ │ Stores in DB │
 │ ACK          │ │ ACK          │ │ ACK          │
 └──────────────┘ └──────────────┘ └──────────────┘
 
-Default: 12 Worker total (4 pro Server)
-Skalierbar via .env: PRECOMPUTE_WORKERS, PRECOMPUTE_WORKERS_B/C
+Default: 12 workers total (4 per server)
+Scalable via .env: PRECOMPUTE_WORKERS, PRECOMPUTE_WORKERS_B/C
 ```
 
-**Wichtig:** Precompute-Worker sind für **Vorausberechnung** zuständig. Asteroid/Comet-Worker sind für **On-Demand API-Requests** (siehe unten).
+**Important:** Precompute workers perform scheduled precomputation. Asteroid/Comet workers handle on-demand API requests (see below).
 
 ---
 
-## 🔄 Worker-Typen
+## 🔄 Worker Types
 
-### 1. Precompute Worker (aktiv)
-- **Zweck:** Vorausberechnung für bekannte Locations
+### 1. Precompute Worker (active)
+- **Purpose:** Precompute for known locations
 - **Queue:** `precompute.tasks`
-- **Trigger:** Coordinator (stündlich)
-- **Berechnet:** Asteroids + Comets für alle Locations
-- **Status:** ✅ Immer aktiv
+- **Trigger:** Coordinator (hourly)
+- **Computes:** Asteroids + comets for all locations
+- **Status:** ✅ Always active
 
 ### 2. Asteroid/Comet Worker (on-demand)
-- **Zweck:** On-Demand Berechnungen für API-Requests
+- **Purpose:** On-demand computations for API requests
 - **Queues:** `asteroid.compute`, `comet.compute`
-- **Trigger:** API-Request (wenn Location nicht im Cache)
-- **Feature Flag:** `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
-- **Status:** ✅ Aktiv (warten auf API-Requests)
-- **Verwendung:** Für unbekannte Locations, Cache-Miss, oder Zeiten außerhalb Precompute-Fenster
+- **Trigger:** API request (when location is not in cache)
+- **Feature flags:** `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
+- **Status:** ✅ Active (idle until API requests arrive)
+- **Use cases:** Unknown locations, cache-miss, or times outside the precompute window
 
-**Warum sind Asteroid/Comet-Worker manchmal idle?**
-- Sie warten auf API-Requests für **nicht-precomputed** Locations
-- Precompute deckt nur bekannte Locations + 720h Zeitfenster ab
-- Sobald ein Benutzer eine andere Location/Zeit anfragt, werden sie aktiv
-- **Wichtig:** Diese Worker MÜSSEN laufen, sonst funktionieren API-Requests für neue Locations nicht!
+**Why are asteroid/comet workers sometimes idle?**
+- They wait for API requests for non-precomputed locations
+- Precompute only covers known locations + a 720h time window
+- As soon as a user requests a different location/time, they become active
+- **Important:** These workers MUST be running, or API requests for new locations will fail!
 
 ---
 
-## ✅ Vorteile
+## ✅ Benefits
 
-1. **Keine Duplikate**
-   - Jeder Task wird nur 1x bearbeitet
-   - RabbitMQ garantiert Fair Dispatch
+1. **No duplicates**
+   - Each task is processed exactly once
+   - RabbitMQ ensures fair dispatch
 
-2. **Automatische Lastverteilung**
-   - Worker holen sich Tasks wenn frei
-   - Schnellere Worker bearbeiten mehr Tasks
+2. **Automatic load balancing**
+   - Workers pull when free
+   - Faster workers process more tasks
 
-3. **Einfach skalierbar**
-   - Mehr Worker = schneller fertig
-   - Skalierung via `.env`: `PRECOMPUTE_WORKERS=8`
-   - Dann: `docker compose up -d`
+3. **Easily scalable**
+   - More workers = faster completion
+   - Scale via `.env`: `PRECOMPUTE_WORKERS=8`
+   - Then: `docker compose up -d`
 
 4. **Failover**
-   - Worker fällt aus → anderer übernimmt
-   - Tasks werden nicht verloren (Persistent Queue)
+   - If a worker fails, another takes over
+   - Tasks are not lost (persistent queue)
 
-5. **Prioritäten**
-   - Nächste 24h = HIGH Priority (10)
-   - Danach = NORMAL Priority (5)
+5. **Priorities**
+   - Next 24h = HIGH priority (10)
+   - After that = NORMAL priority (5)
 
 ---
 
 ## 🚀 Setup
 
-### 1. Automatisches Setup (Empfohlen)
+### 1. Automatic setup (recommended)
 
 ```bash
-# Auf Entwicklungsrechner
+# On your development machine
 ./scripts/setup-production.sh
 ```
 
-Das Script deployed automatisch:
-- Hauptserver: Coordinator + 4 Precompute Workers
-- Worker-B: 4 Precompute Workers
-- Worker-C: 4 Precompute Workers
+The script deploys:
+- Main server: Coordinator + 4 precompute workers
+- Worker-B: 4 precompute workers
+- Worker-C: 4 precompute workers
 
-### 2. Worker-Skalierung (via .env)
+### 2. Worker scaling (via .env)
 
 ```bash
-# .env editieren
-PRECOMPUTE_WORKERS=8        # Hauptserver
+# Edit .env
+PRECOMPUTE_WORKERS=8        # Main server
 PRECOMPUTE_WORKERS_B=8      # Worker-B
 PRECOMPUTE_WORKERS_C=8      # Worker-C
 
-# Neu starten
+# Restart
 docker compose up -d
 ```
 
-### 3. Manuelles Setup
+### 3. Manual setup
 
 ```bash
-# Hauptserver
+# Main server
 docker compose -f docker-compose.production.yml up -d
 
 # Worker-B (optional)
@@ -139,31 +139,31 @@ docker compose -f docker-compose.worker-c.yml up -d
 
 ---
 
-## 📊 Skalierungs-Szenarien
+## 📊 Scaling scenarios
 
-### Szenario 1: Kleine Installation (1-2 Locations)
+### Scenario 1: Small installation (1–2 locations)
 
 **Setup:**
-- 1 Coordinator (Hauptserver)
-- 4 Worker (Hauptserver)
+- 1 Coordinator (main server)
+- 4 workers (main server)
 
 ```bash
 # .env
 PRECOMPUTE_WORKERS=4
 
-# Nur Hauptserver
+# Main server only
 docker compose -f docker-compose.production.yml up -d
 ```
 
-**Performance:** ~30 min für 720h × 2 Locations
+**Performance:** ~30 min for 720h × 2 locations
 
 ---
 
-### Szenario 2: Standard Production (2-5 Locations)
+### Scenario 2: Standard production (2–5 locations)
 
 **Setup:**
-- 1 Coordinator (Hauptserver)
-- 12 Worker (4 Hauptserver + 4 rabbit-b + 4 rabbit-c)
+- 1 Coordinator (main server)
+- 12 workers (4 main + 4 rabbit-b + 4 rabbit-c)
 
 ```bash
 # .env (Default)
@@ -175,15 +175,15 @@ PRECOMPUTE_WORKERS_C=4
 ./scripts/setup-production.sh
 ```
 
-**Performance:** ~10 min für 720h × 5 Locations
+**Performance:** ~10 min for 720h × 5 locations
 
 ---
 
-### Szenario 3: High-Performance (5+ Locations)
+### Scenario 3: High performance (5+ locations)
 
 **Setup:**
-- 1 Coordinator (Hauptserver)
-- 24 Worker (8 Hauptserver + 8 rabbit-b + 8 rabbit-c)
+- 1 Coordinator (main server)
+- 24 workers (8 main + 8 rabbit-b + 8 rabbit-c)
 
 ```bash
 # .env
@@ -195,34 +195,34 @@ PRECOMPUTE_WORKERS_C=8
 ./scripts/setup-production.sh
 ```
 
-**Performance:** ~5 min für 720h × 10 Locations
+**Performance:** ~5 min for 720h × 10 locations
 
 ---
 
-## 💡 Brauche ich Asteroid/Comet-Worker?
+## 💡 Do I need asteroid/comet workers?
 
-**Kurze Antwort:** Ja! Sie sind wichtig für API-Requests.
+**Short answer:** Yes! They are critical for API requests.
 
-**Lange Antwort:**
+**Long answer:**
 
-### Precompute-Worker (Vorausberechnung)
-- Berechnen bekannte Locations im Voraus (720h Fenster)
-- Speichern in PostgreSQL Cache
-- Laufen stündlich automatisch
-- **Abdeckung:** Nur Locations in `precompute_locations.json`
+### Precompute workers (scheduled)
+- Compute known locations in advance (720h window)
+- Store in PostgreSQL cache
+- Run automatically every hour
+- **Coverage:** Only locations in `precompute_locations.json`
 
-### Asteroid/Comet-Worker (On-Demand)
-- Berechnen API-Requests für:
-  - ✅ Neue/unbekannte Locations
-  - ✅ Zeiten außerhalb des 720h Fensters
-  - ✅ Cache-Miss (z.B. nach Neustart)
-- Feature Flags: `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
-- **Wichtig:** Ohne diese Worker funktionieren API-Requests für nicht-precomputed Daten nicht!
+### Asteroid/Comet workers (on-demand)
+- Handle API requests for:
+  - ✅ New/unknown locations
+  - ✅ Times outside the 720h window
+  - ✅ Cache miss (e.g., after restart)
+- Feature flags: `USE_RABBITMQ_ASTEROIDS=true`, `USE_RABBITMQ_COMETS=true`
+- **Important:** Without these workers, API requests for non-precomputed data will not work!
 
-**Empfehlung:** 
-- **Minimum:** 2 Asteroid + 2 Comet Worker pro Server (Default)
-- **Optimal:** 4+ Worker pro Server bei hoher Last
-- **Idle ist normal:** Worker warten auf API-Requests, das ist OK!
+**Recommendation:** 
+- **Minimum:** 2 asteroid + 2 comet workers per server (default)
+- **Optimal:** 4+ workers per server under high load
+- **Idle is normal:** Workers wait for API requests—that's OK!
 
 ---
 
@@ -230,24 +230,24 @@ PRECOMPUTE_WORKERS_C=8
 
 ### RabbitMQ UI
 
-**Zugriff via SSH-Tunnel:**
+**Access via SSH tunnel:**
 ```bash
-# Von deinem lokalen Rechner
+# From your local machine
 ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
-# Dann im Browser öffnen
+# Then open in the browser
 http://localhost:15672
 
 User: admin
-Password: <RABBITMQ_PASSWORD aus .env>
+Password: <RABBITMQ_PASSWORD from .env>
 
 Queue: precompute.tasks
 ```
 
-**Prüfen:**
-- ✅ Tasks in Queue
-- ✅ Worker verbunden (Consumers) - sollte 12 sein (Default)
-- ✅ Messages/sec Rate
+**Check:**
+- ✅ Tasks in queue
+- ✅ Workers connected (consumers) — should be 12 (default)
+- ✅ Messages/sec rate
 
 ### Logs
 
@@ -265,7 +265,7 @@ ssh $RABBITMQ_B "docker compose -f docker-compose.worker-b.yml logs -f precomput
 ssh $RABBITMQ_C "docker compose -f docker-compose.worker-c.yml logs -f precompute_worker"
 ```
 
-### PostgreSQL Cache-Status
+### PostgreSQL cache status
 
 ```bash
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "
@@ -281,141 +281,141 @@ GROUP BY location_key;
 
 ---
 
-## ⚙️ Konfiguration
+## ⚙️ Configuration
 
 ### Coordinator (precompute_coordinator.py)
 
-**Environment Variables:**
-- `ASCII_SKY_PRECOMPUTE_HOURS`: Wie viele Stunden voraus (default: 720)
-- `PRECOMPUTE_COORDINATOR_INTERVAL`: Wie oft Tasks erstellen in Sekunden (default: 3600 = 1h)
-- `RABBITMQ_URL`: RabbitMQ Verbindung
+**Environment variables:**
+- `ASCII_SKY_PRECOMPUTE_HOURS`: How many hours ahead (default: 720)
+- `PRECOMPUTE_COORDINATOR_INTERVAL`: How often to create tasks in seconds (default: 3600 = 1h)
+- `RABBITMQ_URL`: RabbitMQ connection
 
-**Locations-Quellen (in Reihenfolge):**
-1. `user_settings.json` - Persönliche Location
-2. `precompute_locations.json` - Konfigurierte Locations
-3. `ASCII_SKY_PRECOMPUTE_LOCATIONS` - Environment Variable
+**Location sources (in order):**
+1. `user_settings.json` — user location
+2. `precompute_locations.json` — configured locations
+3. `ASCII_SKY_PRECOMPUTE_LOCATIONS` — environment variable
 
 ### Worker (workers/precompute_worker.py)
 
-**Environment Variables:**
-- `WORKER_ID`: Eindeutige Worker-ID (für Logging)
-- `RABBITMQ_URL`: RabbitMQ Verbindung
-- `RABBITMQ_PREFETCH_COUNT`: Wie viele Tasks gleichzeitig (default: 1)
-- `POSTGRES_HOST`: PostgreSQL Server
-- `USE_POSTGRES`: true für PostgreSQL
+**Environment variables:**
+- `WORKER_ID`: Unique worker ID (for logging)
+- `RABBITMQ_URL`: RabbitMQ connection
+- `RABBITMQ_PREFETCH_COUNT`: How many tasks concurrently (default: 1)
+- `POSTGRES_HOST`: PostgreSQL server
+- `USE_POSTGRES`: true for PostgreSQL
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Problem: Keine Tasks in Queue
+### Issue: No tasks in queue
 
 ```bash
-# Prüfe Coordinator Logs
+# Check coordinator logs
 docker logs asciisky-precompute-coordinator
 
-# Prüfe ob Locations konfiguriert
+# Check if locations are configured
 cat precompute_locations.json
 cat user_settings.json
 ```
 
-### Problem: Worker bearbeiten keine Tasks
+### Issue: Workers are not processing tasks
 
 ```bash
-# Prüfe Worker Logs
+# Check worker logs
 docker logs asciisky-precompute-worker
 
-# Prüfe RabbitMQ Verbindung
+# Check RabbitMQ connection
 docker exec asciisky-precompute-worker ping rabbitmq
 
-# Prüfe PostgreSQL Verbindung
+# Check PostgreSQL connection
 docker exec asciisky-precompute-worker pg_isready -h postgres -U asciisky
 ```
 
-### Problem: Tasks werden nicht abgearbeitet
+### Issue: Tasks are not being processed
 
 ```bash
-# Prüfe Queue in RabbitMQ UI
+# Check queue in RabbitMQ UI
 # http://$RABBITMQ_MAIN:15672
 
-# Prüfe Consumer Count
-# Sollte = Anzahl Worker sein
+# Check consumer count
+# Should equal the number of workers
 ```
 
 ---
 
-## 📈 Performance-Tipps
+## 📈 Performance tips
 
-### 1. Mehr Worker starten
+### 1. Start more workers
 
 ```bash
-# .env editieren
-PRECOMPUTE_WORKERS=8  # Statt 4
+# Edit .env
+PRECOMPUTE_WORKERS=8  # Instead of 4
 
-# Neu starten
+# Restart
 docker compose -f docker-compose.production.yml up -d
 ```
 
-### 2. PREFETCH_COUNT erhöhen
+### 2. Increase PREFETCH_COUNT
 
 ```yaml
-# Für schnellere Worker
+# For faster workers
 environment:
-  - RABBITMQ_PREFETCH_COUNT=2  # Statt 1
+  - RABBITMQ_PREFETCH_COUNT=2  # Instead of 1
 ```
 
-**Achtung:** Nur wenn Worker schnell genug sind!
+**Note:** Only if workers are fast enough!
 
-### 3. Coordinator-Intervall anpassen
+### 3. Adjust coordinator interval
 
 ```yaml
-# Öfter Tasks erstellen
+# Create tasks more frequently
 environment:
-  - PRECOMPUTE_COORDINATOR_INTERVAL=1800  # 30 Minuten statt 1h
+  - PRECOMPUTE_COORDINATOR_INTERVAL=1800  # 30 minutes instead of 1h
 ```
 
 ---
 
-## 🎉 Zusammenfassung
+## 🎉 Summary
 
-**Vorher (kompliziert):**
-- ❌ Manuelle Location-Aufteilung
-- ❌ Komplizierte Konfiguration
-- ❌ Duplikate möglich
+**Before (complicated):**
+- ❌ Manual location partitioning
+- ❌ Complicated configuration
+- ❌ Possible duplicates
 
-**Jetzt (einfach):**
-- ✅ RabbitMQ koordiniert automatisch
-- ✅ Einfach skalierbar (mehr Worker = schneller)
-- ✅ Keine Duplikate (Fair Dispatch)
-- ✅ Failover inkludiert
-- ✅ Prioritäten (nächste 24h zuerst)
+**Now (simple):**
+- ✅ RabbitMQ coordinates automatically
+- ✅ Easy to scale (more workers = faster)
+- ✅ No duplicates (fair dispatch)
+- ✅ Failover included
+- ✅ Priorities (next 24h first)
 
 **Deployment:**
 ```bash
-# Automatisch (empfohlen)
+# Automatic (recommended)
 ./scripts/setup-production.sh
 
-# Oder manuell:
-# Hauptserver
+# Or manual:
+# Main server
 docker compose -f docker-compose.production.yml up -d
 
-# Worker-Server B
+# Worker server B
 ssh $RABBITMQ_B "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml up -d"
 
-# Worker-Server C
+# Worker server C
 ssh $RABBITMQ_C "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml up -d"
 ```
 
-**Worker-Skalierung:**
+**Worker scaling:**
 ```bash
-# .env editieren
-PRECOMPUTE_WORKERS=8        # Hauptserver: 8 Worker
-PRECOMPUTE_WORKERS_B=8      # Worker-B: 8 Worker
-PRECOMPUTE_WORKERS_C=8      # Worker-C: 8 Worker
-# = 24 Worker total
+# Edit .env
+PRECOMPUTE_WORKERS=8        # Main server: 8 workers
+PRECOMPUTE_WORKERS_B=8      # Worker-B: 8 workers
+PRECOMPUTE_WORKERS_C=8      # Worker-C: 8 workers
+# = 24 workers total
 
-# Neu starten
+# Restart
 docker compose up -d
 ```
 
-**Fertig!** 🚀
+**Done!** 🚀

@@ -1,13 +1,13 @@
-# ASCII Sky - Architektur & Datenfluss
+# ASCII Sky - Architecture & Data Flow
 
-Detaillierte Dokumentation über den kompletten Request-Flow von der Web-Anfrage bis zur Antwort.
+Detailed documentation of the full request flow from the web request to the response.
 
-## Übersicht
+## Overview
 
-ASCII Sky verwendet zwei parallele Datenflüsse:
+ASCII Sky uses two parallel data flows:
 
-1. **Precompute-Flow**: Stündliche Vorberechnung für bekannte Locations
-2. **On-Demand-Flow**: Echtzeit-Berechnung bei Cache-Miss
+1. **Precompute flow**: Hourly precomputation for known locations
+2. **On-demand flow**: Real-time computation on cache miss
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -16,7 +16,7 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 │                                                                 │
 │  ┌──────────────────┐              ┌──────────────────┐         │
 │  │  Precompute      │              │  On-Demand       │         │
-│  │  (Stündlich)     │              │  (Bei Bedarf)    │         │
+│  │  (Hourly)        │              │  (On-Demand)     │         │
 │  └──────────────────┘              └──────────────────┘         │
 │           │                                  │                  │
 │           ├──────────────┬──────────────────┤                   │
@@ -32,77 +32,77 @@ ASCII Sky verwendet zwei parallele Datenflüsse:
 
 ---
 
-## Precompute-Flow (Stündlich)
+## Precompute Flow (Hourly)
 
-### Ablauf-Diagramm
+### Sequence Diagram
 
 ```
     ┌──────────────────┐
     │  Coordinator     │  api/background.py:precompute_coordinator()
-    │  (Hauptserver)   │  Läuft alle 3600 Sekunden
+    │  (Main server)   │  Runs every 3600 seconds
     └────────┬─────────┘
              │
-             │ 1. Lade Locations aus user_settings.json
+             │ 1. Load locations from user_settings.json
              ▼
     ┌────────────────────────────────────────────────────────────┐
-    │ Für jede Location & nächste X Stunden:                     │
-    │ - X = ASCII_SKY_PRECOMPUTE_HOURS (default: 720 = 30 Tage)  │
-    │ - Erstelle Task für jede Stunde                            │
+    │ For each location & next X hours:                          │
+    │ - X = ASCII_SKY_PRECOMPUTE_HOURS (default: 720 = 30 days)  │
+    │ - Create a task for each hour                              │
     └────────┬───────────────────────────────────────────────────┘
              │
-             │ 2. Publiziere Tasks zu RabbitMQ Queue: "precompute.tasks"
+             │ 2. Publish tasks to RabbitMQ queue: "precompute.tasks"
              ▼
     ┌────────────────────────────────────────┐
     │         RabbitMQ Queue                 │
     │  [Task1] [Task2] [Task3] ... [TaskN]   │
     └────────┬───────────────────────────────┘
              │
-             │ 3. Worker holen Tasks (12 Worker total)
+             │ 3. Workers pull tasks (12 workers total)
              ▼
   ┌────────┐  ┌────────┐  ┌────────┐
   │Worker 1│  │Worker 2│  │ ... 12 │
   └───┬────┘  └───┬────┘  └───┬────┘
       │           │           │
-      │ 4. Verarbeite Task    │
+      │ 4. Process task       │
       ▼           ▼           ▼
 ┌──────────────────────────────────────────────────┐
 │  process_precompute_task()                       │
 │  workers/precompute_worker.py:200-350            │
 │                                                  │
-│  A. Lade Asteroiden-DataFrame                    │
+│  A. Load asteroid DataFrame                      │
 │     bright_asteroids.py:load_bright_asteroids()  │
-│     - Prüfe PostgreSQL Cache (TTL 31 Tage)       │
-│     - Falls fehlt: Download von MPC MPCORB.DAT   │
+│     - Check PostgreSQL cache (TTL 31 days)       │
+│     - If missing: download MPC MPCORB.DAT        │
 │                                                  │
-│  B. Lade Kometen-DataFrame                       │
+│  B. Load comet DataFrame                         │
 │     comets.py:load_comets()                      │
-│     - Prüfe PostgreSQL Cache (TTL 31 Tage)       │
-│     - Falls fehlt: Download MPC CometEls.txt     │
+│     - Check PostgreSQL cache (TTL 31 days)       │
+│     - If missing: download MPC CometEls.txt      │
 │                                                  │
-│  C. Berechne Positionen                          │
-│     - Skyfield Berechnungen für jeden Ort/Zeit   │
-│     - Asteroiden & Kometen                       │
+│  C. Compute positions                            │
+│     - Skyfield calculations for each location/time│
+│     - Asteroids & comets                         │
 │                                                  │
-│  D. Speichere in PostgreSQL                      │
+│  D. Store in PostgreSQL                          │
 │     db_utils.py:store_asteroid_positions()       │
 │     db_utils.py:store_comet_positions()          │
 │     Tabelle: cached_positions                    │
 └──────────────────────────────────────────────────┘
 ```
 
-### Code-Referenzen
+### Code References
 
-| Komponente | Datei | Funktion | Zeilen |
+| Component | File | Function | Lines |
 |------------|-------|----------|--------|
 | Coordinator | `api/background.py` | `precompute_coordinator()` | 130-195 |
 | Worker | `workers/precompute_worker.py` | `process_precompute_task()` | 80-190 |
-| Asteroid Load | `bright_asteroids.py` | `load_bright_asteroids()` | 200-360 |
-| Comet Load | `comets.py` | `load_comets()` | 280-450 |
-| Asteroid Store | `db_utils.py` | `store_asteroid_positions()` | 90-112 |
-| Comet Store | `db_utils.py` | `store_comet_positions()` | 180-202 |
+| Asteroid load | `bright_asteroids.py` | `load_bright_asteroids()` | 200-360 |
+| Comet load | `comets.py` | `load_comets()` | 280-450 |
+| Asteroid store | `db_utils.py` | `store_asteroid_positions()` | 90-112 |
+| Comet store | `db_utils.py` | `store_comet_positions()` | 180-202 |
 
 ---
 
-## API-Request-Flow (On-Demand)
+## API Request Flow (On-Demand)
 
-Siehe separate Datei: `ARCHITECTURE_FLOW_API.md`
+See separate file: `ARCHITECTURE_FLOW_API.md`

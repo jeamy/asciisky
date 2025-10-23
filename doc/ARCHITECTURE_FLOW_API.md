@@ -1,20 +1,20 @@
 # API Request Flow (On-Demand)
 
-## Übersicht
+## Overview
 
-ASCII Sky hat drei verschiedene API-Endpoints mit unterschiedlichen Berechnungsstrategien:
+ASCII Sky has three different API endpoints with distinct computation strategies:
 
-1. **Asteroiden** (`/api/bright_asteroids`) - RabbitMQ Worker (Cache + On-Demand)
-2. **Kometen** (`/api/comets`) - RabbitMQ Worker (Cache + On-Demand) - **Gleich wie Asteroiden**
-3. **Planeten** (`/api/planets`) - Direktberechnung (kein Worker, kein Cache)
+1. **Asteroids** (`/api/bright_asteroids`) — RabbitMQ workers (cache + on-demand)
+2. **Comets** (`/api/comets`) — RabbitMQ workers (cache + on-demand) — **same as asteroids**
+3. **Planets** (`/api/planets`) — Direct computation (no workers, no cache)
 
 ---
 
-## Asteroiden & Kometen (Identischer Flow)
+## Asteroids & Comets (Identical Flow)
 
-Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Cache.
+Both use the same architecture with RabbitMQ workers and multi-level caches.
 
-### Ablauf-Diagramm
+### Sequence Diagram
 
 ```
     ┌──────────────────┐
@@ -24,14 +24,14 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
              │ GET /api/bright_asteroids?lat=52.52&lon=13.4&time=2025-10-22T20:00:00Z
              ▼
     ┌────────────────────────────────────────┐
-    │  FastAPI (Hauptserver)                 │
+    │  FastAPI (Main server)                  │
     │  api/routes/asteroids.py               │
     └────────┬───────────────────────────────┘
              │
-             │ 1. Parse Request Parameter
+             │ 1. Parse request parameters
              ▼
     ┌────────────────────────────────────────┐
-    │  Prüfe Position Cache                  │
+    │  Check position cache                  │
     │  db_utils.py:get_asteroid_positions()  │
     └────────┬───────────────────────────────┘
              │
@@ -41,51 +41,51 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
         │         │
         ▼         ▼
     ┌────────┐  ┌───────────────────────────────────┐
-    │ Filter │  │  RabbitMQ: On-Demand Berechnung   │
+    │ Filter │  │  RabbitMQ: On-demand computation  │
     │ + Ret. │  │                                   │
-    └────────┘  │  2. Publiziere zu RabbitMQ        │
+    └────────┘  │  2. Publish to RabbitMQ           │
                 │     Exchange: "computation.direct"│
                 │     Queue (Quorum, TTL 1h):       │
                 │     "asteroid.compute"            │
                 │                                   │
-                │  3. Warte auf Antwort (RPC)       │
-                │     Timeout: 30 Sekunden          │
+                │  3. Wait for reply (RPC)          │
+                │     Timeout: 30 seconds           │
                 └────────┬──────────────────────────┘
                          │
                          ▼
                 ┌────────────────────────────────────┐
-                │  Asteroid Worker (Host B oder C)   │
+                │  Asteroid Worker (host B or C)     │
                 │  workers/asteroid_worker.py        │
                 │                                    │
-                │  A. Lade DataFrame aus PostgreSQL  │
-                │  B. Berechne Positionen (Mag 20.0) │
-                │  C. Speichere ungefiltert in Cache │
+                │  A. Load DataFrame from PostgreSQL │
+                │  B. Compute positions (mag 20.0)   │
+                │  C. Store unfiltered in cache      │
                 │     (cached_positions)             │
                 └────────┬───────────────────────────┘
                          │
-                         │ 4. Sende Antwort zurück
+                         │ 4. Send reply back
                          ▼
                 ┌────────────────────────────────────┐
-                │  FastAPI: Magnitude-Filterung      │
+                │  FastAPI: Magnitude filtering      │
                 │  api/routes/asteroids.py:188-189   │
                 │                                    │
                 │  if asteroid['magnitude'] <= max:  │
                 │      result.add(asteroid)          │
                 │                                    │
-                │  Formatiert JSON Response          │
+                │  Format JSON response              │
                 └────────┬───────────────────────────┘
                          │
                          ▼
                 ┌────────────────────────────────────┐
-                │  Web Browser zeigt Asteroiden      │
+                │  Web browser shows asteroids       │
                 └────────────────────────────────────┘
 ```
 
-## Code-Referenzen: Asteroiden & Kometen
+## Code References: Asteroids & Comets
 
-### Asteroiden
+### Asteroids
 
-| Komponente | Datei | Funktion | Zeilen |
+| Component | File | Function | Lines |
 |------------|-------|----------|--------|
 | API Endpoint | `api/routes/asteroids.py` | `get_bright_asteroids()` | 20-120 |
 | Worker | `workers/asteroid_worker.py` | `process_asteroid_task()` | 50-150 |
@@ -93,9 +93,9 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
 | Core Logic | `bright_asteroids.py` | `compute_positions()` | 200-300 |
 | Magnitude Filter | `settings.py` | `get_magnitude_filters()` | 45-60 |
 
-### Kometen (Identischer Ablauf)
+### Comets (Identical Flow)
 
-| Komponente | Datei | Funktion | Zeilen |
+| Component | File | Function | Lines |
 |------------|-------|----------|--------|
 | API Endpoint | `api/routes/comets.py` | `get_comets()` | 20-120 |
 | Worker | `workers/comet_worker.py` | `process_comet_task()` | 50-150 |
@@ -103,11 +103,11 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
 | Core Logic | `comets.py` | `compute_positions()` | 200-300 |
 | Magnitude Filter | `settings.py` | `get_magnitude_filters()` | 45-60 |
 
-**Unterschiede:**
-- Andere MPC-Datenquelle (MPCORB.DAT vs Comets Ephemerides)
-- Andere RabbitMQ Queue (Quorum, TTL 1h: `asteroid.compute` vs `comet.compute`)
-- Andere PostgreSQL Tabellen (`asteroids` vs `comets`)
-- **Gleiche Architektur, gleicher Ablauf!**
+**Differences:**
+- Different MPC data source (MPCORB.DAT vs Comets Ephemerides)
+- Different RabbitMQ queue (quorum, TTL 1h: `asteroid.compute` vs `comet.compute`)
+- Different PostgreSQL tables (`asteroids` vs `comets`)
+- **Same architecture, same sequence!**
 
 ---
 
@@ -116,11 +116,11 @@ Beide verwenden die gleiche Architektur mit RabbitMQ Workers und mehrstufigem Ca
 - Precompute: `precompute.tasks` (Classic, Priority 0–10)
 - On-Demand: `asteroid.compute`, `comet.compute` (Quorum, TTL 1h)
 
-## Planeten (Direktberechnung)
+## Planets (Direct Computation)
 
-Planeten verwenden eine **komplett andere Strategie**: Keine Worker, kein Cache, direkte Berechnung.
+Planets use a **completely different strategy**: no workers, no cache, direct computation.
 
-### Ablauf-Diagramm
+### Flow Diagram
 
 ```
     ┌──────────────────┐
@@ -130,80 +130,80 @@ Planeten verwenden eine **komplett andere Strategie**: Keine Worker, kein Cache,
              │ GET /api/planets?lat=52.52&lon=13.4&time=2025-10-22T20:00:00Z
              ▼
     ┌────────────────────────────────────────┐
-    │  FastAPI (Hauptserver)                 │
+    │  FastAPI (Main server)                 │
     │  api/routes/planets.py                 │
     └────────┬───────────────────────────────┘
              │
-             │ 1. Parse Request Parameter
+             │ 1. Parse request parameters
              ▼
     ┌────────────────────────────────────────┐
-    │  Direktberechnung (Synchron)           │
+    │  Direct computation (synchronous)      │
     │  planets.py:get_planet_positions()     │
     │                                        │
-    │  - Keine Cache-Prüfung                 │
-    │  - Keine RabbitMQ                      │
-    │  - Keine Worker                        │
+    │  - No cache check                      │
+    │  - No RabbitMQ                         │
+    │  - No workers                          │
     │                                        │
-    │  A. Erstelle Skyfield Observer         │
-    │  B. Für jeden Planeten:                │
-    │     - Lade Ephemeris (de421.bsp)       │
-    │     - Berechne Position (RA/Dec)       │
-    │     - Transformiere zu Alt/Az          │
-    │     - Berechne Magnitude               │
-    │     - Berechne Auf-/Untergangszeiten   │
-    │  C. Filtere sichtbare Planeten         │
+    │  A. Create Skyfield observer           │
+    │  B. For each planet:                   │
+    │     - Load ephemeris (de421.bsp)       │
+    │     - Compute position (RA/Dec)        │
+    │     - Transform to Alt/Az              │
+    │     - Compute magnitude                │
+    │     - Compute rise/set times           │
+    │  C. Filter visible planets             │
     └────────┬───────────────────────────────┘
              │
-             │ 2. Return JSON (direkt)
+             │ 2. Return JSON (directly)
              ▼
     ┌────────────────────────────────────────┐
-    │  Web Browser zeigt Planeten            │
+    │  Web browser shows planets            │
     └────────────────────────────────────────┘
 ```
 
-### Warum keine Worker für Planeten?
+### Why no workers for planets?
 
-**Gründe:**
-1. **Schnell:** Nur 8 Planeten → Berechnung dauert ~50-200ms
-2. **Kein Download:** Ephemeris-Daten (de421.bsp) sind lokal vorhanden
-3. **Keine großen Datasets:** Asteroiden = ~1M Objekte, Planeten = 8 Objekte
-4. **Einfacher:** Weniger Komplexität, weniger Fehlerquellen
+**Reasons:**
+1. **Fast:** Only 8 planets → computation takes ~50–200ms
+2. **No download:** Ephemeris data (de421.bsp) is local
+3. **No large datasets:** Asteroids ≈ ~1M objects, planets = 8 objects
+4. **Simpler:** Less complexity, fewer failure points
 
-**Nachteile:**
-- Blockiert Request-Thread (aber nur kurz)
-- Keine Skalierung über Worker
-- Kein Cache (aber auch nicht nötig bei <200ms)
+**Drawbacks:**
+- Blocks request thread (briefly)
+- No scaling via workers
+- No cache (not needed at <200ms)
 
-### Code-Referenzen: Planeten
+### Code References: Planets
 
-| Komponente | Datei | Funktion | Zeilen |
+| Component | File | Function | Lines |
 |------------|-------|----------|--------|
 | API Endpoint | `api/routes/planets.py` | `get_planets()` | 20-80 |
 | Core Logic | `planets.py` | `get_planet_positions()` | 50-200 |
 | Ephemeris | `planets.py` | Skyfield Loader | 20-40 |
 
-**Wichtig:** Planeten verwenden Skyfield's eingebaute Planeten-Ephemeris (de421.bsp), keine MPC-Daten!
+**Important:** Planets use Skyfield's built-in planetary ephemeris (de421.bsp), not MPC data!
 
 ---
 
-## Vergleich: Asteroiden/Kometen vs Planeten
+## Comparison: Asteroids/Comets vs Planets
 
-| Aspekt | Asteroiden/Kometen | Planeten |
+| Aspect | Asteroids/Comets | Planets |
 |--------|-------------------|----------|
-| **Anzahl Objekte** | ~1M Asteroiden, ~1000 Kometen | 8 Planeten |
-| **Datenquelle** | MPC (Download) | Skyfield Ephemeris (lokal) |
-| **Cache** | 4-Level Cache | Kein Cache |
-| **Worker** | RabbitMQ Worker (4-8 Worker) | Keine Worker |
-| **Response Zeit** | 10ms (Cache) - 30s (Cold Start) | 50-200ms (immer) |
-| **Komplexität** | Hoch (Multi-Host, Queue, Cache) | Niedrig (Direktberechnung) |
-| **Skalierung** | Horizontal (mehr Worker) | Vertikal (schnellerer Server) |
-| **Fehlerbehandlung** | Fallback, Retry, Timeout | Einfach (try/catch) |
+| **Number of objects** | ~1M asteroids, ~1000 comets | 8 planets |
+| **Data source** | MPC (download) | Skyfield ephemeris (local) |
+| **Cache** | 4-level cache | No cache |
+| **Workers** | RabbitMQ workers (4–8 workers) | No workers |
+| **Response time** | 10ms (cache) – 30s (cold start) | 50–200ms (always) |
+| **Complexity** | High (multi-host, queue, cache) | Low (direct computation) |
+| **Scaling** | Horizontal (more workers) | Vertical (faster server) |
+| **Error handling** | Fallback, retry, timeout | Simple (try/catch) |
 
 ---
 
-## Performance-Vergleich
+## Performance Comparison
 
-### Asteroiden/Kometen
+### Asteroids/Comets
 ```
 Best Case (Precomputed):  10-50ms
 Cache Hit (Position):     100-200ms
@@ -211,9 +211,9 @@ Cache Miss (DataFrame):   2-5s
 Cold Start (MPC):         10-30s
 ```
 
-### Planeten
+### Planets
 ```
-Immer:                    50-200ms
+Always:                   50–200ms
 ```
 
-**Fazit:** Planeten sind konsistent schnell, Asteroiden/Kometen haben variable Performance aber bessere Best-Case Performance durch Precompute.
+**Conclusion:** Planets are consistently fast; asteroids/comets have variable performance but better best-case performance due to precompute.
