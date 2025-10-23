@@ -36,18 +36,31 @@ warning() {
 # ===== SERVER IPs AUTOMATISCH ERMITTELN (IPv4 + IPv6) =====
 echo "📋 Ermittle Server-IPs (IPv4 + IPv6)..."
 
-# IPv4
-MAIN_IP=$(dig +short "$RABBITMQ_MAIN" A | tail -n1)
-WORKER_B_IP=$(dig +short "$RABBITMQ_B" A | tail -n1)
-WORKER_C_IP=$(dig +short "$RABBITMQ_C" A | tail -n1)
+# Prüfe ob bereits IPs gesetzt sind (z.B. WORKER_B_IP, WORKER_C_IP)
+# Falls nicht, versuche DNS-Auflösung
+if [ -z "$WORKER_B_IP" ]; then
+    WORKER_B_IP=$(dig +short "$RABBITMQ_B" A 2>/dev/null | tail -n1)
+fi
+if [ -z "$WORKER_C_IP" ]; then
+    WORKER_C_IP=$(dig +short "$RABBITMQ_C" A 2>/dev/null | tail -n1)
+fi
+if [ -z "$MAIN_IP" ]; then
+    MAIN_IP=$(dig +short "$RABBITMQ_MAIN" A 2>/dev/null | tail -n1)
+fi
 
-# IPv6
-MAIN_IP6=$(dig +short "$RABBITMQ_MAIN" AAAA | tail -n1)
-WORKER_B_IP6=$(dig +short "$RABBITMQ_B" AAAA | tail -n1)
-WORKER_C_IP6=$(dig +short "$RABBITMQ_C" AAAA | tail -n1)
+# IPv6 (optional)
+if [ -z "$WORKER_B_IP6" ]; then
+    WORKER_B_IP6=$(dig +short "$RABBITMQ_B" AAAA 2>/dev/null | tail -n1)
+fi
+if [ -z "$WORKER_C_IP6" ]; then
+    WORKER_C_IP6=$(dig +short "$RABBITMQ_C" AAAA 2>/dev/null | tail -n1)
+fi
+if [ -z "$MAIN_IP6" ]; then
+    MAIN_IP6=$(dig +short "$RABBITMQ_MAIN" AAAA 2>/dev/null | tail -n1)
+fi
 
-if [ -z "$MAIN_IP" ] || [ -z "$WORKER_B_IP" ] || [ -z "$WORKER_C_IP" ]; then
-    error_exit "Konnte nicht alle IPv4-Adressen auflösen. Prüfe DNS-Konfiguration."
+if [ -z "$WORKER_B_IP" ] || [ -z "$WORKER_C_IP" ]; then
+    error_exit "Konnte Worker-IPs nicht ermitteln. Setze WORKER_B_IP und WORKER_C_IP als Environment-Variablen!"
 fi
 
 echo ""
