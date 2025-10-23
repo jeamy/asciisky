@@ -1,6 +1,6 @@
 #\!/bin/bash
 # UFW Firewall Setup für ASCII Sky Multi-Host Deployment
-# Führe dieses Skript auf JEDEM Server aus\!
+# Führe dieses Skript NUR auf dem HAUPTSERVER aus\!
 # Konfiguriert IP-basierte Zugriffsbeschränkungen für RabbitMQ/PostgreSQL
 
 set -e
@@ -208,74 +208,56 @@ sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
 
 success "DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass!)"
 
-# Mache DOCKER-USER Regeln persistent (überleben Docker-Neustart)
-echo "💾 Mache iptables-Regeln persistent..."
+# Mache DOCKER-USER Regeln persistent via UFW after.rules
+echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules hinzu..."
 
-# Erstelle Skript das bei jedem Boot/Docker-Start die DOCKER-USER Regeln wiederherstellt
-cat > /tmp/restore-docker-firewall.sh << 'EOFSCRIPT'
-#!/bin/bash
-# Restore DOCKER-USER iptables rules
-# This script is called by systemd on boot
+# Entferne alte systemd-basierte Lösung (falls vorhanden)
+if [ -f /etc/systemd/system/restore-docker-firewall.service ]; then
+    echo "🧹 Entferne alte systemd-basierte Firewall-Regeln..."
+    sudo systemctl stop restore-docker-firewall.service 2>/dev/null || true
+    sudo systemctl disable restore-docker-firewall.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/restore-docker-firewall.service
+    sudo rm -f /usr/local/bin/restore-docker-firewall.sh
+    sudo systemctl daemon-reload
+    success "Alte systemd-Services entfernt"
+fi
 
-WORKER_B_IP="WORKER_B_IP_PLACEHOLDER"
-WORKER_C_IP="WORKER_C_IP_PLACEHOLDER"
+# Backup der originalen after.rules
+if [ ! -f /etc/ufw/after.rules.backup ]; then
+    sudo cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
+    success "Backup erstellt: /etc/ufw/after.rules.backup"
+fi
 
-# Warte bis Docker läuft
-until docker info &>/dev/null; do
-    sleep 1
-done
+# Entferne alte ASCII Sky DOCKER-USER Regeln falls vorhanden
+sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/,/# ASCII Sky DOCKER-USER rules - END/d' /etc/ufw/after.rules
 
-# Lösche alte DOCKER-USER Regeln
-iptables -F DOCKER-USER 2>/dev/null || true
-ip6tables -F DOCKER-USER 2>/dev/null || true
+# Füge neue DOCKER-USER Regeln am Ende hinzu (vor COMMIT)
+sudo sed -i '/^COMMIT$/i \
+# ASCII Sky DOCKER-USER rules - START\
+# Diese Regeln verhindern dass Docker die UFW-Firewall umgeht\
+*filter\
+:DOCKER-USER - [0:0]\
+\
+# Erlaube Worker-B und Worker-C auf RabbitMQ und PostgreSQL\
+-A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"\
+-A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"\
+-A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"\
+-A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"\
+\
+# Erlaube localhost auf RabbitMQ Management UI\
+-A DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"\
+\
+# BLOCKIERE alle anderen auf diesen Ports\
+-A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"\
+-A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"\
+-A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"\
+\
+# RETURN (lässt andere Verbindungen durch)\
+-A DOCKER-USER -j RETURN\
+# ASCII Sky DOCKER-USER rules - END\
+' /etc/ufw/after.rules
 
-# IPv4: Erlaube Worker-IPs
-iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"
-iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"
-iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"
-iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"
-iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
-
-# IPv4: Blockiere alle anderen
-iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
-iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
-iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
-
-# RETURN am Ende
-iptables -A DOCKER-USER -j RETURN
-ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
-EOFSCRIPT
-
-# Ersetze Platzhalter mit echten IPs
-sudo sed -i "s/WORKER_B_IP_PLACEHOLDER/$WORKER_B_IP/g" /tmp/restore-docker-firewall.sh
-sudo sed -i "s/WORKER_C_IP_PLACEHOLDER/$WORKER_C_IP/g" /tmp/restore-docker-firewall.sh
-
-# Installiere Skript
-sudo mv /tmp/restore-docker-firewall.sh /usr/local/bin/restore-docker-firewall.sh
-sudo chmod +x /usr/local/bin/restore-docker-firewall.sh
-
-# Erstelle systemd Service
-sudo tee /etc/systemd/system/restore-docker-firewall.service > /dev/null << EOF
-[Unit]
-Description=Restore Docker Firewall Rules
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/restore-docker-firewall.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Aktiviere Service
-sudo systemctl daemon-reload
-sudo systemctl enable restore-docker-firewall.service
-sudo systemctl start restore-docker-firewall.service
-
-success "DOCKER-USER Regeln werden automatisch bei Boot wiederhergestellt"
+success "DOCKER-USER Regeln zu /etc/ufw/after.rules hinzugefügt"
 
 echo ""
 echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz)..."
