@@ -4,6 +4,15 @@
 
 set -e
 
+# Check if .env exists
+if [ ! -f .env ]; then
+    echo "❌ Error: .env file not found! Please create it first."
+    exit 1
+fi
+
+# Load environment variables
+source .env
+
 RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
 RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
 RABBITMQ_C="${RABBITMQ_C:-rabbit-c.example.org}"
