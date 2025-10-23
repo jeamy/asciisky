@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup-Skript für Multi-Host Production Deployment
-# ASCII Sky mit PostgreSQL und verteilten RabbitMQ-Workern
+# Setup script for multi-host production deployment
+# ASCII Sky with PostgreSQL and distributed RabbitMQ workers
 
 set -e
 
@@ -9,13 +9,13 @@ RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
 RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
 RABBITMQ_C="${RABBITMQ_C:-rabbit-c.example.org}"
 
-# Farben für Output
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Funktion für Fehlerbehandlung
+# Function for error handling
 error_exit() {
     echo -e "${RED}❌ Error: $1${NC}" >&2
     exit 1
@@ -29,15 +29,15 @@ warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
-# Prüfe ob .env existiert
+# Check if .env exists
 if [ ! -f .env ]; then
     error_exit ".env file not found! Please create it first."
 fi
 
-# Lade Environment Variables
+# Load environment variables
 source .env
 
-# Prüfe erforderliche Variablen
+# Check required variables
 if [ -z "$POSTGRES_PASSWORD" ]; then
     error_exit "POSTGRES_PASSWORD not set in .env"
 fi
@@ -53,7 +53,7 @@ fi
 echo "📋 Configuration loaded from .env"
 echo ""
 
-# Funktion für Host-Setup
+# Host setup function
 setup_host() {
     local HOST=$1
     local COMPOSE_FILE=$2
@@ -67,20 +67,20 @@ setup_host() {
     echo ""
     
     if [ "$HOST" == "localhost" ]; then
-        # Lokales Setup
+        # Local setup
         echo "📦 Building Docker image..."
         docker compose -f "$COMPOSE_FILE" build || error_exit "Build failed on $HOST"
         
         echo "🚀 Starting services with worker scaling..."
-        # Verwende Env-Variablen für Worker-Anzahl (Fallback auf Defaults in docker-compose.yml)
+        # Use env variables for worker counts (fallback to defaults in docker-compose.yml)
         docker compose -f "$COMPOSE_FILE" up -d || error_exit "Startup failed on $HOST"
         
         success "Services started on $HOST (Worker scaling via .env)"
     else
-        # Remote Setup
+        # Remote setup
         echo "📤 Setting up $HOST..."
         
-        # Prüfe ob Repository bereits existiert
+        # Check if repository already exists
         if ssh "$HOST" "[ -d ~/asciisky/.git ]"; then
             echo "📥 Repository exists, pulling latest changes..."
             ssh "$HOST" "cd ~/asciisky && git pull" || error_exit "Git pull failed on $HOST"
@@ -89,14 +89,14 @@ setup_host() {
             ssh "$HOST" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || error_exit "Git clone failed on $HOST"
         fi
         
-        # Kopiere .env
+        # Copy .env
         echo "📋 Copying .env..."
         scp .env "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
         
         echo "🐳 Building and starting on remote host..."
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
         
-        # Worker-Skalierung via --scale (aus .env auf Remote-Host)
+        # Worker scaling via --scale (from .env on remote host)
         if [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
             ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Startup failed on $HOST"
         else
@@ -112,15 +112,15 @@ setup_host() {
 # ===== MAIN SERVER =====
 setup_host "localhost" "docker-compose.production.yml" "Main Server (Web + RabbitMQ + PostgreSQL)"
 
-# Warte auf PostgreSQL
+# Wait for PostgreSQL
 echo "⏳ Waiting for PostgreSQL to be ready..."
 sleep 10
 
-# Prüfe PostgreSQL
+# Check PostgreSQL
 docker exec asciisky-postgres pg_isready -U asciisky -d asciisky || error_exit "PostgreSQL not ready"
 success "PostgreSQL is ready"
 
-# Warte auf RabbitMQ
+# Wait for RabbitMQ
 echo "⏳ Waiting for RabbitMQ to be ready..."
 sleep 10
 

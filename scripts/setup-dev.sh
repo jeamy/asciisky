@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup-Skript für lokale Entwicklung
-# ASCII Sky mit Docker Compose (lokal)
+# Setup script for local development
+# ASCII Sky with Docker Compose (local)
 
 set -e
 
@@ -8,14 +8,14 @@ echo "🚀 ASCII Sky Development Setup"
 echo "================================"
 echo ""
 
-# Farben für Output
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Funktion für Fehlerbehandlung
+# Function for error handling
 error_exit() {
     echo -e "${RED}❌ Error: $1${NC}" >&2
     exit 1
@@ -33,12 +33,12 @@ info() {
     echo -e "${BLUE}ℹ️  $1${NC}"
 }
 
-# Prüfe ob Docker läuft
+# Check if Docker is running
 if ! docker info > /dev/null 2>&1; then
     error_exit "Docker is not running. Please start Docker first."
 fi
 
-# Prüfe ob docker compose verfügbar ist
+# Check if docker compose is available
 if ! docker compose version > /dev/null 2>&1; then
     error_exit "docker compose not found. Please install Docker Compose v2."
 fi
@@ -47,7 +47,7 @@ echo "📋 Environment Setup"
 echo "===================="
 echo ""
 
-# Erstelle .env falls nicht vorhanden
+# Create .env if not present
 if [ ! -f .env ]; then
     info "Creating .env file from .env.example..."
     if [ -f .env.example ]; then
@@ -92,7 +92,7 @@ else
     success ".env already exists"
 fi
 
-# Lade Environment Variables
+# Load environment variables
 source .env
 
 echo ""
@@ -100,23 +100,23 @@ echo "🐳 Docker Setup"
 echo "==============="
 echo ""
 
-# Stoppe alte Container (falls vorhanden)
+# Stop old containers (if any)
 info "Stopping old containers (if any)..."
 docker compose down 2>/dev/null || true
 
-# Baue Images
+# Build images
 echo ""
 info "Building Docker images..."
 docker compose build || error_exit "Docker build failed"
 success "Docker images built"
 
-# Starte Services mit Skalierung (aus .env oder Defaults)
+# Start services with worker scaling (from .env or defaults)
 echo ""
 info "Starting services with worker scaling..."
 docker compose up -d || error_exit "Failed to start services"
 success "Services started (Worker scaling via .env or docker-compose.yml defaults)"
 
-# Warte auf PostgreSQL
+# Wait for PostgreSQL
 echo ""
 info "Waiting for PostgreSQL to be ready..."
 sleep 5
@@ -133,7 +133,7 @@ until docker exec asciisky-postgres pg_isready -U asciisky -d asciisky > /dev/nu
 done
 success "PostgreSQL is ready"
 
-# Warte auf RabbitMQ
+# Wait for RabbitMQ
 echo ""
 info "Waiting for RabbitMQ to be ready..."
 sleep 5
@@ -149,14 +149,14 @@ until docker exec asciisky-rabbitmq rabbitmqctl status > /dev/null 2>&1; do
 done
 success "RabbitMQ is ready"
 
-# Setup RabbitMQ Queues
+# Setup RabbitMQ queues
 echo ""
 info "Setting up RabbitMQ queues..."
 export RABBITMQ_CONTAINER=asciisky-rabbitmq
 ./scripts/setup-rabbitmq-queues.sh || error_exit "RabbitMQ queue setup failed"
 success "RabbitMQ queues created"
 
-# Initiale Daten laden (optional)
+# Load initial data (optional)
 echo ""
 read -p "Load initial asteroid/comet data? (y/N) " -n 1 -r
 echo

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Test Worker Connectivity vom Container aus
-# Führe auf Worker-Host aus: ./scripts/test-worker-connectivity-in-container.sh
+# Test worker connectivity from inside the container
+# Run on worker host: ./scripts/test-worker-connectivity-in-container.sh
 
 echo "🔍 Testing connectivity from Worker Container to Main Server"
 echo "============================================================="
@@ -9,7 +9,7 @@ echo ""
 COMPOSE_FILE="docker-compose.workers.yml"
 CONTAINER="asteroid_worker"
 
-# Farben
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,10 +27,10 @@ warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
-# Prüfe ob Container läuft
+# Check if container is running
 if ! docker compose -f $COMPOSE_FILE ps | grep -q "$CONTAINER"; then
-    error "Container $CONTAINER läuft nicht!"
-    echo "Starte mit: docker compose -f $COMPOSE_FILE up -d"
+    error "Container $CONTAINER is not running!"
+    echo "Start with: docker compose -f $COMPOSE_FILE up -d"
     exit 1
 fi
 

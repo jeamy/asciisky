@@ -10,8 +10,8 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
     volumes:
@@ -70,8 +70,8 @@ services:
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       
       # RabbitMQ Configuration
@@ -121,8 +121,8 @@ services:
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       
     depends_on:
@@ -178,8 +178,8 @@ services:
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       
       # RabbitMQ Configuration
