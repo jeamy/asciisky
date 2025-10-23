@@ -210,10 +210,72 @@ success "DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass!)"
 
 # Mache DOCKER-USER Regeln persistent (überleben Docker-Neustart)
 echo "💾 Mache iptables-Regeln persistent..."
-sudo apt-get install -y iptables-persistent 2>/dev/null || true
-sudo netfilter-persistent save 2>/dev/null || sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
-sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 > /dev/null 2>/dev/null || true
-success "iptables-Regeln gespeichert"
+
+# Erstelle Skript das bei jedem Boot/Docker-Start die DOCKER-USER Regeln wiederherstellt
+cat > /tmp/restore-docker-firewall.sh << 'EOFSCRIPT'
+#!/bin/bash
+# Restore DOCKER-USER iptables rules
+# This script is called by systemd on boot
+
+WORKER_B_IP="WORKER_B_IP_PLACEHOLDER"
+WORKER_C_IP="WORKER_C_IP_PLACEHOLDER"
+
+# Warte bis Docker läuft
+until docker info &>/dev/null; do
+    sleep 1
+done
+
+# Lösche alte DOCKER-USER Regeln
+iptables -F DOCKER-USER 2>/dev/null || true
+ip6tables -F DOCKER-USER 2>/dev/null || true
+
+# IPv4: Erlaube Worker-IPs
+iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"
+iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"
+iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"
+iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"
+iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
+
+# IPv4: Blockiere alle anderen
+iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
+iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
+iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
+
+# RETURN am Ende
+iptables -A DOCKER-USER -j RETURN
+ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
+EOFSCRIPT
+
+# Ersetze Platzhalter mit echten IPs
+sudo sed -i "s/WORKER_B_IP_PLACEHOLDER/$WORKER_B_IP/g" /tmp/restore-docker-firewall.sh
+sudo sed -i "s/WORKER_C_IP_PLACEHOLDER/$WORKER_C_IP/g" /tmp/restore-docker-firewall.sh
+
+# Installiere Skript
+sudo mv /tmp/restore-docker-firewall.sh /usr/local/bin/restore-docker-firewall.sh
+sudo chmod +x /usr/local/bin/restore-docker-firewall.sh
+
+# Erstelle systemd Service
+sudo tee /etc/systemd/system/restore-docker-firewall.service > /dev/null << EOF
+[Unit]
+Description=Restore Docker Firewall Rules
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/restore-docker-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Aktiviere Service
+sudo systemctl daemon-reload
+sudo systemctl enable restore-docker-firewall.service
+sudo systemctl start restore-docker-firewall.service
+
+success "DOCKER-USER Regeln werden automatisch bei Boot wiederhergestellt"
 
 echo ""
 echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz)..."
