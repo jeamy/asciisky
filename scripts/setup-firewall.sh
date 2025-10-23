@@ -37,26 +37,50 @@ warning() {
 echo "📋 Ermittle Server-IPs (IPv4 + IPv6)..."
 
 # Prüfe ob bereits IPs gesetzt sind (z.B. WORKER_B_IP, WORKER_C_IP)
-# Falls nicht, versuche DNS-Auflösung
+# Falls nicht, versuche DNS-Auflösung mit dig, host oder getent
+resolve_ip() {
+    local hostname=$1
+    local ip=""
+    
+    # Versuche dig
+    if command -v dig &> /dev/null; then
+        ip=$(dig +short "$hostname" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+    fi
+    
+    # Falls dig fehlschlägt, versuche host
+    if [ -z "$ip" ] && command -v host &> /dev/null; then
+        ip=$(host "$hostname" 2>/dev/null | grep "has address" | head -n1 | awk '{print $NF}')
+    fi
+    
+    # Falls host fehlschlägt, versuche getent
+    if [ -z "$ip" ] && command -v getent &> /dev/null; then
+        ip=$(getent hosts "$hostname" 2>/dev/null | awk '{print $1}' | head -n1)
+    fi
+    
+    echo "$ip"
+}
+
 if [ -z "$WORKER_B_IP" ]; then
-    WORKER_B_IP=$(dig +short "$RABBITMQ_B" A 2>/dev/null | tail -n1)
+    WORKER_B_IP=$(resolve_ip "$RABBITMQ_B")
 fi
 if [ -z "$WORKER_C_IP" ]; then
-    WORKER_C_IP=$(dig +short "$RABBITMQ_C" A 2>/dev/null | tail -n1)
+    WORKER_C_IP=$(resolve_ip "$RABBITMQ_C")
 fi
 if [ -z "$MAIN_IP" ]; then
-    MAIN_IP=$(dig +short "$RABBITMQ_MAIN" A 2>/dev/null | tail -n1)
+    MAIN_IP=$(resolve_ip "$RABBITMQ_MAIN")
 fi
 
-# IPv6 (optional)
-if [ -z "$WORKER_B_IP6" ]; then
-    WORKER_B_IP6=$(dig +short "$RABBITMQ_B" AAAA 2>/dev/null | tail -n1)
-fi
-if [ -z "$WORKER_C_IP6" ]; then
-    WORKER_C_IP6=$(dig +short "$RABBITMQ_C" AAAA 2>/dev/null | tail -n1)
-fi
-if [ -z "$MAIN_IP6" ]; then
-    MAIN_IP6=$(dig +short "$RABBITMQ_MAIN" AAAA 2>/dev/null | tail -n1)
+# IPv6 (optional, nur mit dig)
+if command -v dig &> /dev/null; then
+    if [ -z "$WORKER_B_IP6" ]; then
+        WORKER_B_IP6=$(dig +short "$RABBITMQ_B" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+$' | head -n1)
+    fi
+    if [ -z "$WORKER_C_IP6" ]; then
+        WORKER_C_IP6=$(dig +short "$RABBITMQ_C" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+$' | head -n1)
+    fi
+    if [ -z "$MAIN_IP6" ]; then
+        MAIN_IP6=$(dig +short "$RABBITMQ_MAIN" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+$' | head -n1)
+    fi
 fi
 
 if [ -z "$WORKER_B_IP" ] || [ -z "$WORKER_C_IP" ]; then
