@@ -32,12 +32,16 @@ sudo ./scripts/setup-firewall.sh
 
 The script:
 - ✅ Automatically discovers IPs via DNS
+- ✅ **Configures DOCKER-USER iptables chain (prevents Docker bypass!)**
 - ✅ Restricts port 5672 (RabbitMQ) to Worker-B/C IPs
 - ✅ Restricts port 5432 (PostgreSQL) to Worker-B/C IPs
 - ✅ Restricts port 15672 (RabbitMQ UI) to localhost
+- ✅ Makes iptables rules persistent (survive reboot)
 - ✅ Worker servers require NO firewall changes
 
-**Important:** Ports 80/443 (nginx) and SSH are assumed to be already configured!
+**Important:** 
+- Ports 80/443 (nginx) and SSH are assumed to be already configured!
+- **Docker bypasses UFW by default** - the script fixes this with DOCKER-USER chain rules!
 
 ---
 
@@ -57,15 +61,39 @@ WORKER_C_IP=$(dig +short $RABBITMQ_C | tail -n1)
 echo "Worker-B IP: $WORKER_B_IP"
 echo "Worker-C IP: $WORKER_C_IP"
 
-# RabbitMQ AMQP (ONLY from worker servers)
+# WICHTIG: Docker-Bypass verhindern (DOCKER-USER Chain)
+# Docker fügt automatisch Regeln ein, die VOR UFW greifen!
+# Wir müssen explizit DOCKER-USER Chain konfigurieren:
+
+# Lösche alte DOCKER-USER Regeln
+sudo iptables -F DOCKER-USER 2>/dev/null || true
+
+# Erlaube Worker-IPs auf RabbitMQ und PostgreSQL
+sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"
+sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"
+sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"
+sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"
+
+# Erlaube localhost auf RabbitMQ Management UI
+sudo iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
+
+# BLOCKIERE alle anderen auf diesen Ports
+sudo iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
+sudo iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
+sudo iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
+
+# WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
+sudo iptables -A DOCKER-USER -j RETURN
+
+# Mache iptables-Regeln persistent
+sudo apt-get install -y iptables-persistent
+sudo netfilter-persistent save
+
+# UFW-Regeln als zusätzliche Sicherheitsebene (Backup)
 sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
-
-# PostgreSQL (ONLY from worker servers)
 sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-C'
-
-# RabbitMQ Management UI (ONLY localhost)
 sudo ufw allow from 127.0.0.1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost'
 
 # Reload UFW
@@ -73,9 +101,12 @@ sudo ufw reload
 
 # Check status
 sudo ufw status verbose
+sudo iptables -L DOCKER-USER -n -v
 ```
 
-**Note:** Ports 80/443 (nginx), SSH, and other ports are assumed to be already configured.
+**Note:** 
+- Ports 80/443 (nginx), SSH, and other ports are assumed to be already configured.
+- **DOCKER-USER Chain ist KRITISCH** - ohne diese Regeln umgeht Docker die UFW-Firewall!
 
 ### On $RABBITMQ_B and $RABBITMQ_C (worker servers)
 
@@ -93,6 +124,70 @@ Worker servers:
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw enable
+```
+
+---
+
+## ⚠️ Docker Firewall Bypass Problem
+
+### Das Problem
+
+**Docker umgeht UFW standardmäßig!**
+
+Docker fügt automatisch Regeln in die `DOCKER-USER` iptables-Chain ein, die **VOR** den UFW-Regeln ausgewertet werden. Das bedeutet:
+
+- ❌ UFW-Regeln wie `ufw allow from X.X.X.X to any port 5432` werden **IGNORIERT**
+- ❌ Docker-Container-Ports sind **für ALLE IPs erreichbar**, auch wenn UFW sie blockieren sollte
+- ❌ PostgreSQL (5432) und RabbitMQ (5672) sind **öffentlich zugänglich**, trotz UFW-Konfiguration!
+
+### Die Lösung: DOCKER-USER Chain
+
+Die `DOCKER-USER` Chain ist eine spezielle iptables-Chain, die Docker respektiert:
+
+```
+Packet Flow:
+1. DOCKER-USER Chain ← Hier müssen wir Regeln setzen!
+2. DOCKER Chain (automatisch von Docker)
+3. UFW Chains (werden zu spät ausgewertet)
+```
+
+**Unser Setup:**
+1. **DOCKER-USER Chain** blockiert alle IPs außer Worker-B/C auf Ports 5432/5672/15672
+2. **UFW-Regeln** als zusätzliche Sicherheitsebene (Backup)
+3. **iptables-persistent** macht Regeln persistent (überleben Neustart)
+
+### Verifikation
+
+```bash
+# DOCKER-USER Chain anzeigen (WICHTIG!)
+sudo iptables -L DOCKER-USER -n -v
+
+# Sollte zeigen:
+# - ACCEPT von Worker-B IP auf Port 5672/5432
+# - ACCEPT von Worker-C IP auf Port 5672/5432
+# - ACCEPT von 127.0.0.1 auf Port 15672
+# - DROP auf Port 5672/5432/15672 (alle anderen)
+# - RETURN (am Ende)
+
+# UFW Status (zusätzlich)
+sudo ufw status verbose
+```
+
+### Wichtige Befehle
+
+```bash
+# DOCKER-USER Chain anzeigen
+sudo iptables -L DOCKER-USER -n -v
+sudo iptables -L DOCKER-USER -n --line-numbers
+
+# iptables-Regeln persistent speichern
+sudo netfilter-persistent save
+
+# iptables-Regeln laden (nach Neustart)
+sudo netfilter-persistent reload
+
+# Alle iptables-Chains anzeigen
+sudo iptables -L -n -v
 ```
 
 ---

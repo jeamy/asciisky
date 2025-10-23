@@ -104,8 +104,71 @@ if grep -q "IPV6=no" /etc/default/ufw; then
 fi
 
 echo ""
-echo "📋 Setze Firewall-Regeln für RabbitMQ und PostgreSQL (IPv4 + IPv6)..."
+echo "🐳 Konfiguriere DOCKER-USER Chain (verhindert Docker-Bypass von UFW)..."
 
+# Docker fügt automatisch Regeln in die DOCKER-USER Chain ein, die VOR UFW greifen
+# Wir müssen explizit DENY-Regeln in DOCKER-USER hinzufügen, um Docker-Container zu schützen
+
+# Erstelle /etc/docker/daemon.json falls nicht vorhanden
+if [ ! -f /etc/docker/daemon.json ]; then
+    echo '{"iptables": true}' | sudo tee /etc/docker/daemon.json > /dev/null
+    success "Docker daemon.json erstellt"
+fi
+
+# Füge DOCKER-USER Chain Regeln hinzu (werden VOR UFW ausgewertet!)
+echo "🔒 Setze DOCKER-USER Chain Regeln (blockiert alle außer Worker-IPs)..."
+
+# Lösche alte DOCKER-USER Regeln (außer RETURN am Ende)
+sudo iptables -F DOCKER-USER 2>/dev/null || true
+sudo ip6tables -F DOCKER-USER 2>/dev/null || true
+
+# IPv4: Erlaube Worker-B und Worker-C auf RabbitMQ (5672) und PostgreSQL (5432)
+sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"
+sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"
+sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"
+sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"
+
+# IPv4: Erlaube localhost auf RabbitMQ Management UI (15672)
+sudo iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
+
+# IPv4: BLOCKIERE alle anderen auf RabbitMQ, PostgreSQL und Management UI
+sudo iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
+sudo iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
+sudo iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
+
+# IPv6: Gleiche Regeln für IPv6 (falls vorhanden)
+if [ -n "$WORKER_B_IP6" ] || [ -n "$WORKER_C_IP6" ]; then
+    if [ -n "$WORKER_B_IP6" ]; then
+        sudo ip6tables -I DOCKER-USER -s $WORKER_B_IP6 -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B IPv6"
+        sudo ip6tables -I DOCKER-USER -s $WORKER_B_IP6 -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B IPv6"
+    fi
+    if [ -n "$WORKER_C_IP6" ]; then
+        sudo ip6tables -I DOCKER-USER -s $WORKER_C_IP6 -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C IPv6"
+        sudo ip6tables -I DOCKER-USER -s $WORKER_C_IP6 -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C IPv6"
+    fi
+    sudo ip6tables -I DOCKER-USER -s ::1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others IPv6"
+fi
+
+# WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
+sudo iptables -A DOCKER-USER -j RETURN
+sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
+
+success "DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass!)"
+
+# Mache DOCKER-USER Regeln persistent (überleben Docker-Neustart)
+echo "💾 Mache iptables-Regeln persistent..."
+sudo apt-get install -y iptables-persistent 2>/dev/null || true
+sudo netfilter-persistent save 2>/dev/null || sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
+sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 > /dev/null 2>/dev/null || true
+success "iptables-Regeln gespeichert"
+
+echo ""
+echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz)..."
+
+# UFW-Regeln als zusätzliche Sicherheitsebene (werden NACH DOCKER-USER ausgewertet)
 # RabbitMQ AMQP (nur von Worker-Servern) - IPv4
 sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B IPv4'
 sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C IPv4'
@@ -164,17 +227,20 @@ echo "   🔒 5432  - PostgreSQL (NUR Worker-B: $WORKER_B_IP, Worker-C: $WORKER_
 echo "   🔒 15672 - RabbitMQ Management UI (NUR localhost/SSH-Tunnel)"
 echo ""
 echo "🔒 Sicherheit:"
+echo "   ✅ DOCKER-USER Chain konfiguriert (verhindert Docker-Bypass!)"
 echo "   ✅ RabbitMQ (5672) und PostgreSQL (5432) NUR von Worker-Servern erreichbar"
 echo "   ✅ RabbitMQ UI (15672) NUR via SSH-Tunnel erreichbar"
 echo "   ✅ Alle anderen IPs werden auf Ports 5672, 5432, 15672 blockiert"
+echo "   ✅ iptables-Regeln persistent gespeichert (überleben Neustart)"
 
 echo ""
 echo "📝 Nützliche Befehle:"
-echo "   sudo ufw status verbose          # Status anzeigen"
-echo "   sudo ufw status numbered         # Regeln mit Nummern"
-echo "   sudo ufw delete <nummer>         # Regel löschen"
-echo "   sudo ufw disable                 # UFW deaktivieren"
-echo "   sudo ufw reload                  # UFW neu laden"
+echo "   sudo ufw status verbose                    # UFW Status anzeigen"
+echo "   sudo iptables -L DOCKER-USER -n -v         # DOCKER-USER Chain anzeigen"
+echo "   sudo iptables -L DOCKER-USER -n --line-numbers  # Mit Zeilennummern"
+echo "   sudo ufw status numbered                   # UFW Regeln mit Nummern"
+echo "   sudo ufw delete <nummer>                   # UFW Regel löschen"
+echo "   sudo netfilter-persistent save             # iptables speichern"
 echo ""
 echo "💡 RabbitMQ UI Zugriff (von deinem lokalen Rechner):"
 echo "   ssh -L 15672:localhost:15672 $RABBITMQ_MAIN"
