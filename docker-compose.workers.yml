@@ -27,8 +27,8 @@ services:
       - TZ=Europe/Berlin
       - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
@@ -60,8 +60,8 @@ services:
       - LOG_LEVEL=info
       - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
@@ -90,8 +90,8 @@ services:
       - LOG_LEVEL=info
       - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=asciisky
-      - POSTGRES_USER=asciisky
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
