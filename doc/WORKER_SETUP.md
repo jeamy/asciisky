@@ -6,7 +6,7 @@ ASCII Sky verwendet eine Multi-Host Worker-Architektur mit RabbitMQ:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Hauptserver (asciisky.eibrain.org)                          │
+│ Hauptserver ($RABBITMQ_MAIN)                                 │
 │ - Web (FastAPI)                                              │
 │ - RabbitMQ (Message Broker)                                  │
 │ - PostgreSQL (Cache/DB)                                      │
@@ -68,7 +68,7 @@ ASTEROID_WORKERS=0  # Nicht verwendet auf Hauptserver
 COMET_WORKERS=0     # Nicht verwendet auf Hauptserver
 ```
 
-#### Worker Host B (.env auf rabbit-b.eibrain.org)
+#### Worker Host B (.env auf $RABBITMQ_B)
 ```bash
 # Worker Scaling (unterschiedlich pro Host konfigurierbar)
 PRECOMPUTE_WORKERS=4
@@ -76,7 +76,7 @@ ASTEROID_WORKERS=2
 COMET_WORKERS=2
 ```
 
-#### Worker Host C (.env auf rabbit-c.eibrain.org)
+#### Worker Host C (.env auf $RABBITMQ_C)
 ```bash
 # Worker Scaling (unterschiedlich pro Host konfigurierbar)
 PRECOMPUTE_WORKERS=4
@@ -130,7 +130,7 @@ docker compose -f docker-compose.production.yml up -d --scale precompute_worker=
 
 **Auf Worker-Host B:**
 ```bash
-ssh rabbit-b.eibrain.org
+ssh $RABBITMQ_B
 cd ~/asciisky
 
 # .env bearbeiten
@@ -147,7 +147,7 @@ docker compose -f docker-compose.workers.yml up -d --scale asteroid_worker=4
 
 ```bash
 # SSH-Tunnel erstellen
-ssh -L 15672:localhost:15672 asciisky.eibrain.org
+ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
 # Browser öffnen
 http://localhost:15672
@@ -168,7 +168,7 @@ docker compose -f docker-compose.production.yml logs -f precompute_worker
 
 **Worker Host B:**
 ```bash
-ssh rabbit-b.eibrain.org
+ssh $RABBITMQ_B
 cd ~/asciisky
 docker compose -f docker-compose.workers.yml logs -f asteroid_worker
 docker compose -f docker-compose.workers.yml logs -f comet_worker
@@ -177,7 +177,7 @@ docker compose -f docker-compose.workers.yml logs -f precompute_worker
 
 **Worker Host C:**
 ```bash
-ssh rabbit-c.eibrain.org
+ssh $RABBITMQ_C
 cd ~/asciisky
 docker compose -f docker-compose.workers.yml logs -f asteroid_worker
 docker compose -f docker-compose.workers.yml logs -f comet_worker
@@ -198,7 +198,7 @@ docker compose -f docker-compose.workers.yml logs -f precompute_worker
 **Lösung:**
 ```bash
 # Worker neu starten
-ssh rabbit-b.eibrain.org
+ssh $RABBITMQ_B
 cd ~/asciisky
 docker compose -f docker-compose.workers.yml restart
 ```
@@ -224,8 +224,8 @@ docker compose -f docker-compose.workers.yml restart
 **Prüfen:**
 ```bash
 # Von Worker-Host testen
-ssh rabbit-b.eibrain.org
-telnet asciisky.eibrain.org 5432
+ssh $RABBITMQ_B
+telnet $RABBITMQ_MAIN 5432
 ```
 
 **Lösung:**

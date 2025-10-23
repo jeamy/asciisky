@@ -127,12 +127,12 @@ docker compose up -d
 docker compose -f docker-compose.production.yml up -d
 
 # Worker-B (optional)
-ssh rabbit-b.eibrain.org
+ssh $RABBITMQ_B
 cd ~/asciisky
 docker compose -f docker-compose.worker-b.yml up -d
 
 # Worker-C (optional)
-ssh rabbit-c.eibrain.org
+ssh $RABBITMQ_C
 cd ~/asciisky
 docker compose -f docker-compose.worker-c.yml up -d
 ```
@@ -233,7 +233,7 @@ PRECOMPUTE_WORKERS_C=8
 **Zugriff via SSH-Tunnel:**
 ```bash
 # Von deinem lokalen Rechner
-ssh -L 15672:localhost:15672 asciisky.eibrain.org
+ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
 # Dann im Browser öffnen
 http://localhost:15672
@@ -259,10 +259,10 @@ docker logs -f asciisky-precompute-coordinator
 docker logs -f asciisky-precompute-worker
 
 # Worker (rabbit-b) - alle 4 Worker
-ssh rabbit-b.eibrain.org "docker compose -f docker-compose.worker-b.yml logs -f precompute_worker"
+ssh $RABBITMQ_B "docker compose -f docker-compose.worker-b.yml logs -f precompute_worker"
 
 # Worker (rabbit-c) - alle 4 Worker
-ssh rabbit-c.eibrain.org "docker compose -f docker-compose.worker-c.yml logs -f precompute_worker"
+ssh $RABBITMQ_C "docker compose -f docker-compose.worker-c.yml logs -f precompute_worker"
 ```
 
 ### PostgreSQL Cache-Status
@@ -336,7 +336,7 @@ docker exec asciisky-precompute-worker pg_isready -h postgres -U asciisky
 
 ```bash
 # Prüfe Queue in RabbitMQ UI
-# http://asciisky.eibrain.org:15672
+# http://$RABBITMQ_MAIN:15672
 
 # Prüfe Consumer Count
 # Sollte = Anzahl Worker sein
@@ -400,10 +400,10 @@ environment:
 docker compose -f docker-compose.production.yml up -d
 
 # Worker-Server B
-ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml up -d"
+ssh $RABBITMQ_B "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml up -d"
 
 # Worker-Server C
-ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml up -d"
+ssh $RABBITMQ_C "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml up -d"
 ```
 
 **Worker-Skalierung:**

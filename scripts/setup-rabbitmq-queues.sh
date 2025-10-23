@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup RabbitMQ Queues für ASCII Sky
-# Verwendung: ./scripts/setup-rabbitmq-queues.sh
+# Setup RabbitMQ queues for ASCII Sky
+# Usage: ./scripts/setup-rabbitmq-queues.sh
 
 set -e
 
@@ -10,7 +10,7 @@ RABBITMQ_PASS="${RABBITMQ_PASSWORD:-changeme}"
 
 echo "🐰 Setting up RabbitMQ queues in container: $CONTAINER_NAME"
 
-# Warten bis RabbitMQ bereit ist
+# Wait until RabbitMQ is ready
 echo "⏳ Waiting for RabbitMQ to be ready..."
 until docker exec $CONTAINER_NAME rabbitmqctl status > /dev/null 2>&1; do
     echo "   Waiting..."
@@ -18,7 +18,7 @@ until docker exec $CONTAINER_NAME rabbitmqctl status > /dev/null 2>&1; do
 done
 echo "✅ RabbitMQ is ready!"
 
-# Queues via rabbitmqctl erstellen (funktioniert ohne zusätzliche Dependencies)
+# Create exchanges and queues via rabbitmqctl (no extra dependencies required)
 echo "📦 Creating exchanges and queues..."
 
 # Exchange (via eval)

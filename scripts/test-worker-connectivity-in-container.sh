@@ -34,7 +34,9 @@ if ! docker compose -f $COMPOSE_FILE ps | grep -q "$CONTAINER"; then
     exit 1
 fi
 
-MAIN_SERVER="asciisky.eibrain.org"
+# Allow overriding the main server via environment; fall back to example.org
+RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
+MAIN_SERVER="$RABBITMQ_MAIN"
 
 echo "Testing from container: $CONTAINER"
 echo ""

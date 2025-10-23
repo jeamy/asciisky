@@ -5,6 +5,11 @@
 
 set -e
 
+# Hostnames (can be provided via environment or .env); fall back to example.org
+RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
+RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
+RABBITMQ_C="${RABBITMQ_C:-rabbit-c.example.org}"
+
 echo "🔥 ASCII Sky Firewall Setup (UFW)"
 echo "=================================="
 echo ""
@@ -32,14 +37,14 @@ warning() {
 echo "📋 Ermittle Server-IPs (IPv4 + IPv6)..."
 
 # IPv4
-MAIN_IP=$(dig +short asciisky.eibrain.org A | tail -n1)
-WORKER_B_IP=$(dig +short rabbit-b.eibrain.org A | tail -n1)
-WORKER_C_IP=$(dig +short rabbit-c.eibrain.org A | tail -n1)
+MAIN_IP=$(dig +short "$RABBITMQ_MAIN" A | tail -n1)
+WORKER_B_IP=$(dig +short "$RABBITMQ_B" A | tail -n1)
+WORKER_C_IP=$(dig +short "$RABBITMQ_C" A | tail -n1)
 
 # IPv6
-MAIN_IP6=$(dig +short asciisky.eibrain.org AAAA | tail -n1)
-WORKER_B_IP6=$(dig +short rabbit-b.eibrain.org AAAA | tail -n1)
-WORKER_C_IP6=$(dig +short rabbit-c.eibrain.org AAAA | tail -n1)
+MAIN_IP6=$(dig +short "$RABBITMQ_MAIN" AAAA | tail -n1)
+WORKER_B_IP6=$(dig +short "$RABBITMQ_B" AAAA | tail -n1)
+WORKER_C_IP6=$(dig +short "$RABBITMQ_C" AAAA | tail -n1)
 
 if [ -z "$MAIN_IP" ] || [ -z "$WORKER_B_IP" ] || [ -z "$WORKER_C_IP" ]; then
     error_exit "Konnte nicht alle IPv4-Adressen auflösen. Prüfe DNS-Konfiguration."
@@ -47,16 +52,16 @@ fi
 
 echo ""
 echo "📍 Ermittelte IPv4-Adressen:"
-echo "   asciisky.eibrain.org: $MAIN_IP"
-echo "   rabbit-b.eibrain.org: $WORKER_B_IP"
-echo "   rabbit-c.eibrain.org: $WORKER_C_IP"
+echo "   $RABBITMQ_MAIN: $MAIN_IP"
+echo "   $RABBITMQ_B: $WORKER_B_IP"
+echo "   $RABBITMQ_C: $WORKER_C_IP"
 
 if [ -n "$MAIN_IP6" ] || [ -n "$WORKER_B_IP6" ] || [ -n "$WORKER_C_IP6" ]; then
     echo ""
     echo "📍 Ermittelte IPv6-Adressen:"
-    [ -n "$MAIN_IP6" ] && echo "   asciisky.eibrain.org: $MAIN_IP6"
-    [ -n "$WORKER_B_IP6" ] && echo "   rabbit-b.eibrain.org: $WORKER_B_IP6"
-    [ -n "$WORKER_C_IP6" ] && echo "   rabbit-c.eibrain.org: $WORKER_C_IP6"
+    [ -n "$MAIN_IP6" ] && echo "   $RABBITMQ_MAIN: $MAIN_IP6"
+    [ -n "$WORKER_B_IP6" ] && echo "   $RABBITMQ_B: $WORKER_B_IP6"
+    [ -n "$WORKER_C_IP6" ] && echo "   $RABBITMQ_C: $WORKER_C_IP6"
 fi
 echo ""
 
@@ -72,12 +77,12 @@ HOSTNAME=$(hostname -f)
 echo "🖥️  Server: $HOSTNAME"
 echo ""
 
-echo "📍 Konfiguriere Firewall für Hauptserver (asciisky.eibrain.org)"
+echo "📍 Konfiguriere Firewall für Hauptserver ($RABBITMQ_MAIN)"
 echo "   RabbitMQ und PostgreSQL werden auf Worker-IPs beschränkt"
 echo ""
 
 warning "ACHTUNG: UFW wird konfiguriert!"
-warning "Nur auf dem Hauptserver (asciisky.eibrain.org) ausführen!"
+warning "Nur auf dem Hauptserver ($RABBITMQ_MAIN) ausführen!"
 warning "Worker-Server (rabbit-b/c) benötigen KEINE Firewall-Änderungen!"
 echo ""
 read -p "Fortfahren? (y/N) " -n 1 -r
@@ -131,7 +136,7 @@ success "Port 5432 (PostgreSQL) - IPv4 + IPv6"
 sudo ufw allow from 127.0.0.1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost IPv4'
 sudo ufw allow from ::1 to any port 15672 proto tcp comment 'RabbitMQ UI localhost IPv6'
 success "Port 15672 (RabbitMQ Management UI) - NUR localhost (SSH-Tunnel)"
-echo "   💡 Zugriff via SSH-Tunnel: ssh -L 15672:localhost:15672 asciisky.eibrain.org"
+echo "   💡 Zugriff via SSH-Tunnel: ssh -L 15672:localhost:15672 $RABBITMQ_MAIN"
 
 # ===== UFW NEU LADEN =====
 echo ""
@@ -172,6 +177,6 @@ echo "   sudo ufw disable                 # UFW deaktivieren"
 echo "   sudo ufw reload                  # UFW neu laden"
 echo ""
 echo "💡 RabbitMQ UI Zugriff (von deinem lokalen Rechner):"
-echo "   ssh -L 15672:localhost:15672 asciisky.eibrain.org"
+echo "   ssh -L 15672:localhost:15672 $RABBITMQ_MAIN"
 echo "   Dann: http://localhost:15672 im Browser öffnen"
 echo ""

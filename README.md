@@ -72,9 +72,9 @@ For production deployment across multiple servers:
    ```
 
 This deploys:
-- **Main Server** (asciisky.eibrain.org): Web UI, PostgreSQL, RabbitMQ, Data Updater
-- **Worker Server B** (rabbit-b.eibrain.org): Scalable compute workers
-- **Worker Server C** (rabbit-c.eibrain.org): Scalable compute workers
+- **Main Server** ($RABBITMQ_MAIN): Web UI, PostgreSQL, RabbitMQ, Data Updater
+- **Worker Server B** ($RABBITMQ_B): Scalable compute workers
+- **Worker Server C** ($RABBITMQ_C): Scalable compute workers
 
 See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions.
 
@@ -244,6 +244,16 @@ The application provides zoom and pan functionality for desktop users:
 ### Environment Variables
 
 The application can be configured using the following environment variables in `docker-compose.yml`:
+
+#### Distributed Host Configuration
+- `RABBITMQ_MAIN` — Main server hostname used by workers (default: `asciisky.example.org`)
+- `RABBITMQ_B` — Worker server B hostname (default: `rabbit-b.example.org`)
+- `RABBITMQ_C` — Worker server C hostname (default: `rabbit-c.example.org`)
+- `RABBITMQ_MAIN_IP` — Main server static IP used by `extra_hosts` in `docker-compose.workers.yml` (default: `203.0.113.10`)
+
+Notes:
+- These values are read from `.env` by `docker-compose.workers.yml` to resolve `POSTGRES_HOST`, `RABBITMQ_URL`, and `extra_hosts`.
+- Replace the example hostnames/IP with your production domain names or static IPs.
 
 ### RabbitMQ Configuration
 - `USE_RABBITMQ` - Enable RabbitMQ for async processing (default: true)

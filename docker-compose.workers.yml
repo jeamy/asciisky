@@ -1,4 +1,4 @@
-# Docker Compose für Worker-Hosts (rabbit-b.eibrain.org, rabbit-c.eibrain.org)
+# Docker Compose für Worker-Hosts ($RABBITMQ_B, $RABBITMQ_C)
 # Worker für Precompute, Asteroid, Comet
 #
 # Worker-Typen:
@@ -18,19 +18,19 @@ services:
     pull_policy: never
     command: ["python", "workers/precompute_worker.py"]
     extra_hosts:
-      - "asciisky.eibrain.org:152.53.239.133"
+      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
       - POSTGRES_USER=asciisky
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
@@ -50,7 +50,7 @@ services:
     pull_policy: never
     command: ["python", "workers/asteroid_worker.py"]
     extra_hosts:
-      - "asciisky.eibrain.org:152.53.239.133"
+      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
@@ -58,12 +58,12 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - LOG_LEVEL=info
-      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
       - POSTGRES_USER=asciisky
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
@@ -80,7 +80,7 @@ services:
     pull_policy: never
     command: ["python", "workers/comet_worker.py"]
     extra_hosts:
-      - "asciisky.eibrain.org:152.53.239.133"
+      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
@@ -88,12 +88,12 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - LOG_LEVEL=info
-      - POSTGRES_HOST=asciisky.eibrain.org
+      - POSTGRES_HOST=${RABBITMQ_MAIN}
       - POSTGRES_PORT=5432
       - POSTGRES_DB=asciisky
       - POSTGRES_USER=asciisky
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@asciisky.eibrain.org:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
       - RABBITMQ_PREFETCH_COUNT=1
       - RABBITMQ_HEARTBEAT=60
       - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}

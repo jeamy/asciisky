@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ asciisky.eibrain.org (Hauptserver)                          │
+│ $RABBITMQ_MAIN (Hauptserver)                                 │
 │ ┌─────────────┐  ┌──────────────┐  ┌──────────────┐        │
 │ │   Web UI    │  │  RabbitMQ    │  │  PostgreSQL  │        │
 │ │  (FastAPI)  │  │   (4.1)      │  │    (16)      │        │
@@ -29,7 +29,7 @@
         │                                       │
         ▼                                       ▼
 ┌──────────────────────┐            ┌──────────────────────┐
-│ rabbit-b.eibrain.org │            │ rabbit-c.eibrain.org │
+│ $RABBITMQ_B │            │ $RABBITMQ_C │
 │ ┌──────────────────┐ │            │ ┌──────────────────┐ │
 │ │Precompute x4     │ │            │ │Precompute x4     │ │
 │ │Asteroid x2       │ │            │ │Asteroid x2       │ │
@@ -43,9 +43,9 @@
 
 | Server | Komponenten | Ports | Zweck |
 |--------|-------------|-------|-------|
-| **asciisky.eibrain.org** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Hauptserver mit UI und Datenbanken |
-| **rabbit-b.eibrain.org** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool B (skalierbar) |
-| **rabbit-c.eibrain.org** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool C (skalierbar) |
+| **$RABBITMQ_MAIN** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Hauptserver mit UI und Datenbanken |
+| **$RABBITMQ_B** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool B (skalierbar) |
+| **$RABBITMQ_C** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker-Pool C (skalierbar) |
 
 **Gesamt (Default): 12 Precompute + 4 Asteroid + 4 Comet Workers**
 
@@ -82,21 +82,21 @@ COMET_WORKERS_C=2
 **Firewall-Regeln:**
 
 ```bash
-# asciisky.eibrain.org (Hauptserver)
+# $RABBITMQ_MAIN (Hauptserver)
 Eingehend: 80, 443 (Web UI - öffentlich)
 Eingehend: 5672 (RabbitMQ - NUR von Worker-B/C IPs)
 Eingehend: 5432 (PostgreSQL - NUR von Worker-B/C IPs)
 Eingehend: 15672 (RabbitMQ UI - NUR localhost/SSH-Tunnel)
 Ausgehend: 80, 443 (HTTP/HTTPS für Daten-Downloads)
 
-# rabbit-b/c.eibrain.org (Worker-Server)
+# $RABBITMQ_B / $RABBITMQ_C (Worker-Server)
 Ausgehend: 5432 (PostgreSQL zu Hauptserver)
 Ausgehend: 5672 (RabbitMQ zu Hauptserver)
 ```
 
 **Automatisches Firewall-Setup:**
 ```bash
-# Nur auf asciisky.eibrain.org ausführen:
+# Nur auf $RABBITMQ_MAIN ausführen:
 sudo ./scripts/setup-firewall.sh
 ```
 
@@ -170,12 +170,12 @@ ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
 
 ```bash
 # SSH-Keys zu Worker-Servern kopieren
-ssh-copy-id rabbit-b.eibrain.org
-ssh-copy-id rabbit-c.eibrain.org
+ssh-copy-id $RABBITMQ_B
+ssh-copy-id $RABBITMQ_C
 
 # Teste Verbindung
-ssh rabbit-b.eibrain.org "echo 'Connection OK'"
-ssh rabbit-c.eibrain.org "echo 'Connection OK'"
+ssh $RABBITMQ_B "echo 'Connection OK'"
+ssh $RABBITMQ_C "echo 'Connection OK'"
 ```
 
 ### 3. Automatisches Deployment
@@ -190,21 +190,21 @@ chmod +x scripts/setup-production.sh
 
 Das Skript:
 1. ✅ Baut Docker-Images
-2. ✅ Startet PostgreSQL und RabbitMQ auf asciisky.eibrain.org
+2. ✅ Startet PostgreSQL und RabbitMQ auf $RABBITMQ_MAIN
 3. ✅ Initialisiert PostgreSQL-Schema
 4. ✅ Erstellt RabbitMQ-Queues
 5. ✅ Startet Precompute Coordinator und Workers
-6. ✅ **Kopiert .env auf rabbit-b.eibrain.org** (automatisch via scp)
-7. ✅ Deployed Worker auf rabbit-b.eibrain.org
-8. ✅ **Kopiert .env auf rabbit-c.eibrain.org** (automatisch via scp)
-9. ✅ Deployed Worker auf rabbit-c.eibrain.org
+6. ✅ **Kopiert .env auf $RABBITMQ_B** (automatisch via scp)
+7. ✅ Deployed Worker auf $RABBITMQ_B
+8. ✅ **Kopiert .env auf $RABBITMQ_C** (automatisch via scp)
+9. ✅ Deployed Worker auf $RABBITMQ_C
 
 **Wichtig:** Die `.env` Datei wird automatisch von deinem lokalen Rechner auf alle Server kopiert. Du musst sie **nicht manuell** auf jeden Server kopieren!
 
 **Nach dem Deployment:**
 ```bash
 # Firewall auf Hauptserver konfigurieren
-ssh asciisky.eibrain.org
+ssh $RABBITMQ_MAIN
 sudo ./scripts/setup-firewall.sh
 ```
 
@@ -212,7 +212,7 @@ sudo ./scripts/setup-firewall.sh
 
 ## 🔧 Manuelle Installation
 
-### Auf asciisky.eibrain.org
+### Auf $RABBITMQ_MAIN
 
 ```bash
 # 1. Repository klonen
@@ -234,7 +234,7 @@ docker compose -f docker-compose.production.yml up -d
 docker exec asciisky-data-updater python nightly_data_updater.py
 ```
 
-### Auf rabbit-b.eibrain.org
+### Auf $RABBITMQ_B
 
 ```bash
 # 1. Repository klonen
@@ -242,14 +242,14 @@ git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
 # 2. .env von Hauptserver kopieren
-scp asciisky.eibrain.org:~/asciisky/.env .env
+scp $RABBITMQ_MAIN:~/asciisky/.env .env
 
 # 3. Worker starten
 docker compose -f docker-compose.worker-b.yml build
 docker compose -f docker-compose.worker-b.yml up -d
 ```
 
-### Auf rabbit-c.eibrain.org
+### Auf $RABBITMQ_C
 
 ```bash
 # 1. Repository klonen
@@ -257,7 +257,7 @@ git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
 # 2. .env von Hauptserver kopieren
-scp asciisky.eibrain.org:~/asciisky/.env .env
+scp $RABBITMQ_MAIN:~/asciisky/.env .env
 
 # 3. Worker starten
 docker compose -f docker-compose.worker-c.yml build
@@ -271,15 +271,15 @@ docker compose -f docker-compose.worker-c.yml up -d
 ### Service-Status prüfen
 
 ```bash
-# Auf asciisky.eibrain.org
+# Auf $RABBITMQ_MAIN
 docker compose -f docker-compose.production.yml ps
 docker compose -f docker-compose.production.yml logs -f web
 
-# Auf rabbit-b.eibrain.org
-ssh rabbit-b.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml ps"
+# Auf $RABBITMQ_B
+ssh $RABBITMQ_B "cd ~/asciisky && docker compose -f docker-compose.worker-b.yml ps"
 
-# Auf rabbit-c.eibrain.org
-ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml ps"
+# Auf $RABBITMQ_C
+ssh $RABBITMQ_C "cd ~/asciisky && docker compose -f docker-compose.worker-c.yml ps"
 ```
 
 ### RabbitMQ Management UI
@@ -287,7 +287,7 @@ ssh rabbit-c.eibrain.org "cd ~/asciisky && docker compose -f docker-compose.work
 **Zugriff via SSH-Tunnel:**
 ```bash
 # Von deinem lokalen Rechner:
-ssh -L 15672:localhost:15672 asciisky.eibrain.org
+ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
 # Dann im Browser öffnen:
 http://localhost:15672
@@ -341,18 +341,18 @@ set -e
 echo "🔄 Updating ASCII Sky on all servers..."
 
 # Hauptserver
-echo "📦 Updating asciisky.eibrain.org..."
+echo "📦 Updating $RABBITMQ_MAIN..."
 git pull
 docker compose -f docker-compose.production.yml build
 docker compose -f docker-compose.production.yml up -d
 
 # Worker B
-echo "📦 Updating rabbit-b.eibrain.org..."
-ssh rabbit-b.eibrain.org "cd ~/asciisky && git pull && docker compose -f docker-compose.worker-b.yml build && docker compose -f docker-compose.worker-b.yml up -d"
+echo "📦 Updating $RABBITMQ_B..."
+ssh $RABBITMQ_B "cd ~/asciisky && git pull && docker compose -f docker-compose.worker-b.yml build && docker compose -f docker-compose.worker-b.yml up -d"
 
 # Worker C
-echo "📦 Updating rabbit-c.eibrain.org..."
-ssh rabbit-c.eibrain.org "cd ~/asciisky && git pull && docker compose -f docker-compose.worker-c.yml build && docker compose -f docker-compose.worker-c.yml up -d"
+echo "📦 Updating $RABBITMQ_C..."
+ssh $RABBITMQ_C "cd ~/asciisky && git pull && docker compose -f docker-compose.worker-c.yml build && docker compose -f docker-compose.worker-c.yml up -d"
 
 echo "✅ Update complete!"
 EOF
@@ -403,13 +403,13 @@ cat backup_20250119.sql | docker exec -i asciisky-postgres psql -U asciisky asci
 
 ```bash
 # Prüfe Netzwerk-Verbindung
-ssh rabbit-b.eibrain.org "telnet asciisky.eibrain.org 5672"
+ssh $RABBITMQ_B "telnet $RABBITMQ_MAIN 5672"
 
 # Prüfe RabbitMQ Logs
 docker logs asciisky-rabbitmq
 
 # Prüfe Worker Logs
-ssh rabbit-b.eibrain.org "docker logs asciisky-asteroid-worker-1"
+ssh $RABBITMQ_B "docker logs asciisky-asteroid-worker-1"
 ```
 
 ### PostgreSQL Verbindungsfehler
@@ -457,8 +457,8 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
 
 1. **Firewall konfigurieren (WICHTIG!)**
    ```bash
-   # Auf asciisky.eibrain.org:
-   sudo ./scripts/setup-firewall.sh
+   # Auf $RABBITMQ_MAIN:
+sudo ./scripts/setup-firewall.sh
    ```
    
    Das Script:
@@ -469,7 +469,7 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
    - ✅ Worker-Server benötigen KEINE Änderungen
 
 2. **RabbitMQ UI Zugriff**
-   - ✅ Nur via SSH-Tunnel: `ssh -L 15672:localhost:15672 asciisky.eibrain.org`
+   - ✅ Nur via SSH-Tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
    - ✅ Nicht öffentlich erreichbar
 
 3. **PostgreSQL Zugriff**
@@ -492,5 +492,5 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
 
 Bei Problemen:
 1. Prüfe Logs: `docker compose logs -f`
-2. Prüfe RabbitMQ UI: http://asciisky.eibrain.org:15672
+2. Prüfe RabbitMQ UI: http://$RABBITMQ_MAIN:15672
 3. Prüfe PostgreSQL: `docker exec asciisky-postgres psql -U asciisky`

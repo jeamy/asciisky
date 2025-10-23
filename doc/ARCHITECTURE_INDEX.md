@@ -290,7 +290,7 @@ get_comet_positions(location_key, time_bucket)                         # Zeilen:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Hauptserver (asciisky.eibrain.org)                          │
+│ Hauptserver ($RABBITMQ_MAIN)                                 │
 │ - FastAPI Web                                                │
 │ - RabbitMQ (Message Broker)                                  │
 │ - PostgreSQL (Cache/DB)                                      │

@@ -1,6 +1,6 @@
-# Docker Compose für asciisky.eibrain.org
+# Docker Compose für $RABBITMQ_MAIN
 # Web-Server, RabbitMQ, PostgreSQL, Data Updater
-# Worker laufen auf rabbit-b/c.eibrain.org
+# Worker laufen auf $RABBITMQ_B/$RABBITMQ_C
 
 services:
   # ===== PostgreSQL Database =====

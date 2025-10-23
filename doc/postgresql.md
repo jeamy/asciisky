@@ -143,8 +143,8 @@ POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
 
 PostgreSQL enables multi-host deployment:
 
-- **Main Server** (asciisky.eibrain.org): Runs PostgreSQL container
-- **Worker Servers** (rabbit-b/c.eibrain.org): Connect to central PostgreSQL
+- **Main Server** ($RABBITMQ_MAIN): Runs PostgreSQL container
+- **Worker Servers** ($RABBITMQ_B/$RABBITMQ_C): Connect to central PostgreSQL
 - **Benefits**:
   - Single source of truth for all data
   - No SQLite file locking issues

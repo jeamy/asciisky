@@ -4,9 +4,10 @@
 
 set -e
 
-echo "🚀 ASCII Sky Multi-Host Production Setup"
-echo "=========================================="
-echo ""
+# Hostnames (can be provided via environment or .env); fall back to example.org
+RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
+RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
+RABBITMQ_C="${RABBITMQ_C:-rabbit-c.example.org}"
 
 # Farben für Output
 RED='\033[0;31m'
@@ -108,7 +109,7 @@ setup_host() {
     echo ""
 }
 
-# ===== HAUPTSERVER: asciisky.eibrain.org =====
+# ===== MAIN SERVER =====
 setup_host "localhost" "docker-compose.production.yml" "Main Server (Web + RabbitMQ + PostgreSQL)"
 
 # Warte auf PostgreSQL
@@ -135,16 +136,16 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 docker compose -f docker-compose.production.yml ps
 echo ""
 
-# ===== WORKER SERVER B: rabbit-b.eibrain.org =====
+# ===== WORKER SERVER B =====
 if [ "$SETUP_WORKER_B" == "true" ]; then
-    setup_host "rabbit-b.eibrain.org" "docker-compose.workers.yml" "Worker Server B"
+    setup_host "$RABBITMQ_B" "docker-compose.workers.yml" "Worker Server B"
 else
     warning "Skipping Worker Server B (SETUP_WORKER_B not set to 'true' in .env)"
 fi
 
-# ===== WORKER SERVER C: rabbit-c.eibrain.org =====
+# ===== WORKER SERVER C =====
 if [ "$SETUP_WORKER_C" == "true" ]; then
-    setup_host "rabbit-c.eibrain.org" "docker-compose.workers.yml" "Worker Server C"
+    setup_host "$RABBITMQ_C" "docker-compose.workers.yml" "Worker Server C"
 else
     warning "Skipping Worker Server C (SETUP_WORKER_C not set to 'true' in .env)"
 fi
@@ -155,14 +156,14 @@ echo "🎉 Setup Complete!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📍 Services:"
-echo "   Web UI:         http://asciisky.eibrain.org (nginx → Port 8000)"
-echo "   RabbitMQ UI:    ssh -L 15672:localhost:15672 asciisky.eibrain.org (SSH-Tunnel)"
-echo "   PostgreSQL:     asciisky.eibrain.org:5432 (nur von Worker-Servern)"
+echo "   Web UI:         http://$RABBITMQ_MAIN (nginx → Port 8000)"
+echo "   RabbitMQ UI:    ssh -L 15672:localhost:15672 $RABBITMQ_MAIN (SSH tunnel)"
+echo "   PostgreSQL:     $RABBITMQ_MAIN:5432 (restricted to worker servers)"
 echo ""
 echo "👷 Workers (configured via .env on each host):"
 echo "   Main Server:          ${PRECOMPUTE_WORKERS:-4} precompute workers"
-echo "   rabbit-b.eibrain.org: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
-echo "   rabbit-c.eibrain.org: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
+echo "   $RABBITMQ_B: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
+echo "   $RABBITMQ_C: PRECOMPUTE_WORKERS, ASTEROID_WORKERS, COMET_WORKERS (in .env)"
 echo "   Edit .env on each host to change worker counts"
 echo ""
 echo "🔄 Precompute System:"
@@ -174,8 +175,8 @@ echo "   Run on main server: sudo ./scripts/setup-firewall.sh"
 echo "   Restricts RabbitMQ/PostgreSQL to Worker-IPs only"
 echo ""
 echo "📝 Next steps:"
-echo "   1. Setup Firewall: sudo ./scripts/setup-firewall.sh (auf asciisky.eibrain.org)"
-echo "   2. Check RabbitMQ UI: ssh -L 15672:localhost:15672 asciisky.eibrain.org → http://localhost:15672"
+echo "   1. Setup Firewall: sudo ./scripts/setup-firewall.sh (on $RABBITMQ_MAIN)"
+echo "   2. Check RabbitMQ UI: ssh -L 15672:localhost:15672 $RABBITMQ_MAIN → http://localhost:15672"
 echo "   3. Trigger initial data update: docker exec asciisky-data-updater python nightly_data_updater.py"
 echo "   4. Monitor precompute: docker logs -f asciisky-precompute-coordinator"
 echo "   5. Monitor logs: docker compose -f docker-compose.production.yml logs -f"

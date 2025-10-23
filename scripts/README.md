@@ -1,43 +1,44 @@
 # ASCII Sky - Setup Scripts
 
-## 📋 Übersicht
 
-Automatisierte Setup- und Deployment-Skripte für ASCII Sky.
+## 📋 Overview
+
+Automated setup and deployment scripts for ASCII Sky.
 
 ---
 
-## 🚀 Development (Lokal)
+## 🚀 Development (Local)
 
 ### setup-dev.sh
 
-**Zweck:** Lokale Entwicklungsumgebung einrichten
+**Purpose:** Set up a local development environment
 
-**Was es macht:**
-- ✅ Erstellt `.env` falls nicht vorhanden
-- ✅ Baut Docker Images
-- ✅ Startet alle Services (Web, RabbitMQ, PostgreSQL, Worker)
-- ✅ Richtet RabbitMQ Queues ein
-- ✅ Wartet auf Datenbank-Initialisierung
-- ✅ Lädt initiale Daten automatisch (via data_updater)
+**What it does:**
+- ✅ Creates `.env` if missing
+- ✅ Builds Docker images
+- ✅ Starts all services (Web, RabbitMQ, PostgreSQL, Workers)
+- ✅ Sets up RabbitMQ queues
+- ✅ Waits for database initialization
+- ✅ Optionally loads initial data (via data_updater)
 
-**Verwendung:**
+**Usage:**
 ```bash
 ./scripts/setup-dev.sh
 ```
 
-**Voraussetzungen:**
+**Requirements:**
 - Docker & Docker Compose v2
-- Keine weiteren Abhängigkeiten
+- No additional dependencies
 
-**Services nach Setup:**
+**Services after setup:**
 - Web UI: http://localhost:8000
 - RabbitMQ UI: http://localhost:15672 (admin/password)
 - PostgreSQL: localhost:5432
 
-**Worker:**
-- 4 Precompute Workers (skalierbar via `PRECOMPUTE_WORKERS` in .env)
-- 2 Asteroid Workers (skalierbar via `ASTEROID_WORKERS` in .env)
-- 2 Comet Workers (skalierbar via `COMET_WORKERS` in .env)
+**Workers:**
+- 4 Precompute Workers (scalable via `PRECOMPUTE_WORKERS` in .env)
+- 2 Asteroid Workers (scalable via `ASTEROID_WORKERS` in .env)
+- 2 Comet Workers (scalable via `COMET_WORKERS` in .env)
 
 ---
 
@@ -45,88 +46,88 @@ Automatisierte Setup- und Deployment-Skripte für ASCII Sky.
 
 ### setup-production.sh
 
-**Zweck:** Production-Deployment auf 3 Servern
+**Purpose:** Production deployment across 3 servers
 
-**Was es macht:**
-- ✅ Deployed auf asciisky.eibrain.org (Hauptserver: Web, PostgreSQL, RabbitMQ, 4 Precompute Workers)
-- ✅ Cloned Repository via HTTPS auf Worker-Server (falls noch nicht vorhanden)
-- ✅ Deployed auf rabbit-b.eibrain.org (Worker-Server B: 4 Precompute + 2 Asteroid + 2 Comet Workers)
-- ✅ Deployed auf rabbit-c.eibrain.org (Worker-Server C: 4 Precompute + 2 Asteroid + 2 Comet Workers)
-- ✅ Richtet PostgreSQL ein (automatisch via init-postgres.sql)
-- ✅ Richtet RabbitMQ Queues ein (automatisch)
-- ✅ Kopiert .env automatisch auf alle Server
-- ✅ Skaliert Worker via `--scale` Parameter
+**What it does:**
+- ✅ Deploys to $RABBITMQ_MAIN (Main server: Web, PostgreSQL, RabbitMQ, 4 Precompute Workers)
+- ✅ Clones repository via HTTPS on worker servers (if not present)
+- ✅ Deploys to $RABBITMQ_B (Worker B: 4 Precompute + 2 Asteroid + 2 Comet Workers)
+- ✅ Deploys to $RABBITMQ_C (Worker C: 4 Precompute + 2 Asteroid + 2 Comet Workers)
+- ✅ Initializes PostgreSQL (automatically via init-postgres.sql)
+- ✅ Sets up RabbitMQ queues (automatically)
+- ✅ Copies `.env` to all servers automatically
+- ✅ Scales workers via `--scale` parameter
 
-**Verwendung:**
+**Usage:**
 ```bash
-# 1. .env erstellen und anpassen (LOKAL auf deinem Rechner)
+# 1. Create and edit .env (LOCALLY on your machine)
 cp .env.example .env
 nano .env
 
-# WICHTIG: Setze SICHERE Passwörter!
-# Diese Passwörter werden auf ALLE Server kopiert
+# IMPORTANT: Use STRONG passwords!
+# These passwords will be copied to ALL servers
 
-# 2. SSH-Keys zu Worker-Servern kopieren
-ssh-copy-id rabbit-b.eibrain.org
-ssh-copy-id rabbit-c.eibrain.org
+# 2. Copy SSH keys to worker servers
+ssh-copy-id $RABBITMQ_B
+ssh-copy-id $RABBITMQ_C
 
 # 3. Setup ausführen (kopiert .env automatisch auf alle Server)
 ./scripts/setup-production.sh
 ```
 
-**Voraussetzungen:**
-- SSH-Zugriff auf alle 3 Server
-- Docker auf allen Servern installiert
-- `.env` **lokal** mit Passwörtern konfiguriert
+**Requirements:**
+- SSH access to all 3 servers
+- Docker installed on all servers
+- `.env` configured locally with secure passwords
 
 **Environment Variables (.env):**
 ```bash
-# WICHTIG: Gleiche Passwörter auf ALLEN Servern!
-POSTGRES_PASSWORD=...      # Muss identisch sein (Worker verbinden sich zu Hauptserver)
-RABBITMQ_PASSWORD=...      # Muss identisch sein (Worker verbinden sich zu Hauptserver)
-SESSION_SECRET=...         # Nur für Hauptserver (Web UI)
+# IMPORTANT: Same passwords on ALL servers!
+POSTGRES_PASSWORD=...      # Must be identical (workers connect to main server)
+RABBITMQ_PASSWORD=...      # Must be identical (workers connect to main server)
+SESSION_SECRET=...         # Only for main server (Web UI)
 
-# Deployment-Optionen
-SETUP_WORKER_B=true        # Worker B deployen?
-SETUP_WORKER_C=true        # Worker C deployen?
+# Deployment options
+SETUP_WORKER_B=true        # Deploy Worker B?
+SETUP_WORKER_C=true        # Deploy Worker C?
 
-# Worker-Skalierung (Hauptserver)
+# Worker scaling (main server)
 PRECOMPUTE_WORKERS=4
 ASTEROID_WORKERS=2
 COMET_WORKERS=2
 
-# Worker-Skalierung (Worker-Server B)
+# Worker scaling (Worker Server B)
 PRECOMPUTE_WORKERS_B=4
 ASTEROID_WORKERS_B=2
 COMET_WORKERS_B=2
 
-# Worker-Skalierung (Worker-Server C)
+# Worker scaling (Worker Server C)
 PRECOMPUTE_WORKERS_C=4
 ASTEROID_WORKERS_C=2
 COMET_WORKERS_C=2
 
-# Precompute Settings
-ASCII_SKY_PRECOMPUTE_HOURS=720  # 30 Tage vorausberechnen
+# Precompute settings
+ASCII_SKY_PRECOMPUTE_HOURS=720  # precompute 30 days ahead
 ```
 
-**Was passiert beim Setup?**
-- ✅ Du erstellst `.env` **lokal** (auf deinem Entwicklungsrechner)
-- ✅ Worker-Server: `git clone https://github.com/jeamy/asciisky.git` nach `~/asciisky`
-- ✅ `setup-production.sh` kopiert `.env` **automatisch** auf alle Server
-- ✅ Alle Server verwenden die **gleichen Passwörter** (wichtig für Verbindungen!)
+**What happens during setup?**
+- ✅ You create `.env` locally (on your development machine)
+- ✅ Worker servers: `git clone https://github.com/jeamy/asciisky.git` into `~/asciisky`
+- ✅ `setup-production.sh` copies `.env` to all servers automatically
+- ✅ All servers use the same passwords (required for connections)
 
 ---
 
 ### update-production.sh
 
-**Zweck:** Code-Updates auf allen Servern
+**Purpose:** Update code across all servers
 
-**Was es macht:**
-- ✅ Git Pull auf allen Servern
-- ✅ Rebuild Docker Images
-- ✅ Rolling Restart (kein Downtime)
+**What it does:**
+- ✅ Git pull on all servers
+- ✅ Rebuild Docker images
+- ✅ Rolling restart (no downtime)
 
-**Verwendung:**
+**Usage:**
 ```bash
 ./scripts/update-production.sh
 ```
@@ -143,21 +144,21 @@ UPDATE_WORKER_C=true  # Optional: Worker C updaten
 
 ### setup-rabbitmq-queues.sh
 
-**Zweck:** RabbitMQ Queues einrichten
+**Purpose:** Create RabbitMQ queues
 
-**Was es macht:**
-- ✅ Erstellt Exchange `computation.direct`
-- ✅ Erstellt Queue `asteroid.compute` (Quorum)
-- ✅ Erstellt Queue `comet.compute` (Quorum)
-- ✅ Erstellt Queue `precompute.tasks` (Classic, Priority)
-- ✅ Erstellt Result/Status Queues
+**What it does:**
+- ✅ Creates exchange `computation.direct`
+- ✅ Creates queue `asteroid.compute` (Quorum)
+- ✅ Creates queue `comet.compute` (Quorum)
+- ✅ Creates queue `precompute.tasks` (Classic, Priority)
+- ✅ Creates result/status queues
 
-**Verwendung:**
+**Usage:**
 ```bash
-# Automatisch (wird von setup-*.sh aufgerufen)
+# Automatic (called by setup-*.sh)
 ./scripts/setup-rabbitmq-queues.sh
 
-# Manuell mit Custom-Container
+# Manual with custom container
 RABBITMQ_CONTAINER=my-rabbitmq ./scripts/setup-rabbitmq-queues.sh
 ```
 
@@ -172,64 +173,64 @@ RABBITMQ_PASSWORD=...                 # RabbitMQ Passwort
 
 ### setup-firewall.sh
 
-**Zweck:** UFW Firewall auf Hauptserver einrichten
+**Purpose:** Configure UFW firewall on main server
 
-**Was es macht:**
-- ✅ Ermittelt automatisch Worker-IPs via DNS
-- ✅ Beschränkt Port 5672 (RabbitMQ) auf Worker-B/C IPs
-- ✅ Beschränkt Port 5432 (PostgreSQL) auf Worker-B/C IPs
-- ✅ Beschränkt Port 15672 (RabbitMQ UI) auf localhost (SSH-Tunnel)
-- ✅ Worker-Server benötigen KEINE Firewall-Änderungen
+**What it does:**
+- ✅ Resolves worker IPs via DNS automatically
+- ✅ Restricts port 5672 (RabbitMQ) to Worker B/C IPs
+- ✅ Restricts port 5432 (PostgreSQL) to Worker B/C IPs
+- ✅ Restricts port 15672 (RabbitMQ UI) to localhost (SSH-tunnel)
+- ✅ Worker servers require NO firewall changes
 
-**Verwendung:**
+**Usage:**
 ```bash
-# NUR auf asciisky.eibrain.org ausführen:
+# Run only on the main server (example: $RABBITMQ_MAIN):
 sudo ./scripts/setup-firewall.sh
 ```
 
-**Ports (Hauptserver):**
-- 80/443: Web UI (nginx) - öffentlich
-- 8000: FastAPI - intern (nginx)
-- 5672: RabbitMQ - NUR Worker-B/C IPs
-- 5432: PostgreSQL - NUR Worker-B/C IPs
-- 15672: RabbitMQ UI - NUR localhost (SSH-Tunnel)
+**Ports (Main server):**
+- 80/443: Web UI (nginx) - public
+- 8000: FastAPI - internal (nginx)
+- 5672: RabbitMQ - ONLY Worker B/C IPs
+- 5432: PostgreSQL - ONLY Worker B/C IPs
+- 15672: RabbitMQ UI - ONLY localhost (SSH tunnel)
 
-**Worker-Server:**
-- Keine Firewall-Änderungen nötig
-- Ausgehende Verbindungen bereits erlaubt
+**Worker servers:**
+- No firewall changes required
+- Outgoing connections are allowed by default
 
 ---
 
 ### init-postgres.sql
 
-**Zweck:** PostgreSQL Schema initialisieren
+**Purpose:** Initialize PostgreSQL schema
 
-**Was es macht:**
-- ✅ Erstellt Tabellen (asteroid_dataframes, comet_dataframes, cached_positions, data_updates)
-- ✅ Erstellt Indizes für schnelle Lookups
-- ✅ Erstellt Views (cache_statistics)
-- ✅ Erstellt Functions (cleanup_expired_positions)
+**What it does:**
+- ✅ Creates tables (asteroid_dataframes, comet_dataframes, cached_positions, data_updates)
+- ✅ Creates indexes for fast lookups
+- ✅ Creates views (cache_statistics)
+- ✅ Creates functions (cleanup_expired_positions)
 
-**Verwendung:**
+**Usage:**
 ```bash
-# Automatisch (beim ersten PostgreSQL-Start via docker-entrypoint-initdb.d)
+# Automatic (on first PostgreSQL start via docker-entrypoint-initdb.d)
 
-# Manuell:
+# Manual:
 docker exec -i asciisky-postgres psql -U asciisky -d asciisky < scripts/init-postgres.sql
 ```
 
 ---
 
-## 📊 Workflow-Übersicht
+## 📊 Workflow Overview
 
 ### Development Workflow
 
 ```
 1. ./scripts/setup-dev.sh
    ↓
-2. Code ändern (auto-reload)
+2. Change code (auto-reload)
    ↓
-3. Testen auf http://localhost:8000
+3. Test at http://localhost:8000
    ↓
 4. Git commit & push
 ```
@@ -237,15 +238,15 @@ docker exec -i asciisky-postgres psql -U asciisky -d asciisky < scripts/init-pos
 ### Production Deployment Workflow
 
 ```
-1. Erstmaliges Setup:
+1. Initial setup:
    ./scripts/setup-production.sh
    
-2. Code-Updates:
+2. Code updates:
    git push
    ./scripts/update-production.sh
    
-3. Firewall (einmalig auf Hauptserver):
-   ssh asciisky.eibrain.org
+3. Firewall (run once on main server):
+   ssh $RABBITMQ_MAIN
    sudo ./scripts/setup-firewall.sh
 ```
 
@@ -253,67 +254,67 @@ docker exec -i asciisky-postgres psql -U asciisky -d asciisky < scripts/init-pos
 
 ## 🔍 Troubleshooting
 
-### Problem: setup-dev.sh schlägt fehl
+### Issue: setup-dev.sh fails
 
-**Lösung:**
+**Solution:**
 ```bash
-# Docker läuft?
+# Is Docker running?
 docker info
 
-# Alte Container stoppen
+# Stop old containers
 docker compose down -v
 
-# Neu starten
+# Restart
 ./scripts/setup-dev.sh
 ```
 
-### Problem: setup-production.sh - SSH-Fehler
+### Issue: setup-production.sh - SSH errors
 
-**Lösung:**
+**Solution:**
 ```bash
-# SSH-Keys kopieren
-ssh-copy-id rabbit-b.eibrain.org
-ssh-copy-id rabbit-c.eibrain.org
+# Copy SSH keys
+ssh-copy-id $RABBITMQ_B
+ssh-copy-id $RABBITMQ_C
 
-# Verbindung testen
-ssh rabbit-b.eibrain.org "echo OK"
+# Test connection
+ssh $RABBITMQ_B "echo OK"
 ```
 
-### Problem: RabbitMQ Queues nicht erstellt
+### Issue: RabbitMQ queues not created
 
-**Lösung:**
+**Solution:**
 ```bash
-# Manuell erstellen
+# Create manually
 export RABBITMQ_CONTAINER=asciisky-rabbitmq
 ./scripts/setup-rabbitmq-queues.sh
 
-# Prüfen
+# Verify
 docker exec asciisky-rabbitmq rabbitmqctl list_queues
 ```
 
 ---
 
-## 📝 Checkliste
+## 📝 Checklist
 
-### Vor erstem Production-Deployment
+### Before first production deployment
 
-- [ ] `.env` **lokal** erstellt und **sichere** Passwörter gesetzt
-- [ ] **Gleiche Passwörter** in .env (POSTGRES_PASSWORD, RABBITMQ_PASSWORD)
-- [ ] Worker-Skalierung in .env konfiguriert (PRECOMPUTE_WORKERS, etc.)
-- [ ] SSH-Keys zu allen Servern kopiert (`ssh-copy-id`)
-- [ ] Docker auf allen Servern installiert
-- [ ] DNS/Hostnames konfiguriert (asciisky.eibrain.org, rabbit-b/c.eibrain.org)
-- [ ] nginx auf Hauptserver konfiguriert (Port 80/443 → 8000)
+- [ ] `.env` created locally and secure passwords set
+- [ ] Same passwords in .env (POSTGRES_PASSWORD, RABBITMQ_PASSWORD)
+- [ ] Worker scaling configured in .env (PRECOMPUTE_WORKERS, etc.)
+- [ ] SSH keys copied to all servers (`ssh-copy-id`)
+- [ ] Docker installed on all servers
+- [ ] DNS/hostnames configured ($RABBITMQ_MAIN, $RABBITMQ_B/$RABBITMQ_C)
+- [ ] nginx configured on main server (Port 80/443 → 8000)
 
-### Nach Production-Deployment
+### After production deployment
 
-- [ ] Firewall konfiguriert: `sudo ./scripts/setup-firewall.sh` (auf Hauptserver)
-- [ ] RabbitMQ UI via SSH-Tunnel: `ssh -L 15672:localhost:15672 asciisky.eibrain.org`
-- [ ] Web UI erreichbar: http://asciisky.eibrain.org (nginx)
-- [ ] 20 Worker-Connections in RabbitMQ (12 Precompute + 4 Asteroid + 4 Comet)
-- [ ] Queues erstellt: `precompute.tasks`, `asteroid.compute`, `comet.compute`
-- [ ] PostgreSQL erreichbar von Worker-Servern: `telnet asciisky.eibrain.org 5432`
-- [ ] Logs prüfen: `docker compose -f docker-compose.production.yml logs -f`
+- [ ] Firewall configured: `sudo ./scripts/setup-firewall.sh` (on main server)
+- [ ] RabbitMQ UI via SSH tunnel: `ssh -L 15672:localhost:15672 $RABBITMQ_MAIN`
+- [ ] Web UI reachable: http://$RABBITMQ_MAIN (nginx)
+- [ ] 20 worker connections in RabbitMQ (12 Precompute + 4 Asteroid + 4 Comet)
+- [ ] Queues created: `precompute.tasks`, `asteroid.compute`, `comet.compute`
+- [ ] PostgreSQL reachable from worker servers: `telnet $RABBITMQ_MAIN 5432`
+- [ ] Check logs: `docker compose -f docker-compose.production.yml logs -f`
 
 ---
 
@@ -321,84 +322,84 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues
 
 ## ❓ FAQ
 
-### Wie viele Worker werden deployed?
+### How many workers are deployed?
 
-**Default (12 Precompute + 4 Asteroid + 4 Comet = 20 Worker):**
-- Hauptserver: 4 Precompute Workers
-- Worker-B: 4 Precompute + 2 Asteroid + 2 Comet Workers
-- Worker-C: 4 Precompute + 2 Asteroid + 2 Comet Workers
+**Default (12 Precompute + 4 Asteroid + 4 Comet = 20 workers):**
+- Main server: 4 Precompute Workers
+- Worker B: 4 Precompute + 2 Asteroid + 2 Comet Workers
+- Worker C: 4 Precompute + 2 Asteroid + 2 Comet Workers
 
-**Skalierung via .env:**
+**Scaling via .env:**
 ```bash
-PRECOMPUTE_WORKERS=8        # Hauptserver: 8 statt 4
-PRECOMPUTE_WORKERS_B=8      # Worker-B: 8 statt 4
-PRECOMPUTE_WORKERS_C=8      # Worker-C: 8 statt 4
-# = 24 Precompute Workers total
+PRECOMPUTE_WORKERS=8        # Main server: 8 instead of 4
+PRECOMPUTE_WORKERS_B=8      # Worker B: 8 instead of 4
+PRECOMPUTE_WORKERS_C=8      # Worker C: 8 instead of 4
+# = 24 Precompute workers total
 ```
 
-### Muss .env auf allen Servern vorhanden sein?
+### Does .env need to exist on all servers?
 
-**Ja!** Aber du musst sie **nicht manuell** kopieren.
+**Yes!** But you do not need to copy it manually.
 
-**Automatisch (empfohlen):**
+**Automatic (recommended):**
 ```bash
-# .env wird automatisch kopiert
+# .env is copied automatically
 ./scripts/setup-production.sh
 ```
 
-**Manuell (falls nötig):**
+**Manual (if needed):**
 ```bash
-scp .env asciisky.eibrain.org:~/asciisky/.env
-scp .env rabbit-b.eibrain.org:~/asciisky/.env
-scp .env rabbit-c.eibrain.org:~/asciisky/.env
+scp .env $RABBITMQ_MAIN:~/asciisky/.env
+scp .env $RABBITMQ_B:~/asciisky/.env
+scp .env $RABBITMQ_C:~/asciisky/.env
 ```
 
-### Müssen die Passwörter auf allen Servern gleich sein?
+### Must the passwords be identical on all servers?
 
-**Ja!** Worker-Server verbinden sich zu PostgreSQL/RabbitMQ auf dem Hauptserver.
+**Yes!** Worker servers connect to PostgreSQL/RabbitMQ on the main server.
 
 ```bash
-# .env auf ALLEN Servern:
-POSTGRES_PASSWORD=DasGleichePasswort123!
-RABBITMQ_PASSWORD=DasGleichePasswort456!
+# .env on ALL servers:
+POSTGRES_PASSWORD=SamePassword123!
+RABBITMQ_PASSWORD=SamePassword456!
 ```
 
-### Wie greife ich auf RabbitMQ UI zu?
+### How do I access the RabbitMQ UI?
 
-**Via SSH-Tunnel (sicher):**
+**Via SSH tunnel (secure):**
 ```bash
-# Von deinem lokalen Rechner:
-ssh -L 15672:localhost:15672 asciisky.eibrain.org
+# From your local machine:
+ssh -L 15672:localhost:15672 $RABBITMQ_MAIN
 
-# Dann im Browser öffnen:
+# Then open in the browser:
 http://localhost:15672
 
 User: admin
 Password: <RABBITMQ_PASSWORD aus .env>
 ```
 
-**Warum nicht direkt?**
-- Port 15672 ist nur auf localhost beschränkt (Firewall)
-- Sicherer: Kein öffentlicher Zugriff
-- SSH-Tunnel verschlüsselt die Verbindung
+**Why not directly?**
+- Port 15672 is restricted to localhost (firewall)
+- Safer: No public access
+- SSH tunnel encrypts the connection
 
-### Ist das Repository public oder private?
+### Is the repository public or private?
 
-**Public Repository** - Keine SSH-Keys nötig!
+**Public repository** - No SSH keys required!
 
-Das Repository wird via HTTPS gecloned:
+The repository is cloned via HTTPS:
 ```bash
 git clone https://github.com/jeamy/asciisky.git
 ```
 
-Worker-Server brauchen **keine** GitHub SSH-Keys, da das Repository öffentlich ist.
+Worker servers do **not** need GitHub SSH keys, since the repository is public.
 
-### Wie skaliere ich Worker manuell?
+### How do I scale workers manually?
 
-**Auf Worker-Servern:**
+**On worker servers:**
 ```bash
 # Worker-Server B
-ssh rabbit-b.eibrain.org
+ssh $RABBITMQ_B
 cd ~/asciisky
 docker compose -f docker-compose.worker-b.yml up -d \
   --scale precompute_worker=8 \
@@ -406,7 +407,7 @@ docker compose -f docker-compose.worker-b.yml up -d \
   --scale comet_worker=4
 
 # Worker-Server C
-ssh rabbit-c.eibrain.org
+ssh $RABBITMQ_C
 cd ~/asciisky
 docker compose -f docker-compose.worker-c.yml up -d \
   --scale precompute_worker=8 \
@@ -414,38 +415,38 @@ docker compose -f docker-compose.worker-c.yml up -d \
   --scale comet_worker=4
 ```
 
-**Wichtig:** Die `--scale` Parameter überschreiben die `.env` Werte!
+**Important:** The `--scale` parameters override `.env` values!
 
-### Kann ich verschiedene .env für jeden Server haben?
+### Can I use different `.env` files per server?
 
-**Ja**, aber die **Passwörter müssen identisch** sein:
+**Yes**, but the **passwords must be identical**:
 
 ```bash
-# .env.main (asciisky.eibrain.org)
-POSTGRES_PASSWORD=GleichesPasswort123!
-RABBITMQ_PASSWORD=GleichesPasswort456!
+# .env.main ($RABBITMQ_MAIN)
+POSTGRES_PASSWORD=SamePassword123!
+RABBITMQ_PASSWORD=SamePassword456!
 SESSION_SECRET=abc123...
 SETUP_WORKER_B=true
 
-# .env.worker-b (rabbit-b.eibrain.org)
-POSTGRES_PASSWORD=GleichesPasswort123!  # ← GLEICH!
-RABBITMQ_PASSWORD=GleichesPasswort456!  # ← GLEICH!
-# SESSION_SECRET nicht nötig (kein Web UI)
+# .env.worker-b ($RABBITMQ_B)
+POSTGRES_PASSWORD=SamePassword123!  # ← SAME!
+RABBITMQ_PASSWORD=SamePassword456!  # ← SAME!
+# SESSION_SECRET not needed (no Web UI)
 ```
 
-### Was passiert wenn Passwörter unterschiedlich sind?
+### What happens if passwords are different?
 
-**Worker können sich nicht verbinden:**
+**Workers cannot connect:**
 ```
 Error: FATAL: password authentication failed for user "asciisky"
 Error: Access refused for user 'admin'
 ```
 
-**Lösung:** Gleiche Passwörter in allen `.env` Dateien setzen.
+**Solution:** Set identical passwords in all `.env` files.
 
 ---
 
-## 🔗 Weiterführende Dokumentation
+## 🔗 Further documentation
 
 - [Production Deployment Guide](../doc/PRODUCTION_DEPLOYMENT.md)
 - [Firewall Setup](../doc/FIREWALL_SETUP.md)
