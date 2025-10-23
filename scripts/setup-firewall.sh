@@ -5,6 +5,19 @@
 
 set -e
 
+# Lade .env falls vorhanden
+if [ -f .env ]; then
+    echo "📄 Lade .env Datei..."
+    set -a  # Automatisch alle Variablen exportieren
+    source .env
+    set +a
+elif [ -f ../.env ]; then
+    echo "📄 Lade ../.env Datei..."
+    set -a
+    source ../.env
+    set +a
+fi
+
 # Hostnames (can be provided via environment or .env); fall back to example.org
 RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
 RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
