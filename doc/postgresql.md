@@ -15,57 +15,44 @@ ASCII Sky uses PostgreSQL for efficient storage and retrieval of astronomical da
 
 The database consists of the following tables:
 
-### 1. `db_metadata`
+### 1. `asteroids` / `comets` (DataFrame Cache)
 
-Stores database metadata including schema version.
-
-```sql
-CREATE TABLE IF NOT EXISTS db_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT
-)
-```
-
-### 2. `asteroid_dataframes`
-
-Stores pickled asteroid DataFrames from MPC.
+Stores pickled MPC DataFrames (orbital elements) for asteroids and comets.
 
 ```sql
-CREATE TABLE IF NOT EXISTS asteroid_dataframes (
+CREATE TABLE IF NOT EXISTS asteroids (
     id SERIAL PRIMARY KEY,
-    data_pickle BYTEA NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-```
+    dataframe_pickle BYTEA NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-### 3. `comet_dataframes`
-
-Stores pickled comet DataFrames from MPC.
-
-```sql
-CREATE TABLE IF NOT EXISTS comet_dataframes (
+CREATE TABLE IF NOT EXISTS comets (
     id SERIAL PRIMARY KEY,
-    data_pickle BYTEA NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
+    dataframe_pickle BYTEA NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-### 4. `cached_positions`
+### 2. `cached_positions` (Position Cache)
 
-Caches computed positions for asteroids, comets, and celestial bodies.
+Caches computed positions for asteroids and comets per location/time. Positions are stored unfiltered and reused for any user magnitude filter.
 
 ```sql
 CREATE TABLE IF NOT EXISTS cached_positions (
     id SERIAL PRIMARY KEY,
-    object_type VARCHAR(20) NOT NULL,
-    object_id VARCHAR(100),
-    location_key VARCHAR(100) NOT NULL,
-    time_bucket VARCHAR(20) NOT NULL,
-    position_data BYTEA NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,
-    UNIQUE(object_type, object_id, location_key, time_bucket)
-)
+    object_type VARCHAR(20) NOT NULL,      -- 'asteroid' or 'comet'
+    object_id INTEGER NOT NULL,
+    location_key VARCHAR(100) NOT NULL,    -- 'lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ'
+    time_bucket VARCHAR(20) NOT NULL,      -- 'YYYYMMDDTHH' (1-hour buckets)
+    observer_lat DOUBLE PRECISION NOT NULL,
+    observer_lon DOUBLE PRECISION NOT NULL,
+    observer_elevation DOUBLE PRECISION NOT NULL,
+    computed_at TIMESTAMP NOT NULL,
+    position_data BYTEA NOT NULL,          -- Pickled unfiltered positions
+    UNIQUE(object_type, location_key, time_bucket)
+);
 ```
 
 ### 5. `data_updates`
@@ -87,12 +74,9 @@ CREATE TABLE IF NOT EXISTS data_updates (
 The following indexes are created to optimize query performance:
 
 ```sql
-CREATE INDEX idx_cached_positions_lookup 
-    ON cached_positions(object_type, location_key, time_bucket);
-CREATE INDEX idx_cached_positions_expires 
-    ON cached_positions(expires_at);
-CREATE INDEX idx_data_updates_type 
-    ON data_updates(update_type, created_at DESC);
+CREATE INDEX idx_cached_loc_time ON cached_positions(location_key, time_bucket);
+CREATE INDEX idx_cached_computed ON cached_positions(computed_at);
+CREATE INDEX idx_cached_type ON cached_positions(object_type);
 ```
 
 ## Database Configuration
@@ -129,16 +113,16 @@ POSTGRES_PORT = int(os.getenv('POSTGRES_PORT', 5432))
 ### DataFrame Functions
 
 - `store_asteroid_dataframe(df_pickle)`: Stores pickled asteroid DataFrame
-- `get_asteroid_dataframe(max_age_seconds)`: Retrieves asteroid DataFrame if fresh
+- `get_asteroid_dataframe()`: Retrieves asteroid DataFrame (TTL 31 days)
 - `store_comet_dataframe(df_pickle)`: Stores pickled comet DataFrame
-- `get_comet_dataframe(max_age_seconds)`: Retrieves comet DataFrame if fresh
+- `get_comet_dataframe()`: Retrieves comet DataFrame (TTL 31 days)
 
 ### Position Cache Functions
 
-- `store_asteroid_positions(asteroid_id, location_key, time_bucket, ...)`: Stores computed positions
-- `get_asteroid_positions(location_key, time_bucket, max_age_seconds)`: Retrieves cached positions
-- `store_comet_positions(comet_id, location_key, time_bucket, ...)`: Stores computed positions
-- `get_comet_positions(location_key, time_bucket, max_age_seconds)`: Retrieves cached positions
+- `store_asteroid_positions(asteroid_id, location_key, time_bucket, ...)`: Stores computed positions (unfiltered)
+- `get_asteroid_positions(location_key, time_bucket)`: Retrieves cached positions
+- `store_comet_positions(comet_id, location_key, time_bucket, ...)`: Stores computed positions (unfiltered)
+- `get_comet_positions(location_key, time_bucket)`: Retrieves cached positions
 
 ### Data Update Tracking
 
@@ -191,7 +175,7 @@ PostgreSQL works with RabbitMQ for async computation:
 
 ## Cache Strategy
 
-- **DataFrames**: Stored as pickled BYTEA (12h TTL)
-- **Positions**: Stored as pickled BYTEA (6h TTL)
-- **Filtering**: Always cache with mag 20.0, filter in API
-- **Cleanup**: Automatic expiration via `expires_at` timestamp
+- **DataFrames**: Stored as pickled BYTEA in `asteroids`/`comets` (TTL 31 days)
+- **Positions**: Stored as pickled BYTEA in `cached_positions` (unlimited TTL; positions for a given hour are immutable)
+- **Filtering**: Positions are stored unfiltered up to ~mag 22; API routes apply user magnitude filters from `user_settings.json`
+- **Cleanup**: Optional retention policy can remove very old positions; not required for correctness

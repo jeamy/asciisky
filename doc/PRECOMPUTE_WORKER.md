@@ -100,14 +100,14 @@ Der Worker berechnet für folgende Standorte:
 
 ### 4. Cache-Speicherung
 
-**PostgreSQL (Standard):**
+**PostgreSQL:**
 - Tabelle: `cached_positions`
 - Location Key: `lat+48.2082_lon+16.3738_el+0170`
-- Time Bucket: `20251019T12` (6-Stunden-Buckets)
-- TTL: 6 Stunden
+- Time Bucket: `YYYYMMDDTHH` (1-hour buckets, e.g., `20251019T12`)
+- TTL: Unbegrenzt (Positions-Snapshots für eine Stunde sind unveränderlich)
 
-**PostgreSQL (Production):**
-- Gleiche Struktur wie PostgreSQL
+**Production:**
+- Gleiche Struktur
 - Multi-Host-fähig
 - Bessere Concurrency
 

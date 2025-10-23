@@ -1,6 +1,6 @@
 # Comets: Position and Magnitude Pipeline
 
-This document explains how ASCII Sky computes positions and brightness for comets using real MPC data, and how filtering and event times are determined.
+This document explains how ASCII Sky computes positions and brightness for comets using real MPC data, and how caching and filtering are handled.
 
 ## Overview
 
@@ -13,22 +13,21 @@ This document explains how ASCII Sky computes positions and brightness for comet
     - All observations and almanac calls use `target`.
 - Apparent magnitude: Estimated using the M1/k1 photometric model:
   - V = M1 + 5 log10(Δ) + 2.5·k1·log10(r) (with k1 interpreted as exponent n)
-- Filtering: Two-stage filtering for performance and relevance.
-  - Prefilter by absolute parameters: require M1 and M1 ≤ 14.0 (k1 optional; defaults to n=4.0 if missing)
-  - Final filter by estimated apparent magnitude: V ≤ 10.0
+- Filtering: User-configurable magnitude filter is applied in the API layer; workers compute and store unfiltered positions up to magnitude 20.0.
+  - Prefilter for worker workload is still applied (e.g., require M1 and sort by intrinsic brightness), but final selection by apparent magnitude is performed in the API route based on user settings.
 - Rise/Set/Transit: Computed with Skyfield almanac over a two-day window, selecting the best local-day transit.
   - Functions `risings_and_settings(eph, target, topos)` and `meridian_transits(eph, target, topos)` are used with the `target` defined above.
-- Caching: DataFrame and final bright list are cached to speed up subsequent calls.
+- Caching: PostgreSQL caches are used for both the raw DataFrame (elements) and computed positions. Final lists are filtered at API time per request.
 - API: `GET /api/comets` with optional `max_comets` parameter.
 
 Backend entrypoint: `comets.load_comets()`.
 API endpoint: `/api/comets` (see `api/routes/comets.py`).
 Worker: `workers/comet_worker.py` (RabbitMQ-based async computation).
-Cache: PostgreSQL database (`cached_positions` table).
+Cache: PostgreSQL database (`comets`, `cached_positions` tables).
 
 ## Data Loading and Normalization
 
-- The loader reads from a local cached copy `cache/CometEls.txt` if available; otherwise it downloads from MPC and saves it there.
+- The loader downloads MPC comet elements when needed and stores the standardized DataFrame in PostgreSQL (`comets` table) as a pickled blob.
 - Parsing: `skyfield.data.mpc.load_comets_dataframe()` → Pandas DataFrame.
 - Standardization (`_standardize_comet_df()`):
   - Keep the latest row per `designation` (by `reference`), preferring rows with valid `e` and `q`.
@@ -42,7 +41,7 @@ Cache: PostgreSQL database (`cached_positions` table).
   - Require at least one valid time reference among `epoch_tt`, `Tp`, or a complete Y/M/D for epoch or perihelion.
   - Index by `designation`.
 
-Cache: standardized DataFrame is stored in `cache/comets_dataframe.pkl` with a 6h validity.
+Cache: standardized DataFrame is stored in PostgreSQL with a TTL of 31 days.
 
 ## Geometry and Distances
 
@@ -89,7 +88,7 @@ Processing stops after collecting up to `max_comets` items.
 - Default in `comets.load_comets()`: 5000
 - Default for the API query param in `main.py`: 1000
 
-Note: The frontend no longer exposes user-set magnitude filters. These backend thresholds exist only to limit work and return relevant objects.
+Note: Magnitude filters are user-configurable and applied in the API layer; the caches remain unfiltered and reusable.
 
 ## Rise, Set, and Transit Times
 
@@ -116,14 +115,20 @@ Each comet entry returned by `load_comets()` includes:
 
 ## Caching
 
-- MPC raw copy: `cache/CometEls.txt` (download-once cache of MPC elements)
-- DataFrame cache: `cache/comets_dataframe.pkl` (6h validity)
-- Bright comet list cache: `cache/bright_comet_cache.pkl` (final filtered list, ~6h validity; not keyed by location)
+- PostgreSQL DataFrame Cache (table `comets`)
+  - Stores pickled comet DataFrame (TTL 31 days)
+- PostgreSQL Position Cache (table `cached_positions`)
+  - Key: `(object_type='comet', location_key, time_bucket)`
+  - Stores computed positions as pickled, unfiltered arrays (all objects up to mag ~22)
+  - TTL: Unlimited (positions for a specific hour are immutable)
+  
+Filtering is not part of the caches. The API route applies the user magnitude filter from `user_settings.json` (see `/api/filters`). Workers always compute using `max_magnitude=20.0` and store unfiltered results.
 
 ## Endpoint
 
 - `GET /api/comets?lat=<deg>&lon=<deg>&elevation=<m>&max_comets=<N>&time=<ISO8601>` (optional `time`)
   - Returns a JSON object with `time`, `location`, and `bodies`.
+  - The API applies the current user magnitude filter from `user_settings.json` (defaults can be set via environment variables; see README).
   - `max_comets` limits how many candidates are processed/returned (default 1000 at the API layer).
   - `time` is an optional ISO 8601 UTC timestamp (e.g., `2025-01-15T21:30:00Z` or `2025-01-15T21:30:00+00:00`). When provided, all calculations and event windows use the simulated timestamp and day.
 

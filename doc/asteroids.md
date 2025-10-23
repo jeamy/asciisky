@@ -1,6 +1,6 @@
 # Bright Asteroids: Position and Magnitude Pipeline
 
-This document explains how ASCII Sky computes positions and brightness for bright minor planets (asteroids) and how the magnitude-based selection works.
+This document explains how ASCII Sky computes positions and brightness for bright minor planets (asteroids) and how caching and filtering work.
 
 ## Overview
 
@@ -9,7 +9,7 @@ This document explains how ASCII Sky computes positions and brightness for brigh
 - Geometry: Positions observed from a topocentric Earth observer (`Earth + Topos`).
 - Distances and phase angle: Derived from Skyfield vectors.
 - Apparent magnitude: Computed using the IAU H–G photometric model.
-- Filtering: Two-stage filter by absolute magnitude (H) and apparent magnitude (V).
+- Filtering: User-configurable magnitude filter applied in the API layer; workers compute/store unfiltered positions up to mag 20.0.
 - Rise/Set/Transit: Computed with Skyfield almanac for the composite `sun + orbit` target and the observer `Topos`.
 
 Backend entrypoint: `bright_asteroids.load_bright_asteroids()`.
@@ -102,15 +102,20 @@ Frontend display: the UI simplifies display names by stripping numeric designati
 
 ## Caching
 
-- DataFrame cache: `cache/asteroids_dataframe.pkl` (parsed MPCORB).
-- Final results: per-location and time-bucketed cache file, built via `cache_utils.build_cache_path('asteroids', lat, lon, elevation, dt=dt_utc)`, e.g., `cache/asteroids/lat+48.2082_lon+16.3738_el+0171/20250115T18.pkl`.
-- TTL: see `cache_utils.DEFAULT_TTL_SECONDS` (default 6 hours).
-- Legacy fallback: `cache/bright_asteroid_cache.pkl` may be used if present.
+- PostgreSQL DataFrame Cache (table `asteroids`)
+  - Stores pickled MPCORB DataFrame
+  - TTL: 31 days
+- PostgreSQL Position Cache (table `cached_positions`)
+  - Key: `(object_type='asteroid', location_key, time_bucket)`
+  - Stores computed positions as pickled, unfiltered arrays (all objects up to mag ~22)
+  - TTL: Unlimited (positions for a specific hour are immutable)
+
+Filtering is not part of the caches. The API route applies the user magnitude filter from `user_settings.json` (see `/api/filters`). Workers always compute using `max_magnitude=20.0` and store unfiltered results. This makes caches reusable across different user filter settings.
 
 ## Endpoint
 
 - `GET /api/bright_asteroids?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
-  - Uses `MAX_APPARENT_MAGNITUDE` from `bright_asteroids.py` for filtering.
+  - API applies the current user magnitude filter from `user_settings.json` (defaults can be set via environment variables; see README)
   - Responds with a JSON object containing `time`, `location`, and `bodies`.
   - `time` is an optional ISO 8601 UTC timestamp (e.g., `2025-01-15T21:30:00Z`). When provided, all calculations and event windows use the simulated timestamp and day.
 

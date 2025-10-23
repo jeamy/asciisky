@@ -15,7 +15,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - **User-adjustable brightness filters** for asteroids and comets (magnitude 10-20)
   - Accessible via ⚙️ button under "Visible Objects"
   - Filters saved per user in `user_settings.json`
-  - Automatic cache recalculation when filters change
+  - No cache invalidation when filters change; filtering is applied in API routes and cached positions are unfiltered and reused
 - Constellation visualization with:
   - Interactive toggle to show/hide constellations
   - Constellation lines connecting major stars (using data from [constellationship.fab](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
@@ -34,7 +34,8 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - PostgreSQL database backend for efficient data storage and retrieval
-- Automatic nightly updates of asteroid and comet orbital data (2:00 AM)
+- RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md) and [Worker Setup](doc/WORKER_SETUP.md)
+- Automatic nightly updates of asteroid and comet orbital data (configurable; default 4:00 AM)
 - DB-first loading strategy for optimal performance (10x faster than file parsing)
 
 ## Prerequisites
@@ -77,6 +78,10 @@ This deploys:
 
 See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions.
 
+Compose files for production:
+- `docker-compose.production.yml` — main server (web, PostgreSQL, RabbitMQ, coordinator, precompute workers)
+- `docker-compose.workers.yml` — worker hosts (precompute, asteroid, comet workers)
+
 ### Docker Services
 
 The application runs multiple services:
@@ -102,7 +107,7 @@ COMET_WORKERS=2       # Number of comet workers
 ### First Run and Data Management
 
 - **First Startup**: The app automatically downloads and stores MPC orbital data in PostgreSQL database
-- **Daily Updates**: The `data_updater` service automatically downloads fresh data at 2:00 AM local time
+- **Daily Updates**: The `data_updater` service automatically downloads fresh data at the configured hour (default 4:00 AM local time)
 - **Performance**: After initial setup, all data loads from database (10x faster than file parsing)
 
 ### Cache Architecture
@@ -112,7 +117,7 @@ COMET_WORKERS=2       # Number of comet workers
   - Pre-computed positions cached per location and time bucket
   - Automatic nightly updates via `data_updater` service
   - Multi-host capable: All workers connect to central PostgreSQL instance
-  - See `doc/postgresql.md` and `doc/data-management.md` for details
+  - See `doc/ARCHITECTURE_DATABASE.md` and `doc/ARCHITECTURE_CACHE.md` for details
 
 - **RabbitMQ Task Queue**
   - Async computation of asteroid and comet positions
@@ -183,8 +188,11 @@ COMET_WORKERS=2       # Number of comet workers
 - `doc/asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
 - `doc/comets.md` - Comet position and magnitude pipeline (M1/k1 model)
 - `doc/planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
-- `doc/postgresql.md` - PostgreSQL database schema and implementation details
-- `doc/data-management.md` - Data loading strategy, nightly updates, and troubleshooting
+- `doc/ARCHITECTURE_INDEX.md` - Architecture entry point
+- `doc/ARCHITECTURE_FLOW.md` - System & precompute flow
+- `doc/ARCHITECTURE_FLOW_API.md` - API request flow
+- `doc/ARCHITECTURE_CACHE.md` - Cache strategy
+- `doc/ARCHITECTURE_DATABASE.md` - Database schema and data flow
 
 ### Configuration
 - `Dockerfile` - Docker configuration
@@ -199,20 +207,17 @@ COMET_WORKERS=2       # Number of comet workers
 
 All endpoints are referenced in the frontend via `static/js/constants.js`.
 
-- `GET /api/celestial` — positions for Sun, Moon, and planets
-- `GET /api/celestial/{body}` — position for a single body
+- `GET /api/planets` — positions for Sun, Moon, and planets (direct computation, no cache)
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
-- `GET /api/cache_status` — cache status and precomputed data availability; see `doc/cache.md`
-- `GET /api/config` — current configuration including magnitude limits from environment variables
+- `GET /api/filters` — get/set user magnitude filters (applied at API layer)
 
 ### Simulated Time (optional)
 
-All celestial endpoints accept an optional `time` query parameter to simulate calculations at a specific UTC instant. The value must be ISO 8601 and may end with `Z` or include a timezone offset. The backend normalizes it to UTC.
+All endpoints above accept an optional `time` query parameter to simulate calculations at a specific UTC instant. The value must be ISO 8601 and may end with `Z` or include a timezone offset. The backend normalizes it to UTC.
 
 - Examples:
-  - `/api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
-  - `/api/celestial/moon?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+  - `/api/planets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
   - `/api/bright_asteroids?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
   - `/api/comets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
 
@@ -246,6 +251,10 @@ The application can be configured using the following environment variables in `
 - `USE_RABBITMQ_COMETS` - Enable RabbitMQ for comets (default: true)
 - `RABBITMQ_URL` - RabbitMQ connection URL (default: amqp://admin:password@rabbitmq:5672/)
 - `RABBITMQ_TIMEOUT` - RabbitMQ task timeout in seconds (default: 120)
+- `PRECOMPUTE_WORKERS` - Number of precompute workers on the main server (default: 4)
+- `ASTEROID_WORKERS` - Number of on-demand asteroid workers per host (default: 2)
+- `COMET_WORKERS` - Number of on-demand comet workers per host (default: 2)
+- `RABBITMQ_PREFETCH_COUNT` - Prefetch count per worker (default: 1)
 
 ### Data Update Configuration
 - `ASCII_SKY_UPDATE_HOUR` - Hour of day for automatic data updates (default: 4, meaning 4:00 AM)
@@ -269,13 +278,16 @@ The application can be configured using the following environment variables in `
 - [Asteroids](doc/asteroids.md) - Implementation details for asteroid tracking
 - [Comets](doc/comets.md) - Comet tracking and M1/k1 magnitude model
 - [Planets](doc/planets.md) - Planetary positions and calculations
-- [Constellations](doc/constellations.md) - Star patterns and visualization (using data from [Stellarium](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
 
 ### Architecture
-- [PostgreSQL Database](doc/postgresql.md) - Database schema and caching strategy
-- [Data Management](doc/data-management.md) - DB-first loading, nightly updates, and troubleshooting
-- [Session Management](doc/sessionmgm.md) - User sessions and state handling
-- [Production Deployment](doc/PRODUCTION_DEPLOYMENT.md) - Multi-host deployment guide
+- [Architecture Index](doc/ARCHITECTURE_INDEX.md) - Entry point for architecture docs
+- [System & Precompute Flow](doc/ARCHITECTURE_FLOW.md)
+- [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
+- [Cache Strategy](doc/ARCHITECTURE_CACHE.md)
+- [Database Schema](doc/ARCHITECTURE_DATABASE.md)
+- [Worker Setup](doc/WORKER_SETUP.md)
+- [Production Deployment](doc/PRODUCTION_DEPLOYMENT.md)
+- [Firewall Setup](doc/FIREWALL_SETUP.md)
 
 ## Technologies Used
 
