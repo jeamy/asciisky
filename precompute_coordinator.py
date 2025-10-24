@@ -114,8 +114,9 @@ def get_target_locations() -> List[Dict[str, Any]]:
     unique_locations = []
     seen = set()
     for loc in locations:
-        # Normalisiere auf 4 Dezimalstellen (~11m Genauigkeit)
-        key = (round(loc['latitude'], 4), round(loc['longitude'], 4))
+        # Normalisiere auf 3 Dezimalstellen (~111m Genauigkeit)
+        # Ausreichend für astronomische Zwecke, vermeidet GPS-Ungenauigkeiten
+        key = (round(loc['latitude'], 3), round(loc['longitude'], 3))
         if key not in seen:
             seen.add(key)
             unique_locations.append(loc)
