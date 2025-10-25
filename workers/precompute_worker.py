@@ -79,8 +79,12 @@ def process_task(task: Dict[str, Any]) -> bool:
         elevation = location['elevation']
         name = location.get('name', 'Unknown')
         
-        # Parse Zeit
-        dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
+        # Parse Zeit (robust für verschiedene Formate)
+        time_str = time_bucket_str.replace('Z', '+00:00')
+        dt_utc = datetime.fromisoformat(time_str)
+        # Stelle sicher dass Timezone gesetzt ist
+        if dt_utc.tzinfo is None:
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
         
         logger.info(f"[{WORKER_ID}] Processing {kind} for {name} ({lat:.4f}, {lon:.4f}) at {time_bucket_str}")
         

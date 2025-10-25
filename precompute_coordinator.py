@@ -137,7 +137,7 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
         Liste von Task-Dicts für RabbitMQ
     """
     tasks = []
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # Runde auf volle Stunde
     current_hour = now.replace(minute=0, second=0, microsecond=0)
