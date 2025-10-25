@@ -366,7 +366,11 @@
                 const timeInputDialog = new TimeInputDialog((offsetMinutes) => {
                     // Callback für Zeitänderungen
                     updateSimPreview();
-                    if (renderer) updateSky();
+                    if (renderer) {
+                        updateSky();
+                        // Refresh object dialog if visible
+                        renderer.refreshDialogIfVisible();
+                    }
                     // Refresh cache status
                     try { refreshCacheStatus(); } catch (_) { /* noop */ }
                     try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
@@ -378,7 +382,11 @@
                     const next = Math.max(-525600, Math.min(525600, (offsetMinutes || 0) + delta));
                     settingsManager.setSimulatedTime(next);
                     updateSimPreview();
-                    if (renderer) updateSky();
+                    if (renderer) {
+                        updateSky();
+                        // Refresh object dialog if visible
+                        renderer.refreshDialogIfVisible();
+                    }
                     // Refresh cache status to reflect (potential) background precompute triggered by simulated time
                     try { refreshCacheStatus(); } catch (_) { /* noop */ }
                     // Debounced second pass 3s later, avoid stacking multiple timers
@@ -395,7 +403,11 @@
                 btnNow.addEventListener('click', () => {
                     settingsManager.setSimulatedTime(0);
                     updateSimPreview();
-                    if (renderer) updateSky();
+                    if (renderer) {
+                        updateSky();
+                        // Refresh object dialog if visible
+                        renderer.refreshDialogIfVisible();
+                    }
                     // Refresh cache status for returning to real-time
                     try { refreshCacheStatus(); } catch (_) { /* noop */ }
                     try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }

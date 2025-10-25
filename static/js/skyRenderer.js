@@ -1359,7 +1359,6 @@ export class SkyRenderer {
             
             // Close-Button-Event hinzufügen
             document.getElementById('dialog-close').addEventListener('click', () => {
-                dialog.remove();
                 this.clearSelection();
             });
         } catch (error) {
@@ -1431,7 +1430,7 @@ export class SkyRenderer {
             // Event-Listener für den Close-Button
             const closeButton = dialog.querySelector('#dialog-close');
             closeButton.addEventListener('click', () => {
-                this.removeDialog();
+                this.clearSelection();
             });
             
             // Event-Listener für die Objektliste
