@@ -59,8 +59,8 @@ git pull || error_exit "Git pull failed"
 echo "🔨 Building new images..."
 docker compose -f docker-compose.production.yml build || error_exit "Build failed"
 
-echo "🚀 Restarting services..."
-docker compose -f docker-compose.production.yml up -d || error_exit "Restart failed"
+echo "🚀 Restarting services with worker scaling..."
+docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
 
 success "Main server updated"
 echo ""
@@ -73,7 +73,7 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     
     ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker B"
     ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker B"
-    ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker B"
+    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
     echo ""
@@ -89,7 +89,7 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     
     ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker C"
     ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker C"
-    ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker C"
+    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker C"
     
     success "Worker C updated"
     echo ""

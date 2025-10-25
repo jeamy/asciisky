@@ -73,8 +73,14 @@ setup_host() {
         docker compose -f "$COMPOSE_FILE" build || error_exit "Build failed on $HOST"
         
         echo "🚀 Starting services with worker scaling..."
-        # Use env variables for worker counts (fallback to defaults in docker-compose.yml)
-        docker compose -f "$COMPOSE_FILE" up -d || error_exit "Startup failed on $HOST"
+        # Worker scaling via --scale (from .env)
+        if [[ "$COMPOSE_FILE" == "docker-compose.production.yml" ]]; then
+            docker compose -f "$COMPOSE_FILE" up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Startup failed on $HOST"
+        elif [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
+            docker compose -f "$COMPOSE_FILE" up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=${ASTEROID_WORKERS:-2} --scale comet_worker=${COMET_WORKERS:-2} || error_exit "Startup failed on $HOST"
+        else
+            docker compose -f "$COMPOSE_FILE" up -d || error_exit "Startup failed on $HOST"
+        fi
         
         success "Services started on $HOST (Worker scaling via .env)"
     else
@@ -108,7 +114,7 @@ setup_host() {
         
         # Worker scaling via --scale (from .env on remote host)
         if [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
-            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Startup failed on $HOST"
+            ssh "$HOST" "cd ~/asciisky && source .env && docker compose -f $COMPOSE_FILE up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Startup failed on $HOST"
         else
             ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
         fi
