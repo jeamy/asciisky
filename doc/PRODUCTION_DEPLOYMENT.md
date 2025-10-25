@@ -128,6 +128,12 @@ nano .env
 
 The `.env` file is **automatically** copied to all servers!
 
+**Worker-specific .env files (optional):**
+- `.env.b` → Worker Server B (if exists, otherwise uses `.env`)
+- `.env.c` → Worker Server C (if exists, otherwise uses `.env`)
+
+This allows different worker counts per server while keeping passwords identical.
+
 **Set strong passwords for:**
 - `POSTGRES_PASSWORD` — **Must be identical on all servers!**
 - `RABBITMQ_PASSWORD` — **Must be identical on all servers!**
@@ -149,21 +155,37 @@ SESSION_SECRET=a1b2c3d4e5f6...  # openssl rand -hex 32
 SETUP_WORKER_B=true
 SETUP_WORKER_C=true
 
-# Worker scaling
+# Worker scaling (main server)
 PRECOMPUTE_WORKERS=4
 ASTEROID_WORKERS=2
 COMET_WORKERS=2
 
-PRECOMPUTE_WORKERS_B=4
-ASTEROID_WORKERS_B=2
-COMET_WORKERS_B=2
-
-PRECOMPUTE_WORKERS_C=4
-ASTEROID_WORKERS_C=2
-COMET_WORKERS_C=2
-
 # Precompute settings
 ASCII_SKY_PRECOMPUTE_HOURS=720  # precompute 30 days ahead
+```
+
+**Example .env.b (optional - for Worker Server B):**
+```bash
+# Same passwords as main .env!
+POSTGRES_PASSWORD=SuperSicheres_PG_Passwort_123!
+RABBITMQ_PASSWORD=SuperSicheres_RMQ_Passwort_456!
+
+# Different worker counts for Server B
+PRECOMPUTE_WORKERS=8
+ASTEROID_WORKERS=4
+COMET_WORKERS=4
+```
+
+**Example .env.c (optional - for Worker Server C):**
+```bash
+# Same passwords as main .env!
+POSTGRES_PASSWORD=SuperSicheres_PG_Passwort_123!
+RABBITMQ_PASSWORD=SuperSicheres_RMQ_Passwort_456!
+
+# Different worker counts for Server C
+PRECOMPUTE_WORKERS=2
+ASTEROID_WORKERS=1
+COMET_WORKERS=1
 ```
 
 ### 2. Set up SSH access
@@ -194,12 +216,15 @@ The script:
 3. ✅ Initializes PostgreSQL schema
 4. ✅ Creates RabbitMQ queues
 5. ✅ Starts precompute coordinator and workers
-6. ✅ **Copies .env to $RABBITMQ_B** (automatically via scp)
+6. ✅ **Copies .env.b (or .env) to $RABBITMQ_B** (automatically via scp)
 7. ✅ Deploys workers on $RABBITMQ_B
-8. ✅ **Copies .env to $RABBITMQ_C** (automatically via scp)
+8. ✅ **Copies .env.c (or .env) to $RABBITMQ_C** (automatically via scp)
 9. ✅ Deploys workers on $RABBITMQ_C
 
-**Important:** The `.env` file is automatically copied from your local machine to all servers. You do **not** need to copy it manually to each server!
+**Important:** 
+- The `.env` file is automatically copied from your local machine to all servers
+- If `.env.b` or `.env.c` exist, they are used for the respective worker servers
+- You do **not** need to copy .env files manually to each server!
 
 **Nach dem Deployment:**
 ```bash

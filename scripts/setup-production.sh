@@ -58,6 +58,7 @@ setup_host() {
     local HOST=$1
     local COMPOSE_FILE=$2
     local DESCRIPTION=$3
+    local ENV_SUFFIX=$4  # Optional: "b" or "c" for worker-specific .env files
     
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "🖥️  Setting up: $DESCRIPTION"
@@ -89,9 +90,18 @@ setup_host() {
             ssh "$HOST" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || error_exit "Git clone failed on $HOST"
         fi
         
-        # Copy .env
-        echo "📋 Copying .env..."
-        scp .env "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
+        # Copy .env (with worker-specific fallback)
+        if [ -n "$ENV_SUFFIX" ] && [ -f ".env.$ENV_SUFFIX" ]; then
+            echo "📋 Copying worker-specific .env.$ENV_SUFFIX → .env..."
+            scp ".env.$ENV_SUFFIX" "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env.$ENV_SUFFIX to $HOST"
+            success "Using .env.$ENV_SUFFIX for $HOST"
+        else
+            if [ -n "$ENV_SUFFIX" ]; then
+                warning ".env.$ENV_SUFFIX not found, using default .env"
+            fi
+            echo "📋 Copying .env..."
+            scp .env "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
+        fi
         
         echo "🐳 Building and starting on remote host..."
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
@@ -138,14 +148,14 @@ echo ""
 
 # ===== WORKER SERVER B =====
 if [ "$SETUP_WORKER_B" == "true" ]; then
-    setup_host "$RABBITMQ_B" "docker-compose.workers.yml" "Worker Server B"
+    setup_host "$RABBITMQ_B" "docker-compose.workers.yml" "Worker Server B" "b"
 else
     warning "Skipping Worker Server B (SETUP_WORKER_B not set to 'true' in .env)"
 fi
 
 # ===== WORKER SERVER C =====
 if [ "$SETUP_WORKER_C" == "true" ]; then
-    setup_host "$RABBITMQ_C" "docker-compose.workers.yml" "Worker Server C"
+    setup_host "$RABBITMQ_C" "docker-compose.workers.yml" "Worker Server C" "c"
 else
     warning "Skipping Worker Server C (SETUP_WORKER_C not set to 'true' in .env)"
 fi

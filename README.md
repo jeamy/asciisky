@@ -66,15 +66,16 @@ The setup script automatically:
 For production deployment across multiple servers:
 
 1. Configure `.env` file (see `.env.example`)
-2. Run the production setup script:
+2. Optional: Create `.env.b` and `.env.c` for worker-specific settings (see `.env.b.example`, `.env.c.example`)
+3. Run the production setup script:
    ```bash
    ./scripts/setup-production.sh
    ```
 
 This deploys:
 - **Main Server** ($RABBITMQ_MAIN): Web UI, PostgreSQL, RabbitMQ, Data Updater
-- **Worker Server B** ($RABBITMQ_B): Scalable compute workers
-- **Worker Server C** ($RABBITMQ_C): Scalable compute workers
+- **Worker Server B** ($RABBITMQ_B): Scalable compute workers (uses `.env.b` if exists, else `.env`)
+- **Worker Server C** ($RABBITMQ_C): Scalable compute workers (uses `.env.c` if exists, else `.env`)
 
 See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions.
 
@@ -198,9 +199,10 @@ COMET_WORKERS=2       # Number of comet workers
 - `Dockerfile` - Docker configuration
 - `docker-compose.yml` - Development Docker Compose configuration
 - `docker-compose.production.yml` - Production configuration (main server)
-- `docker-compose.worker-b.yml` - Worker server B configuration
-- `docker-compose.worker-c.yml` - Worker server C configuration
-- `.env.example` - Environment variables template
+- `docker-compose.workers.yml` - Worker servers configuration
+- `.env.example` - Environment variables template (main server)
+- `.env.b.example` - Environment variables template (worker server B)
+- `.env.c.example` - Environment variables template (worker server C)
 - `requirements.txt` - Python dependencies
 
 ## API Endpoints
