@@ -45,34 +45,33 @@ def load_asteroids_with_interpolation(
     list1 = _load_asteroid_bucket(lat, lon, elevation, bucket1_dt, bucket_hours, ttl_seconds, use_postgres)
     list2 = _load_asteroid_bucket(lat, lon, elevation, bucket2_dt, bucket_hours, ttl_seconds, use_postgres)
     
-    # If we have both buckets, interpolate
-    if list1 and list2:
-        return interpolate_object_list(list1, list2, factor)
+    logger.info(f"Asteroid buckets for {dt_utc.isoformat()}: bucket1={bucket1_dt.isoformat()} ({'found' if list1 else 'missing'}), bucket2={bucket2_dt.isoformat()} ({'found' if list2 else 'missing'}), factor={factor:.3f}")
     
-    # If only one bucket available:
-    if list1 and not list2:
-        # Use past bucket - this is safe
+    # DISABLED INTERPOLATION - Using exact buckets only to avoid position inconsistencies
+    # If we have both buckets, prefer the closer one instead of interpolation
+    if list1 and list2:
+        # Choose the bucket closer to the requested time
+        if factor < 0.5:
+            logger.info(f"Using bucket1 (closer): {bucket1_dt.isoformat()}")
+            return list1
+        else:
+            logger.info(f"Using bucket2 (closer): {bucket2_dt.isoformat()}")
+            return list2
+    
+    # If only one bucket available, use it
+    if list1:
+        logger.info(f"Using only available bucket1: {bucket1_dt.isoformat()}")
         return list1
     
-    if list2 and not list1:
-        # list1 (past) missing but list2 (future) exists
-        # Try to find earlier buckets (up to 6 hours back)
-        for hours_back in range(2, 7):
-            fallback_bucket_dt = bucket1_dt - timedelta(hours=hours_back * bucket_hours)
-            fallback_list = _load_asteroid_bucket(lat, lon, elevation, fallback_bucket_dt, bucket_hours, ttl_seconds, use_postgres)
-            if fallback_list:
-                # Found an earlier bucket - use it with list2 for interpolation
-                logger.info(f"Using fallback bucket for asteroids: {fallback_bucket_dt.isoformat()} + {bucket2_dt.isoformat()}")
-                # Calculate new interpolation factor
-                total_seconds = (bucket2_dt - fallback_bucket_dt).total_seconds()
-                elapsed_seconds = (dt_utc - fallback_bucket_dt).total_seconds()
-                new_factor = elapsed_seconds / total_seconds if total_seconds > 0 else 0.0
-                new_factor = max(0.0, min(1.0, new_factor))
-                return interpolate_object_list(fallback_list, list2, new_factor)
-        
-        # No earlier bucket found - log warning and use list2
-        logger.warning(f"Using future bucket for asteroids (no past data): requested {dt_utc.isoformat()}, using {bucket2_dt.isoformat()}")
-        return list2
+    if list2:
+        # Check if bucket2 is not too far in the future
+        time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
+        if time_diff_hours <= 1.0:  # Max 1 hour in future
+            logger.info(f"Using bucket2 (within 1h): {bucket2_dt.isoformat()}")
+            return list2
+        else:
+            logger.warning(f"Bucket2 too far in future ({time_diff_hours:.1f}h), returning None")
+            return None
     
     # No buckets available
     return None
@@ -114,34 +113,31 @@ def load_comets_with_interpolation(
     
     logger.info(f"Comet buckets for {dt_utc.isoformat()}: bucket1={bucket1_dt.isoformat()} ({'found' if list1 else 'missing'}), bucket2={bucket2_dt.isoformat()} ({'found' if list2 else 'missing'}), factor={factor:.3f}")
     
-    # If we have both buckets, interpolate
+    # DISABLED INTERPOLATION - Using exact buckets only to avoid position inconsistencies
+    # If we have both buckets, prefer the closer one instead of interpolation
     if list1 and list2:
-        return interpolate_object_list(list1, list2, factor)
+        # Choose the bucket closer to the requested time
+        if factor < 0.5:
+            logger.info(f"Using bucket1 (closer): {bucket1_dt.isoformat()}")
+            return list1
+        else:
+            logger.info(f"Using bucket2 (closer): {bucket2_dt.isoformat()}")
+            return list2
     
-    # If only one bucket available:
-    if list1 and not list2:
-        # Use past bucket - this is safe
+    # If only one bucket available, use it
+    if list1:
+        logger.info(f"Using only available bucket1: {bucket1_dt.isoformat()}")
         return list1
     
-    if list2 and not list1:
-        # list1 (past) missing but list2 (future) exists
-        # Try to find earlier buckets (up to 6 hours back)
-        for hours_back in range(2, 7):
-            fallback_bucket_dt = bucket1_dt - timedelta(hours=hours_back * bucket_hours)
-            fallback_list = _load_comet_bucket(lat, lon, elevation, fallback_bucket_dt, bucket_hours, ttl_seconds, use_postgres)
-            if fallback_list:
-                # Found an earlier bucket - use it with list2 for interpolation
-                logger.info(f"Using fallback bucket for comets: {fallback_bucket_dt.isoformat()} + {bucket2_dt.isoformat()}")
-                # Calculate new interpolation factor
-                total_seconds = (bucket2_dt - fallback_bucket_dt).total_seconds()
-                elapsed_seconds = (dt_utc - fallback_bucket_dt).total_seconds()
-                new_factor = elapsed_seconds / total_seconds if total_seconds > 0 else 0.0
-                new_factor = max(0.0, min(1.0, new_factor))
-                return interpolate_object_list(fallback_list, list2, new_factor)
-        
-        # No earlier bucket found - log warning and use list2
-        logger.warning(f"Using future bucket for comets (no past data): requested {dt_utc.isoformat()}, using {bucket2_dt.isoformat()}")
-        return list2
+    if list2:
+        # Check if bucket2 is not too far in the future
+        time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
+        if time_diff_hours <= 1.0:  # Max 1 hour in future
+            logger.info(f"Using bucket2 (within 1h): {bucket2_dt.isoformat()}")
+            return list2
+        else:
+            logger.warning(f"Bucket2 too far in future ({time_diff_hours:.1f}h), returning None")
+            return None
     
     # No buckets available
     return None
