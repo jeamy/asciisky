@@ -136,7 +136,11 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
     Returns:
         Liste von Task-Dicts für RabbitMQ
     """
+    from cache_utils import normalize_location, location_key, time_bucket_utc
+    from db_utils import get_asteroid_positions, get_comet_positions
+    
     tasks = []
+    skipped = 0
     now = datetime.now(timezone.utc)
     
     # Runde auf volle Stunde
@@ -148,42 +152,70 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
         elevation = location['elevation']
         name = location.get('name', 'Unknown')
         
+        # Normalisiere Location für Cache-Lookup
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        
         # Erstelle Tasks für jede Stunde
         for hour_offset in range(hours_ahead):
             target_time = current_hour + timedelta(hours=hour_offset)
+            bucket = time_bucket_utc(target_time, 1)  # 1-hour buckets
             
             # Priorität: Nächste 24h = HIGH (10), danach NORMAL (5)
             priority = 10 if hour_offset < 24 else 5
             
-            # Task für Asteroiden
-            tasks.append({
-                'kind': 'asteroids',
-                'location': {
-                    'latitude': lat,
-                    'longitude': lon,
-                    'elevation': elevation,
-                    'name': name
-                },
-                'time_bucket': target_time.isoformat(),
-                'magnitude': 20.0,  # Asteroid max magnitude
-                'priority': priority
-            })
+            # Prüfe ob Asteroiden-Daten schon vorhanden
+            asteroid_cached = False
+            try:
+                cached = get_asteroid_positions(loc_key, bucket, None)
+                asteroid_cached = cached is not None and len(cached) > 0
+            except Exception:
+                pass
             
-            # Task für Kometen
-            tasks.append({
-                'kind': 'comets',
-                'location': {
-                    'latitude': lat,
-                    'longitude': lon,
-                    'elevation': elevation,
-                    'name': name
-                },
-                'time_bucket': target_time.isoformat(),
-                'magnitude': 14.0,  # Comet max magnitude
-                'priority': priority
-            })
+            # Task für Asteroiden nur wenn nicht gecached
+            if not asteroid_cached:
+                tasks.append({
+                    'kind': 'asteroids',
+                    'location': {
+                        'latitude': lat,
+                        'longitude': lon,
+                        'elevation': elevation,
+                        'name': name
+                    },
+                    'time_bucket': target_time.isoformat(),
+                    'magnitude': 20.0,  # Asteroid max magnitude
+                    'priority': priority
+                })
+            else:
+                skipped += 1
+            
+            # Prüfe ob Kometen-Daten schon vorhanden
+            comet_cached = False
+            try:
+                cached = get_comet_positions(loc_key, bucket, None)
+                comet_cached = cached is not None and len(cached) > 0
+            except Exception:
+                pass
+            
+            # Task für Kometen nur wenn nicht gecached
+            if not comet_cached:
+                tasks.append({
+                    'kind': 'comets',
+                    'location': {
+                        'latitude': lat,
+                        'longitude': lon,
+                        'elevation': elevation,
+                        'name': name
+                    },
+                    'time_bucket': target_time.isoformat(),
+                    'magnitude': 14.0,  # Comet max magnitude
+                    'priority': priority
+                })
+            else:
+                skipped += 1
     
-    logger.info(f"Created {len(tasks)} precompute tasks ({len(locations)} locations × {hours_ahead} hours × 2 kinds)")
+    total_possible = len(locations) * hours_ahead * 2
+    logger.info(f"Created {len(tasks)} precompute tasks (skipped {skipped} already cached, total {total_possible})")
     return tasks
 
 
