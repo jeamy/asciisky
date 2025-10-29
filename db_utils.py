@@ -102,9 +102,7 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
                 computed_at, position_data
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (object_type, location_key, time_bucket)
-            DO UPDATE SET
-                computed_at = EXCLUDED.computed_at,
-                position_data = EXCLUDED.position_data
+            DO NOTHING
         """, (
             'asteroid', asteroid_id, location_key, time_bucket,
             observer_lat, observer_lon, observer_elevation,
@@ -196,9 +194,7 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                 computed_at, position_data
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (object_type, location_key, time_bucket)
-            DO UPDATE SET
-                computed_at = EXCLUDED.computed_at,
-                position_data = EXCLUDED.position_data
+            DO NOTHING
         """, (
             'comet', comet_id, location_key, time_bucket,
             observer_lat, observer_lon, observer_elevation,
