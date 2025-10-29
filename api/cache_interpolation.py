@@ -112,6 +112,8 @@ def load_comets_with_interpolation(
     list1 = _load_comet_bucket(lat, lon, elevation, bucket1_dt, bucket_hours, ttl_seconds, use_postgres)
     list2 = _load_comet_bucket(lat, lon, elevation, bucket2_dt, bucket_hours, ttl_seconds, use_postgres)
     
+    logger.info(f"Comet buckets for {dt_utc.isoformat()}: bucket1={bucket1_dt.isoformat()} ({'found' if list1 else 'missing'}), bucket2={bucket2_dt.isoformat()} ({'found' if list2 else 'missing'}), factor={factor:.3f}")
+    
     # If we have both buckets, interpolate
     if list1 and list2:
         return interpolate_object_list(list1, list2, factor)
