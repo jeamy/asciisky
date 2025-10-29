@@ -1299,14 +1299,45 @@ export class SkyRenderer {
 
     refreshDialogIfVisible() {
         try {
-            if (!this.selectedObject) return;
+            if (!this.selectedObject) {
+                console.log('[refreshDialog] No selected object');
+                return;
+            }
             const dialog = document.getElementById('object-dialog');
-            if (!dialog) return;
+            if (!dialog) {
+                console.log('[refreshDialog] No dialog found');
+                return;
+            }
             const content = dialog.querySelector('#dialog-content') || dialog.querySelector('.object-data');
-            if (!content) return;
-            const fresh = (this.celestialData && this.celestialData.bodies) ? this.celestialData.bodies[this.selectedObject.name] : null;
+            if (!content) {
+                console.log('[refreshDialog] No content element found');
+                return;
+            }
+            
+            console.log('[refreshDialog] Refreshing dialog for:', this.selectedObject.name);
+            
+            // Find fresh data - search by name in all bodies
+            let fresh = null;
+            if (this.celestialData && this.celestialData.bodies) {
+                // Try direct lookup first
+                fresh = this.celestialData.bodies[this.selectedObject.name];
+                
+                // If not found, search by matching name (for asteroids/comets with prefixed keys)
+                if (!fresh) {
+                    for (const [key, body] of Object.entries(this.celestialData.bodies)) {
+                        if (body.name === this.selectedObject.name) {
+                            fresh = body;
+                            break;
+                        }
+                    }
+                }
+            }
+            
             if (fresh) {
+                console.log('[refreshDialog] Found fresh data:', fresh);
                 this.selectedObject = fresh;
+            } else {
+                console.log('[refreshDialog] No fresh data found for:', this.selectedObject.name);
             }
             const info = this.buildObjectInfoLines(this.selectedObject);
             content.innerHTML = info.join('\n');
