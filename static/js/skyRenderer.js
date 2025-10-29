@@ -1507,6 +1507,17 @@ export class SkyRenderer {
             // Falls dieses Update veraltet ist, breche ab
             if (!this.isActiveUpdate(token)) return;
 
+            // Entferne alte Asteroiden-Einträge vor dem Merge
+            if (this.celestialData && this.celestialData.bodies) {
+                const cleanBodies = {};
+                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
+                    if (!key.startsWith('bright_asteroid_')) {
+                        cleanBodies[key] = value;
+                    }
+                }
+                this.celestialData.bodies = cleanBodies;
+            }
+
             // Füge die Asteroiden zu den Himmelsdaten hinzu
             if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
                 this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
@@ -1542,6 +1553,17 @@ export class SkyRenderer {
             
             // Falls dieses Update veraltet ist, breche ab
             if (!this.isActiveUpdate(token)) return;
+
+            // Entferne alte Kometen-Einträge vor dem Merge
+            if (this.celestialData && this.celestialData.bodies) {
+                const cleanBodies = {};
+                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
+                    if (!key.startsWith('comet_')) {
+                        cleanBodies[key] = value;
+                    }
+                }
+                this.celestialData.bodies = cleanBodies;
+            }
 
             // Füge die Kometen zu den Himmelsdaten hinzu
             if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
@@ -1631,19 +1653,6 @@ export class SkyRenderer {
             const availableComets = !!(avail && avail.available && avail.available.comets);
             const timeISO = (avail && avail.time) ? avail.time : (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO());
             const locKey = (avail && avail.location && avail.location.loc_key) ? avail.location.loc_key : undefined;
-
-            // Entferne alte Asteroiden/Kometen-Einträge BEVOR neue geladen werden
-            // (verhindert Duplikate bei parallel laufenden Updates)
-            if (this.celestialData && this.celestialData.bodies) {
-                const cleanBodies = {};
-                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
-                    // Behalte nur Planeten, Sonne, Mond - entferne Asteroiden und Kometen
-                    if (!key.startsWith('bright_asteroid_') && !key.startsWith('comet_')) {
-                        cleanBodies[key] = value;
-                    }
-                }
-                this.celestialData.bodies = cleanBodies;
-            }
 
             const tasks = [];
             // ALWAYS load asteroids and comets, regardless of cache status

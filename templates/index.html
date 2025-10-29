@@ -363,12 +363,12 @@
                 if (!btnDayMinus || !btnHourMinus || !btnNow || !btnHourPlus || !btnDayPlus || !timeDisplay) return;
                 
                 // Erstelle den TimeInputDialog
-                const timeInputDialog = new TimeInputDialog((offsetMinutes) => {
+                const timeInputDialog = new TimeInputDialog(async (offsetMinutes) => {
                     // Callback für Zeitänderungen
                     updateSimPreview();
                     if (renderer) {
-                        updateSky();
-                        // Refresh object dialog if visible
+                        await updateSky();
+                        // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
                     // Refresh cache status
@@ -377,14 +377,14 @@
                     __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
 
-                const applyDelta = (delta) => {
+                const applyDelta = async (delta) => {
                     const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
                     const next = Math.max(-525600, Math.min(525600, (offsetMinutes || 0) + delta));
                     settingsManager.setSimulatedTime(next);
                     updateSimPreview();
                     if (renderer) {
-                        updateSky();
-                        // Refresh object dialog if visible
+                        await updateSky();
+                        // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
                     // Refresh cache status to reflect (potential) background precompute triggered by simulated time
@@ -400,12 +400,12 @@
 
                 btnDayMinus.addEventListener('click', () => applyDelta(-SOLAR_DAY_MINUTES));
                 btnHourMinus.addEventListener('click', () => applyDelta(-60));
-                btnNow.addEventListener('click', () => {
+                btnNow.addEventListener('click', async () => {
                     settingsManager.setSimulatedTime(0);
                     updateSimPreview();
                     if (renderer) {
-                        updateSky();
-                        // Refresh object dialog if visible
+                        await updateSky();
+                        // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
                     // Refresh cache status for returning to real-time

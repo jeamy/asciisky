@@ -46,8 +46,19 @@ def load_asteroids_with_interpolation(
     if list1 and list2:
         return interpolate_object_list(list1, list2, factor)
     
-    # Otherwise return whichever bucket we have (or None)
-    return list1 or list2
+    # If only one bucket available, check if it's close enough (within 30 minutes)
+    # to avoid returning stale data
+    if list1:
+        time_diff = abs((dt_utc - bucket1_dt).total_seconds())
+        if time_diff <= 1800:  # 30 minutes
+            return list1
+    if list2:
+        time_diff = abs((dt_utc - bucket2_dt).total_seconds())
+        if time_diff <= 1800:  # 30 minutes
+            return list2
+    
+    # No suitable bucket found - return None to trigger background computation
+    return None
 
 
 def load_comets_with_interpolation(
@@ -88,8 +99,19 @@ def load_comets_with_interpolation(
     if list1 and list2:
         return interpolate_object_list(list1, list2, factor)
     
-    # Otherwise return whichever bucket we have (or None)
-    return list1 or list2
+    # If only one bucket available, check if it's close enough (within 30 minutes)
+    # to avoid returning stale data
+    if list1:
+        time_diff = abs((dt_utc - bucket1_dt).total_seconds())
+        if time_diff <= 1800:  # 30 minutes
+            return list1
+    if list2:
+        time_diff = abs((dt_utc - bucket2_dt).total_seconds())
+        if time_diff <= 1800:  # 30 minutes
+            return list2
+    
+    # No suitable bucket found - return None to trigger background computation
+    return None
 
 
 def _load_asteroid_bucket(
