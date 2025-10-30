@@ -188,17 +188,33 @@ class WorkerMonitor:
         """Consumer für Worker Status Messages"""
         logger.info("🎧 Starting status consumer thread...")
         
-        def callback(ch, method, properties, body):
-            try:
-                status_msg = json.loads(body)
-                self._process_worker_status(status_msg)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-            except Exception as e:
-                logger.error(f"Error processing status message: {e}")
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        # Separate Connection für diesen Thread (wichtig für Threading!)
+        consumer_connection = None
+        consumer_channel = None
         
         try:
-            self.channel.basic_consume(
+            # Erstelle eigene Connection für diesen Thread
+            params = pika.URLParameters(self.rabbitmq_url)
+            params.heartbeat = 600
+            consumer_connection = pika.BlockingConnection(params)
+            consumer_channel = consumer_connection.channel()
+            
+            # Queue deklarieren
+            consumer_channel.queue_declare(
+                queue='computation.status',
+                durable=True
+            )
+            
+            def callback(ch, method, properties, body):
+                try:
+                    status_msg = json.loads(body)
+                    self._process_worker_status(status_msg)
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                except Exception as e:
+                    logger.error(f"Error processing status message: {e}")
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            
+            consumer_channel.basic_consume(
                 queue='computation.status',
                 on_message_callback=callback,
                 auto_ack=False
@@ -207,10 +223,20 @@ class WorkerMonitor:
             logger.info("✅ Status consumer started, waiting for messages...")
             
             # Start consuming (blocking)
-            self.channel.start_consuming()
+            consumer_channel.start_consuming()
         
         except Exception as e:
             logger.error(f"❌ Status consumer error: {e}", exc_info=True)
+        
+        finally:
+            # Cleanup
+            try:
+                if consumer_channel and not consumer_channel.is_closed:
+                    consumer_channel.close()
+                if consumer_connection and not consumer_connection.is_closed:
+                    consumer_connection.close()
+            except Exception as e:
+                logger.error(f"Error closing consumer connection: {e}")
     
     def _process_worker_status(self, status_msg: Dict[str, Any]):
         """Verarbeite Worker Status Message"""

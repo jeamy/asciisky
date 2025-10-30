@@ -56,8 +56,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 git pull || error_exit "Git pull failed"
 
-echo "🔨 Building new images..."
-docker compose -f docker-compose.production.yml build || error_exit "Build failed"
+echo "🔨 Building new images (no cache to ensure latest code)..."
+docker compose -f docker-compose.production.yml build --no-cache || error_exit "Build failed"
 
 echo "🚀 Restarting services with unified worker scaling..."
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
@@ -74,7 +74,7 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker B"
-    ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker B"
+    ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build --no-cache" || error_exit "Build failed on worker B"
     ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
@@ -90,7 +90,7 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker C"
-    ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker C"
+    ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build --no-cache" || error_exit "Build failed on worker C"
     ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker C"
     
     success "Worker C updated"
