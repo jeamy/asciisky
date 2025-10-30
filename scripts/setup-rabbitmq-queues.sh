@@ -22,6 +22,7 @@ echo "✅ RabbitMQ is ready!"
 echo "📦 Creating exchanges and queues..."
 
 # Exchange (via eval)
+echo "🔗 Creating computation.direct exchange..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
 rabbit_exchange:declare(
     {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
@@ -31,7 +32,8 @@ rabbit_exchange:declare(
     false,
     []
 ).
-" > /dev/null 2>&1 || echo "Exchange already exists or created"
+" 2>&1 || echo "Exchange creation failed or already exists"
+echo ""
 
 # Queues via rabbitmqctl
 echo "🌑 Creating asteroid.compute queue..."
@@ -43,7 +45,8 @@ rabbit_amqqueue:declare(
     [{<<\"x-queue-type\">>, longstr, <<\"quorum\">>}, {<<\"x-message-ttl\">>, long, 3600000}],
     none
 ).
-" > /dev/null 2>&1 || echo "Queue already exists"
+" 2>&1 || echo "Queue creation failed or already exists"
+echo ""
 
 echo "☄️  Creating comet.compute queue..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
@@ -54,7 +57,8 @@ rabbit_amqqueue:declare(
     [{<<\"x-queue-type\">>, longstr, <<\"quorum\">>}, {<<\"x-message-ttl\">>, long, 3600000}],
     none
 ).
-" > /dev/null 2>&1 || echo "Queue already exists"
+" 2>&1 || echo "Queue creation failed or already exists"
+echo ""
 
 echo "🔄 Creating precompute.tasks queue..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
@@ -65,7 +69,8 @@ rabbit_amqqueue:declare(
     [{<<\"x-max-priority\">>, long, 10}],
     none
 ).
-" > /dev/null 2>&1 || echo "Queue already exists"
+" 2>&1 || echo "Queue creation failed or already exists"
+echo ""
 
 echo "📊 Creating results and status queues..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
@@ -76,7 +81,7 @@ rabbit_amqqueue:declare(
     [],
     none
 ).
-" > /dev/null 2>&1 || echo "Queue already exists"
+" 2>&1 || echo "Queue creation failed or already exists"
 
 docker exec $CONTAINER_NAME rabbitmqctl eval "
 rabbit_amqqueue:declare(
@@ -86,7 +91,7 @@ rabbit_amqqueue:declare(
     [],
     none
 ).
-" > /dev/null 2>&1 || echo "Queue already exists"
+" 2>&1 || echo "Queue creation failed or already exists"
 
 echo ""
 echo "✅ All queues created successfully!"
