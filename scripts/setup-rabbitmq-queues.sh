@@ -23,7 +23,18 @@ echo "📦 Creating exchanges and queues..."
 
 # Exchange creation using rabbitmqadmin (built into RabbitMQ container)
 echo "🔗 Creating computation.direct exchange..."
-docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare exchange name=computation.direct type=direct durable=true > /dev/null 2>&1 || echo "Exchange already exists"
+echo "🔍 Debug: Before creation, checking existing exchanges..."
+docker exec $CONTAINER_NAME rabbitmqctl list_exchanges name type | grep -v "^amq\." | grep -v "^$"
+
+# First try to delete any existing computation.direct exchange
+echo "🧹 Cleaning up existing exchanges..."
+docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} delete exchange name=computation.direct 2>/dev/null || echo "No computation.direct to delete"
+
+echo "🔧 Executing: rabbitmqadmin declare exchange name=computation.direct type=direct durable=true"
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare exchange name=computation.direct type=direct durable=true" > /dev/null 2>&1 || echo "Exchange creation returned error"
+
+echo "🔍 Debug: After creation, checking exchanges..."
+docker exec $CONTAINER_NAME rabbitmqctl list_exchanges name type | grep -v "^amq\." | grep -v "^$"
 
 # Verify exchange was created
 if docker exec $CONTAINER_NAME rabbitmqctl list_exchanges | grep -q "computation.direct"; then
