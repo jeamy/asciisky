@@ -18,72 +18,40 @@ until docker exec $CONTAINER_NAME rabbitmqctl status > /dev/null 2>&1; do
 done
 echo "✅ RabbitMQ is ready!"
 
-# Create exchanges and queues via rabbitmqadmin
+# Create exchanges and queues via rabbitmqctl (direct Erlang commands)
 echo "📦 Creating exchanges and queues..."
 echo ""
 
-# Exchange creation
+# Exchange creation via rabbitmqctl
 echo "🔗 Creating computation.direct exchange..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare exchange name=computation.direct type=direct durable=true 2>&1; then
-    echo "✅ computation.direct exchange created"
-else
-    echo "⚠️ Exchange may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_exchange:declare({resource, <<"/">>, exchange, <<"computation.direct">>}, direct, true, false, false, []).' 2>&1 | grep -v "already_exists" || echo "✅ Exchange created or already exists"
 echo ""
 
-# Queues via rabbitmqadmin
+# Queues via rabbitmqctl  
 echo "🌑 Creating asteroid.compute queue..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=asteroid.compute durable=true 2>&1; then
-    echo "✅ asteroid.compute queue created"
-else
-    echo "⚠️ Queue may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"asteroid.compute">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
 echo ""
 
 echo "☄️  Creating comet.compute queue..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=comet.compute durable=true 2>&1; then
-    echo "✅ comet.compute queue created"
-else
-    echo "⚠️ Queue may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"comet.compute">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
 echo ""
 
 echo "🔄 Creating precompute.tasks queue..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=precompute.tasks durable=true arguments='{"x-max-priority":10}' 2>&1; then
-    echo "✅ precompute.tasks queue created with priority"
-else
-    echo "⚠️ Queue may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"precompute.tasks">>}, true, false, [{<<"x-max-priority">>, long, 10}], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
 echo ""
 
 echo "📊 Creating computation.results queue..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=computation.results durable=true 2>&1; then
-    echo "✅ computation.results queue created"
-else
-    echo "⚠️ Queue may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"computation.results">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
 echo ""
 
 echo "📊 Creating computation.status queue..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=computation.status durable=true 2>&1; then
-    echo "✅ computation.status queue created"
-else
-    echo "⚠️ Queue may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"computation.status">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
 echo ""
 
 echo "🔗 Binding queues to computation.direct exchange..."
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare binding source=computation.direct destination=asteroid.compute routing_key=asteroid.compute 2>&1; then
-    echo "✅ asteroid.compute bound to exchange"
-else
-    echo "⚠️ Binding may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_binding:add({resource, <<"/">>, exchange, <<"computation.direct">>}, <<"asteroid.compute">>, {resource, <<"/">>, queue, <<"asteroid.compute">>}, <<"asteroid.compute">>, []).' 2>&1 | grep -v "already_exists" || echo "✅ asteroid.compute bound"
 
-if docker exec $CONTAINER_NAME rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare binding source=computation.direct destination=comet.compute routing_key=comet.compute 2>&1; then
-    echo "✅ comet.compute bound to exchange"
-else
-    echo "⚠️ Binding may already exist"
-fi
+docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_binding:add({resource, <<"/">>, exchange, <<"computation.direct">>}, <<"comet.compute">>, {resource, <<"/">>, queue, <<"comet.compute">>}, <<"comet.compute">>, []).' 2>&1 | grep -v "already_exists" || echo "✅ comet.compute bound"
 echo ""
 
 echo ""
