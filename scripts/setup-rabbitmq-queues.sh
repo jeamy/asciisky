@@ -25,7 +25,7 @@ echo "📦 Creating exchanges and queues..."
 echo "🔗 Creating computation.direct exchange..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
 rabbit_exchange:declare(
-    {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
+    {resource, <<\"/\">>, exchange, <<"computation.direct">>},
     direct,
     true,
     false,

@@ -196,7 +196,7 @@ else
     echo "⚠️ computation.direct exchange not found - creating manually..."
     docker exec asciisky-rabbitmq rabbitmqctl eval "
     rabbit_exchange:declare(
-        {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
+        {resource, <<\"/\">>, exchange, <<"computation.direct">>},
         direct,
         true,
         false,
