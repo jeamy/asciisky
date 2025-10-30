@@ -45,28 +45,12 @@ else
     docker exec $CONTAINER_NAME rabbitmqctl list_exchanges name type
 fi
 
-# Queues via rabbitmqctl
+# Queues via rabbitmqadmin (simpler and more reliable)
 echo "🌑 Creating asteroid.compute queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval "
-rabbit_amqqueue:declare(
-    {resource, <<\"/\">>, queue, <<"asteroid.compute">>},
-    true,
-    false,
-    [{<<\"x-queue-type\">>, longstr, <<"quorum">>}, {<<\"x-message-ttl\">>, long, 3600000}],
-    none
-).
-" > /dev/null 2>&1 || echo "Queue already exists"
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=asteroid.compute durable=true" > /dev/null 2>&1 || echo "Queue already exists"
 
 echo "☄️  Creating comet.compute queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval "
-rabbit_amqqueue:declare(
-    {resource, <<\"/\">>, queue, <<"comet.compute">>},
-    true,
-    false,
-    [{<<\"x-queue-type\">>, longstr, <<"quorum">>}, {<<\"x-message-ttl\">>, long, 3600000}],
-    none
-).
-" > /dev/null 2>&1 || echo "Queue already exists"
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare queue name=comet.compute durable=true" > /dev/null 2>&1 || echo "Queue already exists"
 
 echo "🔄 Creating precompute.tasks queue..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
@@ -99,6 +83,10 @@ rabbit_amqqueue:declare(
     none
 ).
 " > /dev/null 2>&1 || echo "Queue already exists"
+
+echo "🔗 Binding queues to computation.direct exchange..."
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare binding source=computation.direct destination=asteroid.compute routing_key=asteroid.compute" > /dev/null 2>&1 || echo "Binding already exists"
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin -u ${RABBITMQ_USER} -p ${RABBITMQ_PASS} declare binding source=computation.direct destination=comet.compute routing_key=comet.compute" > /dev/null 2>&1 || echo "Binding already exists"
 
 echo ""
 echo "✅ All queues created successfully!"
