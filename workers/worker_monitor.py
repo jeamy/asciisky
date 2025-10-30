@@ -186,6 +186,8 @@ class WorkerMonitor:
     
     def _status_consumer_loop(self):
         """Consumer für Worker Status Messages"""
+        logger.info("🎧 Starting status consumer thread...")
+        
         def callback(ch, method, properties, body):
             try:
                 status_msg = json.loads(body)
@@ -202,20 +204,25 @@ class WorkerMonitor:
                 auto_ack=False
             )
             
+            logger.info("✅ Status consumer started, waiting for messages...")
+            
             # Start consuming (blocking)
             self.channel.start_consuming()
         
         except Exception as e:
-            logger.error(f"Status consumer error: {e}")
+            logger.error(f"❌ Status consumer error: {e}", exc_info=True)
     
     def _process_worker_status(self, status_msg: Dict[str, Any]):
         """Verarbeite Worker Status Message"""
         try:
-            worker_id = status_msg['worker_id']
+            worker_id = status_msg.get('worker_id', 'unknown')
+            logger.info(f"📥 Received status from worker: {worker_id}")
+            
             timestamp = datetime.fromisoformat(status_msg['timestamp'].replace('Z', '+00:00'))
             
             # Aktualisiere oder erstelle Worker Stats
             if worker_id not in self.workers:
+                logger.info(f"✨ New worker registered: {worker_id}")
                 self.workers[worker_id] = WorkerStats(
                     worker_id=worker_id,
                     worker_type=status_msg.get('worker_type', 'unknown'),
@@ -249,10 +256,10 @@ class WorkerMonitor:
             if worker.tasks_processed > 0:
                 worker.success_rate = (worker.tasks_processed - worker.tasks_failed) / worker.tasks_processed
             
-            logger.debug(f"Updated status for worker {worker_id}")
+            logger.debug(f"✅ Updated status for worker {worker_id}: {worker.tasks_processed} tasks, {worker.memory_usage_mb:.1f}MB")
             
         except Exception as e:
-            logger.error(f"Error processing worker status: {e}")
+            logger.error(f"❌ Error processing worker status: {e}", exc_info=True)
     
     def _update_system_stats(self):
         """Aktualisiere System-weite Statistiken"""

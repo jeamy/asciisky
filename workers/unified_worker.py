@@ -482,6 +482,10 @@ class UnifiedWorker:
         
         self.running = True
         
+        # Starte Heartbeat-Thread
+        heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        heartbeat_thread.start()
+        
         # Starte Consumer für alle Queues
         self.channel.basic_consume(
             queue='precompute.tasks',
@@ -503,23 +507,27 @@ class UnifiedWorker:
         
         logger.info(f"Worker {self.worker_id} started, consuming from all queues...")
         
+        # Sende initialen Heartbeat
+        self._log_health_status()
+        
         try:
-            while self.running:
-                # Non-blocking consume mit Timeout
-                method_frame, header_frame, body = self.channel.basic_get(queue='precompute.tasks', auto_ack=False)
-                if method_frame:
-                    self.callback(self.channel, method_frame, header_frame, body)
-                else:
-                    time.sleep(0.1)  # Kurze Pause
-                
-                # Health Check alle 30 Sekunden
-                if time.time() - self.metrics.last_task_time > 30:
-                    self._log_health_status()
+            # Blocking consume
+            self.channel.start_consuming()
         
         except KeyboardInterrupt:
             logger.info("Worker stopped by user")
         finally:
             self.stop()
+    
+    def _heartbeat_loop(self):
+        """Separater Thread für regelmäßige Heartbeats"""
+        while self.running:
+            try:
+                time.sleep(30)  # Alle 30 Sekunden
+                if self.running:
+                    self._log_health_status()
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
     
     def _log_health_status(self):
         """Logge und sende Health-Status"""
