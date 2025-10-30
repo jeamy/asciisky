@@ -101,7 +101,7 @@ class SharedSkyfieldResources:
             self.loader.verbose = False  # Reduziere Logging Overhead
             
             # Timescale mit optimierter Konfiguration
-            self.ts = self.loader.timescale(delta_t_recent_hours=48)
+            self.ts = self.loader.timescale()
             
             # Ephemeriden mit Caching
             self.eph = self.loader('de421.bsp')

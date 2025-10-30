@@ -22,6 +22,7 @@ echo "✅ RabbitMQ is ready!"
 echo "📦 Creating exchanges and queues..."
 
 # Exchange (via eval)
+echo "🔗 Creating computation.direct exchange..."
 docker exec $CONTAINER_NAME rabbitmqctl eval "
 rabbit_exchange:declare(
     {resource, <<\"/\">>, exchange, <<"computation.direct">>},
@@ -31,7 +32,16 @@ rabbit_exchange:declare(
     false,
     []
 ).
-" > /dev/null 2>&1 || echo "Exchange already exists or created"
+" || echo "⚠️ Exchange creation failed - trying alternative method..."
+
+# Alternative method to create exchange using rabbitmqadmin if available
+if command -v rabbitmqadmin &> /dev/null; then
+    echo "🔗 Creating exchange via rabbitmqadmin..."
+    docker exec $CONTAINER_NAME rabbitmqadmin declare exchange name=computation.direct type=durable durable=true || echo "Exchange already exists"
+else
+    echo "⚠️ rabbitmqadmin not available, checking if exchange exists..."
+    docker exec $CONTAINER_NAME rabbitmqctl list_exchanges | grep "computation.direct" || echo "❌ Exchange computation.direct not found"
+fi
 
 # Queues via rabbitmqctl
 echo "🌑 Creating asteroid.compute queue..."
@@ -93,6 +103,10 @@ echo "✅ All queues created successfully!"
 echo ""
 echo "🔍 Queue overview:"
 docker exec $CONTAINER_NAME rabbitmqctl list_queues name messages consumers
+
+echo ""
+echo "🔗 Exchange overview:"
+docker exec $CONTAINER_NAME rabbitmqctl list_exchanges name type durable
 
 echo ""
 echo "🌐 RabbitMQ Management UI: http://localhost:15672"
