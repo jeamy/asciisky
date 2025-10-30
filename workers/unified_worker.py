@@ -528,11 +528,49 @@ class UnifiedWorker:
             self.stop()
     
     def _log_health_status(self):
-        """Logge Health-Status"""
+        """Logge und sende Health-Status"""
         health = self.get_health_status()
         logger.info(f"Health Status: {health['tasks_processed']} tasks, "
                    f"{health['success_rate']:.2%} success rate, "
                    f"{health['memory_usage_mb']:.1f}MB memory")
+        
+        # Sende Heartbeat an worker.health Queue
+        try:
+            heartbeat_msg = {
+                'worker_id': self.worker_id,
+                'worker_type': 'unified',
+                'status': health['status'],
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'tasks_processed': health['tasks_processed'],
+                'tasks_failed': health['tasks_failed'],
+                'success_rate': health['success_rate'],
+                'memory_usage_mb': health['memory_usage_mb'],
+                'cpu_usage_percent': health['cpu_usage_percent'],
+                'uptime_seconds': health['uptime_seconds']
+            }
+            
+            props = pika.BasicProperties(
+                delivery_mode=1,  # Non-persistent (Heartbeats müssen nicht persistent sein)
+                content_type='application/json'
+            )
+            
+            # Sende an beide Queues
+            self.channel.basic_publish(
+                exchange='',
+                routing_key='worker.health',
+                properties=props,
+                body=json.dumps(heartbeat_msg)
+            )
+            
+            self.channel.basic_publish(
+                exchange='',
+                routing_key='computation.status',
+                properties=props,
+                body=json.dumps(heartbeat_msg)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error sending heartbeat: {e}")
     
     def stop(self):
         """Stoppe den Worker gracefully"""

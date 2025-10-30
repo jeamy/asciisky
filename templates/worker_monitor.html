@@ -59,6 +59,12 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
             padding: 20px;
+            height: 350px; /* Feste Höhe für Charts */
+            position: relative;
+        }
+        
+        .chart-container canvas {
+            max-height: 250px !important;
         }
         
         .chart-title {
@@ -278,7 +284,8 @@
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
                     plugins: {
                         legend: {
                             labels: { color: '#00ff00' }
@@ -291,7 +298,8 @@
                         },
                         y: {
                             ticks: { color: '#666' },
-                            grid: { color: '#333' }
+                            grid: { color: '#333' },
+                            beginAtZero: true
                         }
                     }
                 }
@@ -319,7 +327,8 @@
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
                     plugins: {
                         legend: {
                             labels: { color: '#00ff00' }
@@ -332,7 +341,8 @@
                         },
                         y: {
                             ticks: { color: '#666' },
-                            grid: { color: '#333' }
+                            grid: { color: '#333' },
+                            beginAtZero: true
                         }
                     }
                 }
