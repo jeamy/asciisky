@@ -241,14 +241,59 @@ def main():
             
             channel = connection.channel()
             
-            # Deklariere Queue
+            # Deklariere alle Queues (RabbitMQ 4.x kompatibel)
+            logger.info(f"[{WORKER_ID}] Declaring queues...")
+            
+            # Precompute Queue
             channel.queue_declare(
                 queue='precompute.tasks',
                 durable=True,
-                arguments={
-                    'x-max-priority': 10
-                }
+                arguments={'x-max-priority': 10}
             )
+            
+            # On-Demand Queues
+            channel.queue_declare(
+                queue='asteroid.compute',
+                durable=True
+            )
+            
+            channel.queue_declare(
+                queue='comet.compute',
+                durable=True
+            )
+            
+            # Results and Status Queues
+            channel.queue_declare(
+                queue='computation.results',
+                durable=True
+            )
+            
+            channel.queue_declare(
+                queue='computation.status',
+                durable=True
+            )
+            
+            # Exchange für On-Demand Computation
+            channel.exchange_declare(
+                exchange='computation.direct',
+                exchange_type='direct',
+                durable=True
+            )
+            
+            # Bindings
+            channel.queue_bind(
+                exchange='computation.direct',
+                queue='asteroid.compute',
+                routing_key='asteroid.compute'
+            )
+            
+            channel.queue_bind(
+                exchange='computation.direct',
+                queue='comet.compute',
+                routing_key='comet.compute'
+            )
+            
+            logger.info(f"[{WORKER_ID}] ✅ All queues and exchanges declared")
             
             # Fair Dispatch (nur 1 Task gleichzeitig pro Worker)
             channel.basic_qos(prefetch_count=prefetch_count)
