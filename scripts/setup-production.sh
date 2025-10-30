@@ -194,16 +194,7 @@ if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computati
     echo "✅ computation.direct exchange verified"
 else
     echo "⚠️ computation.direct exchange not found - creating manually..."
-    docker exec asciisky-rabbitmq rabbitmqctl eval "
-    rabbit_exchange:declare(
-        {resource, <<\"/\">>, exchange, <<"computation.direct">>},
-        direct,
-        true,
-        false,
-        false,
-        []
-    ).
-    " > /dev/null 2>&1 || error_exit "Failed to create computation.direct exchange"
+    docker exec asciisky-rabbitmq rabbitmqadmin -u ${RABBITMQ_USER:-admin} -p ${RABBITMQ_PASSWORD} declare exchange name=computation.direct type=direct durable=true || error_exit "Failed to create computation.direct exchange"
     
     # Final verification
     if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computation.direct"; then

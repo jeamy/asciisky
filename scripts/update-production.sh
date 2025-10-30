@@ -62,6 +62,15 @@ docker compose -f docker-compose.production.yml build || error_exit "Build faile
 echo "🚀 Restarting services with unified worker scaling..."
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
 
+# Verify RabbitMQ exchange exists after update
+echo "🔍 Verifying RabbitMQ exchange..."
+if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges 2>/dev/null | grep -q "computation.direct"; then
+    echo "✅ RabbitMQ exchange verified"
+else
+    warning "computation.direct exchange not found - creating..."
+    docker exec asciisky-rabbitmq rabbitmqadmin -u ${RABBITMQ_USER:-admin} -p ${RABBITMQ_PASSWORD} declare exchange name=computation.direct type=direct durable=true 2>/dev/null || warning "Could not create exchange"
+fi
+
 success "Main server updated"
 echo ""
 
