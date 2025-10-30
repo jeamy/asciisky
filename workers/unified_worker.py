@@ -253,13 +253,13 @@ class UnifiedWorker:
         self.channel.queue_bind(
             exchange='computation.direct',
             queue='asteroid.compute',
-            routing_key='asteroid.compute'
+            routing_key='compute.asteroid'
         )
         
         self.channel.queue_bind(
             exchange='computation.direct',
             queue='comet.compute',
-            routing_key='comet.compute'
+            routing_key='compute.comet'
         )
         
         logger.info("All queues and exchanges declared successfully")

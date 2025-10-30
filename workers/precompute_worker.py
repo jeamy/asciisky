@@ -284,13 +284,13 @@ def main():
             channel.queue_bind(
                 exchange='computation.direct',
                 queue='asteroid.compute',
-                routing_key='asteroid.compute'
+                routing_key='compute.asteroid'
             )
             
             channel.queue_bind(
                 exchange='computation.direct',
                 queue='comet.compute',
-                routing_key='comet.compute'
+                routing_key='compute.comet'
             )
             
             logger.info(f"[{WORKER_ID}] ✅ All queues and exchanges declared")
