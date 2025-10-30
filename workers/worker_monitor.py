@@ -111,11 +111,10 @@ class WorkerMonitor:
             self.connection = pika.BlockingConnection(params)
             self.channel = self.connection.channel()
             
-            # Status Queue deklarieren
+            # Status Queue deklarieren (muss mit Worker übereinstimmen: durable=True)
             self.channel.queue_declare(
                 queue='computation.status',
-                durable=False,
-                arguments={'x-message-ttl': 300000}
+                durable=True
             )
             
             # Health Check Queue
