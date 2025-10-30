@@ -59,7 +59,7 @@ git pull || error_exit "Git pull failed"
 echo "🔨 Building new images..."
 docker compose -f docker-compose.production.yml build || error_exit "Build failed"
 
-echo "🚀 Restarting services with worker scaling..."
+echo "🚀 Restarting services with unified worker scaling..."
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
 
 success "Main server updated"
@@ -73,7 +73,7 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     
     ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker B"
     ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker B"
-    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker B"
+    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
     echo ""
@@ -89,7 +89,7 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     
     ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker C"
     ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker C"
-    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale precompute_worker=\${PRECOMPUTE_WORKERS:-4} --scale asteroid_worker=\${ASTEROID_WORKERS:-2} --scale comet_worker=\${COMET_WORKERS:-2}" || error_exit "Restart failed on worker C"
+    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker C"
     
     success "Worker C updated"
     echo ""
@@ -106,12 +106,15 @@ docker compose -f docker-compose.production.yml ps
 echo ""
 echo "🔍 Monitoring:"
 echo "   RabbitMQ UI:        http://$RABBITMQ_MAIN:15672"
-echo "   Worker Connections: Should see 11 connections (8 compute + 3 precompute)"
+echo "   Worker Monitor:     http://$RABBITMQ_B:8080 (Unified Worker Dashboard)"
+echo "   Worker Connections: Should see unified workers + 3 precompute (main)"
 echo "   Precompute Queue:   Queues → precompute.tasks"
+echo "   Smart Interpolation: Enabled via ENABLE_SMART_INTERPOLATION=true"
 echo ""
 echo "📝 Useful commands:"
 echo "   docker logs -f asciisky-precompute-coordinator  # Precompute coordinator"
 echo "   docker compose -f docker-compose.production.yml logs -f precompute_worker  # Precompute worker (main)"
-echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f precompute_worker'"
-echo "   ssh $RABBITMQ_C 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f precompute_worker'"
+echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
+echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f worker_monitor'  # Worker monitor dashboard"
+echo "   ssh $RABBITMQ_C 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
 echo ""

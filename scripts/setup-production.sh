@@ -96,9 +96,34 @@ setup_host() {
         if ssh "$HOST" "[ -d ~/asciisky/.git ]"; then
             echo "📥 Repository exists, pulling latest changes..."
             ssh "$HOST" "cd ~/asciisky && git pull" || error_exit "Git pull failed on $HOST"
+            
+            # Verify we have the latest unified worker file
+            echo "🔍 Verifying docker-compose.workers.yml has unified_worker service..."
+            if ssh "$HOST" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
+                echo "✅ unified_worker service found in compose file"
+            else
+                echo "⚠️ unified_worker service not found. Forcing fresh clone..."
+                ssh "$HOST" "rm -rf ~/asciisky" || error_exit "Failed to remove old repository"
+                ssh "$HOST" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || error_exit "Git clone failed on $HOST"
+                
+                # Verify again after fresh clone
+                if ssh "$HOST" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
+                    echo "✅ unified_worker service found in fresh clone"
+                else
+                    error_exit "unified_worker service still not found after fresh clone on $HOST. Please check the repository."
+                fi
+            fi
         else
             echo "📥 Cloning repository from GitHub (HTTPS)..."
             ssh "$HOST" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || error_exit "Git clone failed on $HOST"
+            
+            # Verify the cloned repository has the unified worker
+            echo "🔍 Verifying cloned repository has unified_worker service..."
+            if ssh "$HOST" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
+                echo "✅ unified_worker service found in cloned repository"
+            else
+                error_exit "unified_worker service not found in cloned repository on $HOST. The repository may be outdated."
+            fi
         fi
         
         # Copy .env (with worker-specific fallback)
@@ -117,10 +142,19 @@ setup_host() {
         echo "🐳 Building and starting on remote host..."
         ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
         
+        # Verify the unified_worker service exists in the compose file
+        echo "🔍 Verifying unified_worker service in compose file..."
+        ssh "$HOST" "cd ~/asciisky && grep -q 'unified_worker:' $COMPOSE_FILE" || error_exit "unified_worker service not found in $COMPOSE_FILE on $HOST. Check if git pull succeeded."
+        
         # Worker scaling via --scale (from .env on remote host)
         if [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
             # NEU: Unified Worker Architecture mit Smart Interpolation
             echo "🚀 Starting OPTIMIZED Unified Workers on remote host..."
+            
+            # Debug: Show available services before starting
+            echo "🔍 Debug: Available services in $COMPOSE_FILE on $HOST:"
+            ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE config --services"
+            
             ssh "$HOST" "cd ~/asciisky && source .env && docker compose -f $COMPOSE_FILE up -d \
                 --scale unified_worker=\$(( \${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2} )) \
                 --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Startup failed on $HOST"
