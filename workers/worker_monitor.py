@@ -242,7 +242,7 @@ class WorkerMonitor:
         """Verarbeite Worker Status Message"""
         try:
             worker_id = status_msg.get('worker_id', 'unknown')
-            logger.info(f"📥 Received status from worker: {worker_id}")
+            #logger.info(f"📥 Received status from worker: {worker_id}")
             
             timestamp = datetime.fromisoformat(status_msg['timestamp'].replace('Z', '+00:00'))
             

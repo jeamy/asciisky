@@ -542,9 +542,10 @@ class UnifiedWorker:
     def _log_health_status(self):
         """Logge und sende Health-Status"""
         health = self.get_health_status()
-        logger.info(f"Health Status: {health['tasks_processed']} tasks, "
-                   f"{health['success_rate']:.2%} success rate, "
-                   f"{health['memory_usage_mb']:.1f}MB memory")
+
+        #logger.info(f"Health Status: {health['tasks_processed']} tasks, "
+                   #f"{health['success_rate']:.2%} success rate, "
+                   #f"{health['memory_usage_mb']:.1f}MB memory")
         
         # Sende Heartbeat an worker.health Queue
         try:
