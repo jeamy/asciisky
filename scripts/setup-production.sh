@@ -140,7 +140,7 @@ setup_host() {
         fi
         
         echo "🐳 Building images (always rebuild to ensure latest code)..."
-        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build --no-cache" || error_exit "Build failed on $HOST"
+        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
         
         # Verify the unified_worker service exists in the compose file
         echo "🔍 Verifying unified_worker service in compose file..."

@@ -291,10 +291,19 @@ class UnifiedWorker:
     
     def _process_precompute_task(self, task: Dict[str, Any]) -> bool:
         """Verarbeite Precompute Task (optimiert)"""
+        # Validiere Task-Struktur
+        if 'kind' not in task:
+            logger.error(f"Invalid precompute task: missing 'kind' field. Task: {task}")
+            return False
+        
         kind = task['kind']
-        location = task['location']
-        time_bucket_str = task['time_bucket']
-        magnitude = task['magnitude']
+        location = task.get('location', {})
+        time_bucket_str = task.get('time_bucket', '')
+        magnitude = task.get('magnitude', 20.0)
+        
+        if not location or not time_bucket_str:
+            logger.error(f"Invalid precompute task: missing required fields. Task: {task}")
+            return False
         
         lat, lon, elevation = location['latitude'], location['longitude'], location['elevation']
         dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))

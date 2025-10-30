@@ -119,6 +119,7 @@ class TaskPublisher:
         
         task_data = {
             'task_id': task_id,
+            'type': 'precompute',  # Task-Typ für unified_worker
             'kind': kind,
             'location': location,
             'time_bucket': time_bucket,
