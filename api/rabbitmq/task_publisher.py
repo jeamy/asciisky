@@ -56,6 +56,37 @@ class TaskPublisher:
                     durable=True
                 )
                 
+                # Queues deklarieren (RabbitMQ 4.x kompatibel)
+                # Idempotent: Wenn Queue existiert, passiert nichts
+                _thread_local.channel.queue_declare(
+                    queue='asteroid.compute',
+                    durable=True
+                )
+                
+                _thread_local.channel.queue_declare(
+                    queue='comet.compute',
+                    durable=True
+                )
+                
+                _thread_local.channel.queue_declare(
+                    queue='precompute.tasks',
+                    durable=True,
+                    arguments={'x-max-priority': 10}
+                )
+                
+                # Bindings
+                _thread_local.channel.queue_bind(
+                    exchange='computation.direct',
+                    queue='asteroid.compute',
+                    routing_key='compute.asteroid'
+                )
+                
+                _thread_local.channel.queue_bind(
+                    exchange='computation.direct',
+                    queue='comet.compute',
+                    routing_key='compute.comet'
+                )
+                
                 logger.info(f"TaskPublisher connected to RabbitMQ (thread {threading.current_thread().name})")
             except Exception as e:
                 logger.error(f"Failed to connect to RabbitMQ: {e}")

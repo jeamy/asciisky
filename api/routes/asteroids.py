@@ -45,7 +45,12 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                 channel = connection.channel()
                 logger.info(f"✅ Connected to RabbitMQ")
                 
-                # NICHT deklarieren - Queue existiert bereits als Quorum Queue (von Workern erstellt)
+                # Exchange deklarieren (MUSS existieren für basic_publish)
+                channel.exchange_declare(
+                    exchange='computation.direct',
+                    exchange_type='direct',
+                    durable=True
+                )
                 
                 # Task-Daten
                 task = {
