@@ -185,35 +185,12 @@ echo "⏳ Waiting for RabbitMQ to be ready..."
 sleep 10
 
 # Setup RabbitMQ Queues
-echo "🐰 Setting up RabbitMQ queues..."
-./scripts/setup-rabbitmq-queues.sh || error_exit "RabbitMQ queue setup failed"
+echo "🐰 Setting up RabbitMQ..."
+./scripts/setup-rabbitmq-queues.sh || error_exit "RabbitMQ setup failed"
 
-# Verify exchange was created properly
-echo "🔍 Verifying RabbitMQ exchange exists..."
-if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computation.direct"; then
-    echo "✅ computation.direct exchange verified"
-else
-    echo "⚠️ computation.direct exchange not found - creating manually..."
-    docker exec asciisky-rabbitmq rabbitmqctl eval "
-    rabbit_exchange:declare(
-        {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
-        direct,
-        true,
-        false,
-        false,
-        []
-    ).
-    " > /dev/null 2>&1 || error_exit "Failed to create computation.direct exchange"
-    
-    # Final verification
-    if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computation.direct"; then
-        echo "✅ computation.direct exchange created and verified"
-    else
-        error_exit "computation.direct exchange still not found after manual creation"
-    fi
-fi
+echo "ℹ️  Note: Queues will be automatically created when workers start (RabbitMQ 4.x)"
 
-success "RabbitMQ queues and exchanges created"
+success "RabbitMQ ready for workers"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

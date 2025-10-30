@@ -222,30 +222,27 @@ class UnifiedWorker:
         # On-Demand Queues (Smart Interpolation)
         self.channel.queue_declare(
             queue='asteroid.compute',
-            durable=True,
-            arguments={
-                'x-queue-type': 'quorum',
-                'x-message-ttl': 3600000  # 1 Stunde
-            }
+            durable=True
         )
         
         self.channel.queue_declare(
             queue='comet.compute',
-            durable=True,
-            arguments={
-                'x-queue-type': 'quorum',
-                'x-message-ttl': 3600000
-            }
+            durable=True
+        )
+        
+        # Results Queue
+        self.channel.queue_declare(
+            queue='computation.results',
+            durable=True
         )
         
         # Status Queue
         self.channel.queue_declare(
             queue='computation.status',
-            durable=False,
-            arguments={'x-message-ttl': 300000}  # 5 Minuten
+            durable=True
         )
         
-        # Exchange für Status
+        # Exchange für On-Demand Computation
         self.channel.exchange_declare(
             exchange='computation.direct',
             exchange_type='direct',
@@ -256,14 +253,16 @@ class UnifiedWorker:
         self.channel.queue_bind(
             exchange='computation.direct',
             queue='asteroid.compute',
-            routing_key='compute.asteroid'
+            routing_key='asteroid.compute'
         )
         
         self.channel.queue_bind(
             exchange='computation.direct',
             queue='comet.compute',
-            routing_key='compute.comet'
+            routing_key='comet.compute'
         )
+        
+        logger.info("All queues and exchanges declared successfully")
     
     def process_task(self, task: Dict[str, Any]) -> bool:
         """
