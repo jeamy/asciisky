@@ -163,15 +163,34 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
         user_id = request.session.get('user_id', 'anonymous')
         use_rabbitmq_flag = use_rabbitmq_for('comets', user_id)
         
+        # Feature Flag: Smart Interpolation aktivieren?
+        from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
+        use_smart_interpolation = is_smart_interpolation_enabled(user_id)
+        interpolation_strategy = get_interpolation_strategy(user_id)
+        
+        logger.info(f"User {user_id}: smart_interpolation={use_smart_interpolation}, strategy={interpolation_strategy.value}")
+        
         # Cache-First Strategie mit asynchroner Berechnung
         try:
             logger.info(f"Checking cache for comets: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
-            comet_list = load_comets_with_interpolation(
-                lat, lon, elevation, dt_utc,
-                bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
-                ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
-                use_postgres=True
-            )
+            
+            # Wähle Interpolationsmethode basierend auf Feature Flags
+            if use_smart_interpolation:
+                from api.smart_interpolation import load_comets_with_smart_interpolation
+                comet_list = load_comets_with_smart_interpolation(
+                    lat, lon, elevation, dt_utc,
+                    bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
+                    ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
+                    use_postgres=True
+                )
+            else:
+                # Original nearest-bucket strategy
+                comet_list = load_comets_with_interpolation(
+                    lat, lon, elevation, dt_utc,
+                    bucket_hours=comets.COMET_CACHE_BUCKET_HOURS,
+                    ttl_seconds=comets.COMET_CACHE_TTL_SECONDS,
+                    use_postgres=True
+                )
             
             if isinstance(comet_list, list) and comet_list:
                 logger.info(f"✅ Cache HIT for comets: {len(comet_list)} found")
