@@ -230,12 +230,6 @@ class UnifiedWorker:
             durable=True
         )
         
-        # Results Queue
-        self.channel.queue_declare(
-            queue='computation.results',
-            durable=True
-        )
-        
         # Status Queue
         self.channel.queue_declare(
             queue='computation.status',

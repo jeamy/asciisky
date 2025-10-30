@@ -262,12 +262,7 @@ def main():
                 durable=True
             )
             
-            # Results and Status Queues
-            channel.queue_declare(
-                queue='computation.results',
-                durable=True
-            )
-            
+            # Status Queue
             channel.queue_declare(
                 queue='computation.status',
                 durable=True
