@@ -79,8 +79,10 @@ setup_host() {
         elif [[ "$COMPOSE_FILE" == "docker-compose.workers.yml" ]]; then
             # NEU: Unified Worker Architecture mit Smart Interpolation
             echo "🚀 Starting OPTIMIZED Unified Workers..."
+            # UNIFIED_WORKERS können ALLE Tasks übernehmen (Precompute + Asteroids + Comets)
+            # NICHT addieren! Ein Unified Worker kann alles!
             docker compose -f "$COMPOSE_FILE" up -d \
-                --scale unified_worker=$(( ${PRECOMPUTE_WORKERS:-4} + ${ASTEROID_WORKERS:-2} + ${COMET_WORKERS:-2} )) \
+                --scale unified_worker=${UNIFIED_WORKERS:-${PRECOMPUTE_WORKERS:-8}} \
                 --scale worker_monitor=${WORKER_MONITOR:-1} || error_exit "Startup failed on $HOST"
             echo "✅ Unified Workers started with Smart Interpolation + Monitoring"
         else
@@ -155,8 +157,10 @@ setup_host() {
             echo "🔍 Debug: Available services in $COMPOSE_FILE on $HOST:"
             ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE config --services"
             
+            # UNIFIED_WORKERS können ALLE Tasks übernehmen (Precompute + Asteroids + Comets)
+            # NICHT addieren! Ein Unified Worker kann alles!
             ssh "$HOST" "cd ~/asciisky && source .env && docker compose -f $COMPOSE_FILE up -d \
-                --scale unified_worker=\$(( \${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2} )) \
+                --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} \
                 --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Startup failed on $HOST"
             echo "✅ Remote Unified Workers started with Smart Interpolation + Monitoring"
         else
@@ -225,8 +229,8 @@ echo "   PostgreSQL:     $RABBITMQ_MAIN:5432 (restricted to worker servers)"
 echo ""
 echo "👷 OPTIMIZED Workers (Unified Architecture):"
 echo "   Main Server:          ${PRECOMPUTE_WORKERS:-4} precompute workers"
-echo "   $RABBITMQ_B: $(( ${PRECOMPUTE_WORKERS:-4} + ${ASTEROID_WORKERS:-2} + ${COMET_WORKERS:-2} )) unified workers + 1 monitor"
-echo "   $RABBITMQ_C: $(( ${PRECOMPUTE_WORKERS:-4} + ${ASTEROID_WORKERS:-2} + ${COMET_WORKERS:-2} )) unified workers + 1 monitor"
+echo "   $RABBITMQ_B: ${UNIFIED_WORKERS:-8} unified workers + 1 monitor"
+echo "   $RABBITMQ_C: ${UNIFIED_WORKERS:-4} unified workers + 1 monitor"
 echo "   🚀 Performance Gains: -80% Memory, +35% Throughput, Real-time Monitoring"
 echo ""
 echo "📊 Worker Monitoring Dashboard:"

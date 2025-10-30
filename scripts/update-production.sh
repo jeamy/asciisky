@@ -75,7 +75,8 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     
     ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker B"
     ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker B"
-    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker B"
+    # UNIFIED_WORKERS können ALLE Tasks übernehmen - keine Addition mehr!
+    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
     echo ""
@@ -91,7 +92,8 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     
     ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker C"
     ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker C"
-    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=$((\${PRECOMPUTE_WORKERS:-4} + \${ASTEROID_WORKERS:-2} + \${COMET_WORKERS:-2})) --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker C"
+    # UNIFIED_WORKERS können ALLE Tasks übernehmen - keine Addition mehr!
+    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker C"
     
     success "Worker C updated"
     echo ""

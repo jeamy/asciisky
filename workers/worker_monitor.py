@@ -346,18 +346,18 @@ class WorkerMonitor:
             # Prüfe Heartbeat Timeout
             if current_time - worker.last_heartbeat > timeout_threshold:
                 worker.status = 'timeout'
-                logger.warning(f"Worker {worker_id} timeout - last heartbeat {worker.last_heartbeat}")
+#                logger.warning(f"Worker {worker_id} timeout - last heartbeat {worker.last_heartbeat}")
             
             # Prüfe Resource Limits
-            if worker.memory_usage_mb > 512:  # 512MB Limit
-                logger.warning(f"Worker {worker_id} high memory usage: {worker.memory_usage_mb:.1f}MB")
+#            if worker.memory_usage_mb > 512:  # 512MB Limit
+#                logger.warning(f"Worker {worker_id} high memory usage: {worker.memory_usage_mb:.1f}MB")
             
-            if worker.cpu_usage_percent > 90:  # 90% CPU Limit
-                logger.warning(f"Worker {worker_id} high CPU usage: {worker.cpu_usage_percent:.1f}%")
+#            if worker.cpu_usage_percent > 90:  # 90% CPU Limit
+#                logger.warning(f"Worker {worker_id} high CPU usage: {worker.cpu_usage_percent:.1f}%")
             
             # Prüfe Success Rate
-            if worker.success_rate < 0.8 and worker.tasks_processed > 10:  # <80% Success Rate
-                logger.warning(f"Worker {worker_id} low success rate: {worker.success_rate:.2%}")
+#            if worker.success_rate < 0.8 and worker.tasks_processed > 10:  # <80% Success Rate
+#                logger.warning(f"Worker {worker_id} low success rate: {worker.success_rate:.2%}")
     
     def _generate_recommendations(self):
         """Generiere Optimierungsempfehlungen"""
