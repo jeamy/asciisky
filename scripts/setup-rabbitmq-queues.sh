@@ -21,26 +21,14 @@ echo "✅ RabbitMQ is ready!"
 # Create exchanges and queues via rabbitmqctl (no extra dependencies required)
 echo "📦 Creating exchanges and queues..."
 
-# Exchange (via eval)
+# Exchange creation using rabbitmqadmin (more reliable)
 echo "🔗 Creating computation.direct exchange..."
-docker exec $CONTAINER_NAME rabbitmqctl eval "
-rabbit_exchange:declare(
-    {resource, <<\"/\">>, exchange, <<"computation.direct">>},
-    direct,
-    true,
-    false,
-    false,
-    []
-).
-" || echo "⚠️ Exchange creation failed - trying alternative method..."
+docker exec $CONTAINER_NAME sh -c "rabbitmqadmin declare exchange name=computation.direct type=direct durable=true" 2>/dev/null || echo "⚠️ rabbitmqadmin failed, trying eval method..."
 
-# Alternative method to create exchange using rabbitmqadmin if available
-if command -v rabbitmqadmin &> /dev/null; then
-    echo "🔗 Creating exchange via rabbitmqadmin..."
-    docker exec $CONTAINER_NAME rabbitmqadmin declare exchange name=computation.direct type=durable durable=true || echo "Exchange already exists"
-else
-    echo "⚠️ rabbitmqadmin not available, checking if exchange exists..."
-    docker exec $CONTAINER_NAME rabbitmqctl list_exchanges | grep "computation.direct" || echo "❌ Exchange computation.direct not found"
+# Fallback to eval if rabbitmqadmin fails
+if ! docker exec $CONTAINER_NAME rabbitmqctl list_exchanges | grep -q "computation.direct"; then
+    echo "🔗 Trying eval method..."
+    docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_exchange:declare({resource, <<"/">>, exchange, <<"computation.direct">>}, direct, true, false, false, []).' || echo "❌ All methods failed"
 fi
 
 # Queues via rabbitmqctl
