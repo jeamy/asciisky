@@ -269,6 +269,8 @@ class WorkerMonitor:
             self.system_stats.active_workers = sum(1 for w in self.workers.values() 
                                                   if w.status == 'active')
             
+            logger.debug(f"📊 System stats: {self.system_stats.total_workers} total workers, {self.system_stats.active_workers} active")
+            
             self.system_stats.total_tasks_processed = sum(w.tasks_processed for w in self.workers.values())
             self.system_stats.total_tasks_failed = sum(w.tasks_failed for w in self.workers.values())
             
@@ -285,8 +287,10 @@ class WorkerMonitor:
             # Queue Sizes
             self.system_stats.queue_sizes = self._get_queue_sizes()
             
+            logger.debug(f"✅ System stats updated: {self.system_stats.active_workers} workers, {self.system_stats.total_tasks_processed} tasks")
+            
         except Exception as e:
-            logger.error(f"Error updating system stats: {e}")
+            logger.error(f"❌ Error updating system stats: {e}", exc_info=True)
     
     def _get_queue_sizes(self) -> Dict[str, int]:
         """Hole Queue Größen von RabbitMQ"""

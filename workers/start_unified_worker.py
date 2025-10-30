@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import signal
+import socket
 import logging
 import argparse
 from pathlib import Path
@@ -33,9 +34,16 @@ logger = logging.getLogger(__name__)
 
 def parse_arguments():
     """Parse Kommandozeilen-Argumente"""
+    # Default Worker ID mit Hostname
+    default_worker_id = os.getenv('WORKER_ID')
+    if not default_worker_id or default_worker_id == 'unified-worker-${HOSTNAME:-unknown}':
+        # Fallback: Verwende tatsächlichen Hostname
+        hostname = socket.gethostname()
+        default_worker_id = f'unified-worker-{hostname}'
+    
     parser = argparse.ArgumentParser(description='Start Unified Worker')
     parser.add_argument('--worker-id', type=str, 
-                       default=os.getenv('WORKER_ID', f'unified-worker-{os.getpid()}'),
+                       default=default_worker_id,
                        help='Worker ID')
     parser.add_argument('--rabbitmq-url', type=str,
                        default=os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/'),

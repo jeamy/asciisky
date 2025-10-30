@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import json
+import socket
 import logging
 import signal
 import asyncio
@@ -627,7 +628,12 @@ def wait_for_database(worker_id: str):
 
 def main():
     """Hauptfunktion"""
-    worker_id = os.getenv('WORKER_ID', f'unified-worker-{os.getpid()}')
+    worker_id = os.getenv('WORKER_ID')
+    if not worker_id or worker_id == 'unified-worker-${HOSTNAME:-unknown}':
+        # Fallback: Verwende tatsächlichen Hostname
+        hostname = socket.gethostname()
+        worker_id = f'unified-worker-{hostname}'
+    
     rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     
     logger.info("=" * 60)
