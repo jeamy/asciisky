@@ -202,8 +202,8 @@ class WorkerMonitor:
                 auto_ack=False
             )
             
-            while self.monitoring_active:
-                self.channel.process_data_events(time_limit=1)
+            # Start consuming (blocking)
+            self.channel.start_consuming()
         
         except Exception as e:
             logger.error(f"Status consumer error: {e}")

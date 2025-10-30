@@ -111,16 +111,95 @@ async def shutdown_event():
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     """Worker Monitor Dashboard - using existing ASCII Sky styles"""
-    return FileResponse("templates/worker_monitor.html")
+    try:
+        return FileResponse("templates/worker_monitor.html")
+    except FileNotFoundError:
+        # Fallback: Einfaches HTML wenn Template fehlt
+        return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Worker Monitor</title>
+    <style>
+        body { font-family: monospace; max-width: 1200px; margin: 50px auto; padding: 20px; background: #0a0a0a; color: #00ff00; }
+        .status { padding: 20px; border: 1px solid #00ff00; margin: 20px 0; }
+        .error { border-color: #ff0000; color: #ff0000; }
+        .success { border-color: #00ff00; }
+        h1 { text-align: center; }
+        pre { background: #1a1a1a; padding: 15px; overflow-x: auto; }
+        .refresh { text-align: center; margin: 20px 0; }
+        button { background: #00ff00; color: #0a0a0a; border: none; padding: 10px 20px; cursor: pointer; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Worker Monitor Dashboard</h1>
+    <div class="status" id="status">
+        <h2>Loading...</h2>
+    </div>
+    <div class="refresh">
+        <button onclick="location.reload()">Refresh</button>
+    </div>
+    <script>
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/dashboard');
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = `
+                    <h2>✅ Monitor Active</h2>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `
+                    <h2>❌ Monitor Error</h2>
+                    <p>Error: ${error.message}</p>
+                    <p>Check if:</p>
+                    <ul>
+                        <li>RabbitMQ is running</li>
+                        <li>Workers are sending status messages</li>
+                        <li>computation.status queue exists</li>
+                    </ul>
+                `;
+            }
+        }
+        
+        loadStatus();
+        setInterval(loadStatus, 5000);
+    </script>
+</body>
+</html>
+        """, status_code=200)
 
 
 @app.get("/api/dashboard")
 async def get_dashboard_data():
     """Gibt Dashboard-Daten zurück"""
     if not monitor:
-        raise HTTPException(status_code=503, detail="Monitor not available")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Monitor not available",
+                "status": "unhealthy",
+                "message": "Worker monitor is not initialized. Check RabbitMQ connection."
+            }
+        )
     
-    return monitor.get_dashboard_data()
+    try:
+        return monitor.get_dashboard_data()
+    except Exception as e:
+        logger.error(f"Error getting dashboard data: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "status": "error",
+                "message": "Failed to retrieve dashboard data"
+            }
+        )
 
 
 @app.get("/api/workers/{worker_id}")
