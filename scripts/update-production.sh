@@ -68,7 +68,16 @@ if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges 2>/dev/null | grep -
     echo "✅ RabbitMQ exchange verified"
 else
     warning "computation.direct exchange not found - creating..."
-    docker exec asciisky-rabbitmq rabbitmqctl eval 'rabbit_exchange:declare({resource, <<"/">>, exchange, <<"computation.direct">>}, direct, true, false, false, []).' 2>&1 | grep -v "already_exists" || warning "Could not create exchange"
+    docker exec asciisky-rabbitmq rabbitmqctl eval "
+    rabbit_exchange:declare(
+        {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
+        direct,
+        true,
+        false,
+        false,
+        []
+    ).
+    " > /dev/null 2>&1 || warning "Could not create exchange"
 fi
 
 success "Main server updated"

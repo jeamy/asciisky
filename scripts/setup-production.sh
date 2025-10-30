@@ -194,7 +194,16 @@ if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computati
     echo "✅ computation.direct exchange verified"
 else
     echo "⚠️ computation.direct exchange not found - creating manually..."
-    docker exec asciisky-rabbitmq rabbitmqctl eval 'rabbit_exchange:declare({resource, <<"/">>, exchange, <<"computation.direct">>}, direct, true, false, false, []).' 2>&1 | grep -v "already_exists" || echo "Exchange created"
+    docker exec asciisky-rabbitmq rabbitmqctl eval "
+    rabbit_exchange:declare(
+        {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
+        direct,
+        true,
+        false,
+        false,
+        []
+    ).
+    " > /dev/null 2>&1 || error_exit "Failed to create computation.direct exchange"
     
     # Final verification
     if docker exec asciisky-rabbitmq rabbitmqctl list_exchanges | grep -q "computation.direct"; then

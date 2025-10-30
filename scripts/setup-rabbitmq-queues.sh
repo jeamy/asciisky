@@ -18,41 +18,75 @@ until docker exec $CONTAINER_NAME rabbitmqctl status > /dev/null 2>&1; do
 done
 echo "✅ RabbitMQ is ready!"
 
-# Create exchanges and queues via rabbitmqctl (direct Erlang commands)
+# Create exchanges and queues via rabbitmqctl (no extra dependencies required)
 echo "📦 Creating exchanges and queues..."
-echo ""
 
-# Exchange creation via rabbitmqctl
-echo "🔗 Creating computation.direct exchange..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_exchange:declare({resource, <<"/">>, exchange, <<"computation.direct">>}, direct, true, false, false, []).' 2>&1 | grep -v "already_exists" || echo "✅ Exchange created or already exists"
-echo ""
+# Exchange (via eval)
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_exchange:declare(
+    {resource, <<\"/\">>, exchange, <<\"computation.direct\">>},
+    direct,
+    true,
+    false,
+    false,
+    []
+).
+" > /dev/null 2>&1 || echo "Exchange already exists or created"
 
-# Queues via rabbitmqctl  
+# Queues via rabbitmqctl
 echo "🌑 Creating asteroid.compute queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"asteroid.compute">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
-echo ""
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_amqqueue:declare(
+    {resource, <<\"/\">>, queue, <<\"asteroid.compute\">>},
+    true,
+    false,
+    [{<<\"x-queue-type\">>, longstr, <<\"quorum\">>}, {<<\"x-message-ttl\">>, long, 3600000}],
+    none
+).
+" > /dev/null 2>&1 || echo "Queue already exists"
 
 echo "☄️  Creating comet.compute queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"comet.compute">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
-echo ""
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_amqqueue:declare(
+    {resource, <<\"/\">>, queue, <<\"comet.compute\">>},
+    true,
+    false,
+    [{<<\"x-queue-type\">>, longstr, <<\"quorum\">>}, {<<\"x-message-ttl\">>, long, 3600000}],
+    none
+).
+" > /dev/null 2>&1 || echo "Queue already exists"
 
 echo "🔄 Creating precompute.tasks queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"precompute.tasks">>}, true, false, [{<<"x-max-priority">>, long, 10}], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
-echo ""
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_amqqueue:declare(
+    {resource, <<\"/\">>, queue, <<\"precompute.tasks\">>},
+    true,
+    false,
+    [{<<\"x-max-priority\">>, long, 10}],
+    none
+).
+" > /dev/null 2>&1 || echo "Queue already exists"
 
-echo "📊 Creating computation.results queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"computation.results">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
-echo ""
+echo "📊 Creating results and status queues..."
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_amqqueue:declare(
+    {resource, <<\"/\">>, queue, <<\"computation.results\">>},
+    true,
+    false,
+    [],
+    none
+).
+" > /dev/null 2>&1 || echo "Queue already exists"
 
-echo "📊 Creating computation.status queue..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_amqqueue:declare({resource, <<"/">>, queue, <<"computation.status">>}, true, false, [], none).' 2>&1 | grep -v "already_exists" || echo "✅ Queue created or already exists"
-echo ""
-
-echo "🔗 Binding queues to computation.direct exchange..."
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_binding:add({resource, <<"/">>, exchange, <<"computation.direct">>}, <<"asteroid.compute">>, {resource, <<"/">>, queue, <<"asteroid.compute">>}, <<"asteroid.compute">>, []).' 2>&1 | grep -v "already_exists" || echo "✅ asteroid.compute bound"
-
-docker exec $CONTAINER_NAME rabbitmqctl eval 'rabbit_binding:add({resource, <<"/">>, exchange, <<"computation.direct">>}, <<"comet.compute">>, {resource, <<"/">>, queue, <<"comet.compute">>}, <<"comet.compute">>, []).' 2>&1 | grep -v "already_exists" || echo "✅ comet.compute bound"
-echo ""
+docker exec $CONTAINER_NAME rabbitmqctl eval "
+rabbit_amqqueue:declare(
+    {resource, <<\"/\">>, queue, <<\"computation.status\">>},
+    true,
+    false,
+    [],
+    none
+).
+" > /dev/null 2>&1 || echo "Queue already exists"
 
 echo ""
 echo "✅ All queues created successfully!"
@@ -61,22 +95,13 @@ echo "🔍 Queue overview:"
 docker exec $CONTAINER_NAME rabbitmqctl list_queues name messages consumers
 
 echo ""
-echo "🔗 Exchange overview:"
-docker exec $CONTAINER_NAME rabbitmqctl list_exchanges name type durable
-
-echo ""
 echo "🌐 RabbitMQ Management UI: http://localhost:15672"
 echo "   Username: $RABBITMQ_USER"
 echo "   Password: [from .env]"
 echo ""
 echo "📋 Created queues:"
-echo "   - asteroid.compute (durable)"
-echo "   - comet.compute (durable)"
-echo "   - precompute.tasks (durable, Priority 0-10)"
-echo "   - computation.results (durable)"
-echo "   - computation.status (durable)"
-echo ""
-echo "⚠️  Deprecated Features Warning:"
-echo "   RabbitMQ may show deprecated feature warnings."
-echo "   This is normal and doesn't affect functionality."
-echo "   To fix: Enable all feature flags in RabbitMQ management UI."
+echo "   - asteroid.compute (Quorum, TTL 1h)"
+echo "   - comet.compute (Quorum, TTL 1h)"
+echo "   - precompute.tasks (Classic, Priority 0-10)"
+echo "   - computation.results"
+echo "   - computation.status"
