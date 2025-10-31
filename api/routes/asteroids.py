@@ -56,7 +56,7 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                 # Task-Daten
                 task = {
                     'task_id': task_id,
-                    'kind': 'asteroid',  # Required for unified_worker
+                    'kind': 'asteroids',  # Required for unified_worker (plural!)
                     'location': {
                         'latitude': lat,
                         'longitude': lon,

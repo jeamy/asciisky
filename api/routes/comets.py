@@ -56,7 +56,7 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 # Task-Daten
                 task = {
                     'task_id': task_id,
-                    'kind': 'comet',  # Required for unified_worker
+                    'kind': 'comets',  # Required for unified_worker (plural!)
                     'location': {
                         'latitude': lat,
                         'longitude': lon,
