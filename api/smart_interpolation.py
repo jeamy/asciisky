@@ -192,7 +192,7 @@ def _apply_smart_strategy(
     # Case 1: Both buckets available → True interpolation
     if list1 and list2:
         logger.info(f"Both buckets available for {object_type} → performing smart interpolation")
-        return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc)
+        return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
     
     # Case 2: Only previous bucket available → Compute future bucket on-demand
     if list1 and not list2 and _config.on_demand_enabled:
@@ -201,7 +201,7 @@ def _apply_smart_strategy(
         if list2:
             if _config.cache_computed:
                 _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc)
+            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
         logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
         return list1
     
@@ -212,7 +212,7 @@ def _apply_smart_strategy(
         if list1:
             if _config.cache_computed:
                 _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc)
+            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
         
         # Fallback: Check if future bucket is within acceptable time range
         time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
@@ -233,7 +233,7 @@ def _apply_smart_strategy(
             if _config.cache_computed:
                 _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
                 _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc)
+            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
         
         # Return whatever we could compute
         return list1 or list2 or None
@@ -266,7 +266,7 @@ def _apply_on_demand_strategy(
         if _config.cache_computed:
             _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
             _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
-        return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc)
+        return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
     
     return list1 or list2 or None
 
@@ -408,7 +408,10 @@ def _interpolate_objects_smart(
     list1: List[Dict[str, Any]],
     list2: List[Dict[str, Any]],
     factor: float,
-    target_dt: datetime
+    target_dt: datetime,
+    lat: float = 0.0,
+    lon: float = 0.0,
+    elevation: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
     Perform smart interpolation with astronomical corrections.
@@ -417,10 +420,11 @@ def _interpolate_objects_smart(
         # Base interpolation
         interpolated = interpolate_object_list(list1, list2, factor)
         
-        # Apply astronomical corrections
+        # Apply astronomical corrections with location
+        location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         corrected = []
         for obj in interpolated:
-            corrected_obj = _apply_astronomical_corrections(obj, list1, list2, factor, target_dt)
+            corrected_obj = _apply_astronomical_corrections(obj, list1, list2, factor, target_dt, location)
             corrected.append(corrected_obj)
         
         logger.info(f"Smart interpolation completed for {object_type}: {len(corrected)} objects")
@@ -437,89 +441,30 @@ def _apply_astronomical_corrections(
     list1: List[Dict[str, Any]],
     list2: List[Dict[str, Any]],
     factor: float,
-    target_dt: datetime
+    target_dt: datetime,
+    location: Dict[str, float]
 ) -> Dict[str, Any]:
     """
     Apply astronomical corrections to interpolated object.
+    Uses the dedicated astronomical_corrections module.
     """
-    # TODO: Implement sophisticated astronomical corrections
-    # For now, return basic interpolated object
-    
-    # 1. Horizon event detection and correction
-    if _is_horizon_crossing(obj, list1, list2):
-        obj = _correct_horizon_crossing(obj, list1, list2, factor, target_dt)
-    
-    # 2. Magnitude smoothing
-    if 'magnitude' in obj:
-        obj['magnitude'] = _smooth_magnitude_interpolation(obj, list1, list2, factor)
-    
-    # 3. Rise/set/transit time recalculation (placeholder)
-    # obj = _recalculate_rise_set_transit(obj, target_dt)
-    
-    return obj
+    try:
+        from api.astronomical_corrections import apply_astronomical_corrections
+        
+        result = apply_astronomical_corrections(obj, list1, list2, factor, target_dt, location)
+        return result.corrected_object
+        
+    except Exception as e:
+        logger.error(f"Astronomical corrections failed for {obj.get('name')}: {e}")
+        # Fallback: return uncorrected object
+        return obj
 
 
-def _is_horizon_crossing(
-    obj: Dict[str, Any],
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]]
-) -> bool:
-    """
-    Detect if object crosses horizon between buckets.
-    """
-    obj1 = _find_object_by_name(list1, obj.get('name'))
-    obj2 = _find_object_by_name(list2, obj.get('name'))
-    
-    if not obj1 or not obj2:
-        return False
-    
-    alt1 = obj1.get('altitude', -999)
-    alt2 = obj2.get('altitude', -999)
-    
-    # Horizon crossing: one bucket above, other below 0°
-    return (alt1 > 0 and alt2 <= 0) or (alt1 <= 0 and alt2 > 0)
-
-
-def _correct_horizon_crossing(
-    obj: Dict[str, Any],
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]],
-    factor: float,
-    target_dt: datetime
-) -> Dict[str, Any]:
-    """
-    Apply special correction for horizon crossing events.
-    """
-    # TODO: Implement sophisticated horizon crossing correction
-    # For now, ensure altitude is properly interpolated
-    return obj
-
-
-def _smooth_magnitude_interpolation(
-    obj: Dict[str, Any],
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]],
-    factor: float
-) -> float:
-    """
-    Apply smoothing to magnitude interpolation.
-    """
-    # TODO: Implement magnitude smoothing
-    # For now, return basic interpolated magnitude
-    return obj.get('magnitude', 99)
-
-
-def _find_object_by_name(object_list: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
-    """
-    Find object in list by name.
-    """
-    if not name:
-        return None
-    
-    for obj in object_list:
-        if obj.get('name') == name:
-            return obj
-    return None
+# Removed duplicate functions - now using astronomical_corrections module:
+# - _is_horizon_crossing() → use astronomical_corrections.py
+# - _correct_horizon_crossing() → use astronomical_corrections.py
+# - _smooth_magnitude_interpolation() → use astronomical_corrections.py
+# - _find_object_by_name() → use astronomical_corrections.py
 
 
 def _load_with_nearest_bucket_asteroids(
