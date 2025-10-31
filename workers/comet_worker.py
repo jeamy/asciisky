@@ -109,8 +109,10 @@ class CometWorker:
                 elevation_m=location_dict.get('elevation', 0)
             )
             
-            # Zeit parsen
+            # Zeit parsen und auf Bucket-Boundary runden!
             time_bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
+            # Runde auf Stunden-Boundary (z.B. 20:15 → 20:00)
+            time_bucket_dt = time_bucket_dt.replace(minute=0, second=0, microsecond=0)
             
             # Kometen berechnen UND in Cache speichern
             comet_list = comets.load_comets(
@@ -137,22 +139,38 @@ class CometWorker:
             body: Message body
         """
         start_time = time.time()
+        computation_key = None
         
         try:
             # Request parsen
             request = json.loads(body)
             task_id = request.get('task_id', 'unknown')
             location = request['location']
-            time_bucket = request.get('time_bucket') or request['time_range']['start']
+            time_bucket_str = request.get('time_bucket') or request['time_range']['start']
             magnitude = request.get('magnitude', 14.0)
             
             logger.info(f"Processing task {task_id}")
+            
+            # Berechne Lock-Key (gleiche Logik wie API!)
+            from datetime import datetime
+            bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
+            bucket_dt = bucket_dt.replace(minute=0, second=0, microsecond=0)
+            
+            from cache_utils import normalize_location, location_key, time_bucket_utc
+            lat_norm, lon_norm, elev_norm = normalize_location(
+                location['latitude'], location['longitude'], location.get('elevation', 0)
+            )
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            bucket_key = time_bucket_utc(bucket_dt, 1)
+            computation_key = f"computing:comet:{loc_key}:{bucket_key}"
+            
+            logger.info(f"🔒 Computing bucket: {computation_key}")
             
             # Status: Started
             self.publish_status(task_id, 'started', 0, None)
             
             # Berechnung - Ergebnisse werden automatisch in Cache/DB gespeichert
-            results = self.compute_comets(location, time_bucket, magnitude)
+            results = self.compute_comets(location, time_bucket_str, magnitude)
             
             # Status: Completed
             self.publish_status(task_id, 'completed', 100, None)
@@ -161,18 +179,29 @@ class CometWorker:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             
             duration = time.time() - start_time
-            logger.info(f"Task {task_id} completed in {duration:.2f}s")
+            logger.info(f"✅ Task {task_id} completed in {duration:.2f}s")
             
         except Exception as e:
-            logger.error(f"Error processing task: {e}", exc_info=True)
+            logger.error(f"❌ Error processing task: {e}", exc_info=True)
             
             # NACK mit Requeue (max 3x)
             if hasattr(method, 'redelivered') and method.redelivered:
+                # Bereits redelivered -> nicht mehr requeuen
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 logger.error("Task failed after retry, moved to DLQ")
             else:
+                # Ersten Fehler -> requeuen
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                 logger.warning("Task failed, requeued for retry")
+        finally:
+            # Lock IMMER löschen (auch bei Fehler!)
+            if computation_key:
+                try:
+                    from db_utils import clear_computation_lock
+                    clear_computation_lock(computation_key)
+                    logger.info(f"🔓 Cleared lock: {computation_key}")
+                except Exception as e:
+                    logger.error(f"Failed to clear lock {computation_key}: {e}")
     
     def publish_status(self, task_id, status, progress, correlation_id=None):
         """

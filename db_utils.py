@@ -275,3 +275,48 @@ def get_database_stats() -> dict:
         'comets_count': comet_df_count
     }
 
+# ===== Computation Lock Functions =====
+
+def is_computation_in_progress(computation_key: str) -> bool:
+    """Check if a computation is already in progress."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT COUNT(*) as count FROM computation_locks
+        WHERE lock_key = %s
+          AND expires_at > NOW()
+    """, (computation_key,))
+    
+    row = cursor.fetchone()
+    return row['count'] > 0 if row else False
+
+def mark_computation_in_progress(computation_key: str, ttl_seconds: int = 300) -> None:
+    """Mark a computation as in progress."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO computation_locks (lock_key, created_at, expires_at)
+            VALUES (%s, NOW(), NOW() + INTERVAL '%s seconds')
+            ON CONFLICT (lock_key) DO UPDATE SET
+                created_at = NOW(),
+                expires_at = NOW() + INTERVAL '%s seconds'
+        """, (computation_key, ttl_seconds, ttl_seconds))
+
+def clear_computation_lock(computation_key: str) -> None:
+    """Clear a computation lock (called by worker when done)."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM computation_locks WHERE lock_key = %s
+        """, (computation_key,))
+
+def cleanup_expired_locks() -> int:
+    """Remove expired computation locks. Returns number of removed locks."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM computation_locks WHERE expires_at < NOW()
+        """)
+        return cursor.rowcount
+

@@ -174,6 +174,11 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
         try:
             logger.info(f"Checking cache for asteroids: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
             
+            # Berechne Bucket-Zeit (gleiche Logik wie Worker!)
+            from cache_utils import time_bucket_utc
+            bucket_dt = dt_utc.replace(minute=0, second=0, microsecond=0)
+            bucket_key = time_bucket_utc(bucket_dt, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
+            
             # Wähle Interpolationsmethode basierend auf Feature Flags
             if use_smart_interpolation:
                 from api.smart_interpolation import load_asteroids_with_smart_interpolation
@@ -195,11 +200,26 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
             if isinstance(asteroid_list, list) and asteroid_list:
                 logger.info(f"✅ Cache HIT for asteroids: {len(asteroid_list)} found")
             else:
-                # Cache-Miss: Triggere Asteroid-Worker
-                logger.warning(f"❌ Cache MISS - triggering asteroid worker for {dt_utc.isoformat()}")
-                # Starte Task als FastAPI Background Task (läuft NACH Response)
-                background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, dt_utc)
-                asteroid_list = []  # Gib zurück was im Cache ist (leer)
+                # Cache-Miss: Prüfe ob Berechnung bereits läuft
+                from cache_utils import normalize_location, location_key
+                lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+                loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                
+                computation_key = f"computing:asteroid:{loc_key}:{bucket_key}"
+                
+                # Prüfe ob bereits in Berechnung
+                from db_utils import is_computation_in_progress, mark_computation_in_progress
+                if is_computation_in_progress(computation_key):
+                    logger.info(f"⏳ Computation already in progress for bucket {bucket_key}")
+                    asteroid_list = []  # Warte auf laufende Berechnung
+                else:
+                    # Markiere als "in progress" und trigger Worker
+                    mark_computation_in_progress(computation_key, ttl_seconds=300)  # 5 Min Timeout
+                    logger.warning(f"❌ Cache MISS - triggering asteroid worker for bucket {bucket_key}")
+                    # Starte Task als FastAPI Background Task (läuft NACH Response)
+                    # Wichtig: Übergebe BUCKET-Zeit, nicht Request-Zeit!
+                    background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, bucket_dt)
+                    asteroid_list = []  # Gib zurück was im Cache ist (leer)
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")
             # Triggere trotzdem Asteroid-Worker
