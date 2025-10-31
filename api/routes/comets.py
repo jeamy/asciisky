@@ -52,12 +52,18 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                     durable=True
                 )
                 
+                task_id = f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}"
                 # Task-Daten
                 task = {
-                    'task_id': f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-                    'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                    'task_id': task_id,
+                    'kind': 'comet',  # Required for unified_worker
+                    'location': {
+                        'latitude': lat,
+                        'longitude': lon,
+                        'elevation': elevation
+                    },
                     'time_bucket': dt_utc.isoformat(),
-                    'magnitude': 14.0
+                    'magnitude': 14.0  # Max magnitude for comets
                 }
                 
                 logger.info(f"📤 Publishing task: {task['task_id']}")

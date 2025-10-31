@@ -52,12 +52,18 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                     durable=True
                 )
                 
+                task_id = f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}"
                 # Task-Daten
                 task = {
-                    'task_id': f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-                    'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                    'task_id': task_id,
+                    'kind': 'asteroid',  # Required for unified_worker
+                    'location': {
+                        'latitude': lat,
+                        'longitude': lon,
+                        'elevation': elevation
+                    },
                     'time_bucket': dt_utc.isoformat(),
-                    'magnitude': 20.0
+                    'magnitude': 20.0  # Max magnitude for asteroids
                 }
                 
                 logger.info(f"📤 Publishing task: {task['task_id']}")
