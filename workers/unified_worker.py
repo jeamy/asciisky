@@ -40,7 +40,10 @@ from db_utils import store_asteroid_positions, store_comet_positions
 from api.on_demand_computation import OnDemandComputationService
 from api.astronomical_corrections import AstronomicalCorrector
 from config.interpolation_config import get_interpolation_config
-from workers.worker_utils import wait_for_database as wait_for_db
+
+# Worker Utils (same directory)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import worker_utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -608,7 +611,7 @@ class UnifiedWorker:
 
 def wait_for_database(worker_id: str):
     """Wrapper for backward compatibility with start_unified_worker.py"""
-    return wait_for_db(worker_id, check_both=True)
+    return worker_utils.wait_for_database(worker_id, check_both=True)
 
 
 def main():

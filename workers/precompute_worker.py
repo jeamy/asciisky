@@ -30,7 +30,10 @@ import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import store_asteroid_positions, store_comet_positions
-from workers.worker_utils import wait_for_database, declare_computation_queues, setup_rabbitmq_connection
+
+# Worker Utils (same directory)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import worker_utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -222,7 +225,7 @@ def main():
     while True:
         try:
             # Verbinde zu RabbitMQ
-            connection = setup_rabbitmq_connection(rabbitmq_url, heartbeat=0)
+            connection = worker_utils.setup_rabbitmq_connection(rabbitmq_url, heartbeat=0)
             if not connection:
                 logger.error("Cannot connect to RabbitMQ - retrying in 10s...")
                 time.sleep(10)
@@ -232,7 +235,7 @@ def main():
             
             # Deklariere alle Queues
             logger.info(f"[{WORKER_ID}] Declaring queues...")
-            declare_computation_queues(channel)
+            worker_utils.declare_computation_queues(channel)
             logger.info(f"[{WORKER_ID}] ✅ All queues declared")
             
             # Fair Dispatch (nur 1 Task gleichzeitig pro Worker)
@@ -264,7 +267,7 @@ def main():
 
 if __name__ == '__main__':
     # Warte bis Daten vorhanden sind
-    if not wait_for_database(WORKER_ID, check_both=True):
+    if not worker_utils.wait_for_database(WORKER_ID, check_both=True):
         sys.exit(1)
     
     # Starte Worker

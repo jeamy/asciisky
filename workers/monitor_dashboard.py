@@ -29,7 +29,8 @@ import uvicorn
 
 # ASCII Sky Imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from workers.worker_monitor import WorkerMonitor
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # For worker modules
+from worker_monitor import WorkerMonitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

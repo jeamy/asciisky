@@ -16,10 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 from api.computation import LOADER, ts, eph
 from skyfield.api import wgs84
-from workers.worker_utils import (
-    wait_for_database, compute_lock_key, clear_lock_safely,
-    round_to_bucket_boundary, publish_worker_status, WorkerContext
-)
+
+# Worker Utils (same directory)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import worker_utils
 
 logging.basicConfig(
     level=logging.INFO,
@@ -114,7 +114,7 @@ class AsteroidWorker:
             )
             
             # Zeit parsen und auf Bucket-Boundary runden!
-            time_bucket_dt = round_to_bucket_boundary(time_bucket_str)
+            time_bucket_dt = worker_utils.round_to_bucket_boundary(time_bucket_str)
             
             # Asteroiden berechnen UND in Cache speichern
             asteroids = bright_asteroids.load_bright_asteroids(
@@ -155,17 +155,17 @@ class AsteroidWorker:
             logger.info(f"Processing task {task_id}")
             
             # Berechne Lock-Key
-            computation_key = compute_lock_key('asteroid', location, time_bucket_str)
+            computation_key = worker_utils.compute_lock_key('asteroid', location, time_bucket_str)
             logger.info(f"🔒 Computing bucket: {computation_key}")
             
             # Status: Started
-            publish_worker_status(self.channel, self.worker_id, task_id, 'started', 0)
+            worker_utils.publish_worker_status(self.channel, self.worker_id, task_id, 'started', 0)
             
             # Berechnung - Ergebnisse werden automatisch in Cache/DB gespeichert
             results = self.compute_asteroids(location, time_bucket_str, magnitude)
             
             # Status: Completed
-            publish_worker_status(self.channel, self.worker_id, task_id, 'completed', 100)
+            worker_utils.publish_worker_status(self.channel, self.worker_id, task_id, 'completed', 100)
             
             # ACK - Task erfolgreich verarbeitet und in Cache gespeichert
             ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -187,7 +187,7 @@ class AsteroidWorker:
                 logger.warning("Task failed, requeued for retry")
         finally:
             # Lock IMMER löschen (auch bei Fehler!)
-            clear_lock_safely(computation_key)
+            worker_utils.clear_lock_safely(computation_key)
     
     # Removed: publish_status() - now using worker_utils.publish_worker_status()
     
@@ -228,7 +228,7 @@ if __name__ == '__main__':
     rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     
     # Warte bis Daten vorhanden sind
-    if not wait_for_database(worker_id, check_both=False):
+    if not worker_utils.wait_for_database(worker_id, check_both=False):
         sys.exit(1)
     
     # Worker starten

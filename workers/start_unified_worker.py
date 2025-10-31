@@ -21,8 +21,9 @@ from pathlib import Path
 
 # Pfad anpassen für Imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))  # For worker modules
 
-from workers.unified_worker import UnifiedWorker, wait_for_database
+from unified_worker import UnifiedWorker, wait_for_database
 from config.interpolation_config import get_interpolation_config
 
 logging.basicConfig(
