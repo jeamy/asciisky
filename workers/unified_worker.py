@@ -40,6 +40,7 @@ from db_utils import store_asteroid_positions, store_comet_positions
 from api.on_demand_computation import OnDemandComputationService
 from api.astronomical_corrections import AstronomicalCorrector
 from config.interpolation_config import get_interpolation_config
+from workers.worker_utils import wait_for_database as wait_for_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -603,37 +604,11 @@ class UnifiedWorker:
         logger.info(f"Worker {self.worker_id} stopped. Final stats: {health}")
 
 
+# Removed: wait_for_database() - now using worker_utils.wait_for_database()
+
 def wait_for_database(worker_id: str):
-    """Warte bis Datenbank bereit ist (optimiert)"""
-    from db_utils import get_asteroid_dataframe, get_comet_dataframe
-    
-    logger.info(f"[{worker_id}] Checking database readiness...")
-    
-    max_wait = 600
-    check_interval = 30
-    waited = 0
-    
-    while waited < max_wait:
-        try:
-            asteroid_df = get_asteroid_dataframe()
-            comet_df = get_comet_dataframe()
-            
-            if asteroid_df is not None and comet_df is not None:
-                logger.info(f"[{worker_id}] ✅ Database ready")
-                return True
-            else:
-                if waited == 0:
-                    logger.info(f"[{worker_id}] ⏳ Waiting for database...")
-                waited += check_interval
-                time.sleep(check_interval)
-        except Exception as e:
-            if waited == 0:
-                logger.warning(f"[{worker_id}] Database not ready: {e}")
-            waited += check_interval
-            time.sleep(check_interval)
-    
-    logger.error(f"[{worker_id}] ❌ Database timeout after {max_wait}s")
-    return False
+    """Wrapper for backward compatibility with start_unified_worker.py"""
+    return wait_for_db(worker_id, check_both=True)
 
 
 def main():

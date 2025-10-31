@@ -16,6 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import comets
 from api.computation import LOADER, ts, eph
 from skyfield.api import wgs84
+from workers.worker_utils import (
+    wait_for_database, compute_lock_key, clear_lock_safely,
+    round_to_bucket_boundary, publish_worker_status, WorkerContext
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -110,9 +114,7 @@ class CometWorker:
             )
             
             # Zeit parsen und auf Bucket-Boundary runden!
-            time_bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
-            # Runde auf Stunden-Boundary (z.B. 20:15 → 20:00)
-            time_bucket_dt = time_bucket_dt.replace(minute=0, second=0, microsecond=0)
+            time_bucket_dt = round_to_bucket_boundary(time_bucket_str)
             
             # Kometen berechnen UND in Cache speichern
             comet_list = comets.load_comets(
@@ -151,29 +153,18 @@ class CometWorker:
             
             logger.info(f"Processing task {task_id}")
             
-            # Berechne Lock-Key (gleiche Logik wie API!)
-            from datetime import datetime
-            bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
-            bucket_dt = bucket_dt.replace(minute=0, second=0, microsecond=0)
-            
-            from cache_utils import normalize_location, location_key, time_bucket_utc
-            lat_norm, lon_norm, elev_norm = normalize_location(
-                location['latitude'], location['longitude'], location.get('elevation', 0)
-            )
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            bucket_key = time_bucket_utc(bucket_dt, 1)
-            computation_key = f"computing:comet:{loc_key}:{bucket_key}"
-            
+            # Berechne Lock-Key
+            computation_key = compute_lock_key('comet', location, time_bucket_str)
             logger.info(f"🔒 Computing bucket: {computation_key}")
             
             # Status: Started
-            self.publish_status(task_id, 'started', 0, None)
+            publish_worker_status(self.channel, self.worker_id, task_id, 'started', 0)
             
             # Berechnung - Ergebnisse werden automatisch in Cache/DB gespeichert
             results = self.compute_comets(location, time_bucket_str, magnitude)
             
             # Status: Completed
-            self.publish_status(task_id, 'completed', 100, None)
+            publish_worker_status(self.channel, self.worker_id, task_id, 'completed', 100)
             
             # ACK - Task erfolgreich verarbeitet und in Cache gespeichert
             ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -195,49 +186,9 @@ class CometWorker:
                 logger.warning("Task failed, requeued for retry")
         finally:
             # Lock IMMER löschen (auch bei Fehler!)
-            if computation_key:
-                try:
-                    from db_utils import clear_computation_lock
-                    clear_computation_lock(computation_key)
-                    logger.info(f"🔓 Cleared lock: {computation_key}")
-                except Exception as e:
-                    logger.error(f"Failed to clear lock {computation_key}: {e}")
+            clear_lock_safely(computation_key)
     
-    def publish_status(self, task_id, status, progress, correlation_id=None):
-        """
-        Publiziert Status-Update
-        
-        Args:
-            task_id: Task-ID
-            status: Status ('started', 'progress', 'completed', 'failed')
-            progress: Fortschritt (0-100)
-            correlation_id: Optional Correlation-ID
-        """
-        try:
-            status_msg = {
-                'task_id': task_id,
-                'status': status,
-                'progress': progress,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'worker_id': self.worker_id
-            }
-            
-            props = pika.BasicProperties(
-                delivery_mode=1,
-                content_type='application/json'
-            )
-            if correlation_id:
-                props.correlation_id = correlation_id
-            
-            self.channel.basic_publish(
-                exchange='',
-                routing_key='computation.status',
-                properties=props,
-                body=json.dumps(status_msg)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error publishing status: {e}")
+    # Removed: publish_status() - now using worker_utils.publish_worker_status()
     
     def start(self):
         """Startet Worker"""
@@ -267,49 +218,17 @@ class CometWorker:
             logger.error(f"Error stopping worker: {e}")
 
 
-def wait_for_database():
-    """Warte bis Daten in PostgreSQL vorhanden sind"""
-    from db_utils import get_comet_dataframe
-    import time
-    
-    worker_id = os.getenv('WORKER_ID', 'comet-worker')
-    logger.info(f"[{worker_id}] Checking if database has data...")
-    
-    max_wait = 600  # 10 Minuten
-    check_interval = 30  # Alle 30 Sekunden prüfen
-    waited = 0
-    
-    while waited < max_wait:
-        try:
-            comet_df = get_comet_dataframe()
-            
-            if comet_df:
-                logger.info(f"[{worker_id}] ✅ Database has data - starting worker")
-                return True
-            else:
-                if waited == 0:
-                    logger.info(f"[{worker_id}] ⏳ Waiting for data_updater to populate database...")
-                waited += check_interval
-                time.sleep(check_interval)
-        except Exception as e:
-            if waited == 0:
-                logger.warning(f"[{worker_id}] Database not ready: {e}")
-                logger.info(f"[{worker_id}] ⏳ Waiting for database...")
-            waited += check_interval
-            time.sleep(check_interval)
-    
-    logger.error(f"[{worker_id}] ❌ Timeout waiting for database data after {max_wait}s")
-    return False
+# Removed: wait_for_database() - now using worker_utils.wait_for_database()
 
 
 if __name__ == '__main__':
-    # Warte bis Daten vorhanden sind
-    if not wait_for_database():
-        sys.exit(1)
-    
     # Konfiguration aus ENV
-    rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     worker_id = os.environ.get('WORKER_ID', 'comet-worker-1')
+    rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    
+    # Warte bis Daten vorhanden sind
+    if not wait_for_database(worker_id, check_both=False):
+        sys.exit(1)
     
     # Worker starten
     worker = CometWorker(rabbitmq_url, worker_id)
