@@ -14,6 +14,17 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+      
+      # Performance Tuning (8 Cores, 16GB RAM, SSD - max 8GB für App)
+      # KONSERVATIV: Defaults funktionierten, nur SSD-Optimierung + moderater Cache
+      - POSTGRES_SHARED_BUFFERS=512MB         # 2GB RAM für PostgreSQL, 512MB Cache
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB  # 75% of 2GB PostgreSQL RAM
+      - POSTGRES_WORK_MEM=16MB                # Größer als Default (4MB) für DataFrames
+      - POSTGRES_MAINTENANCE_WORK_MEM=256MB   # Für VACUUM, CREATE INDEX
+      - POSTGRES_MAX_CONNECTIONS=100          # Default beibehalten
+      - POSTGRES_RANDOM_PAGE_COST=1.1         # SSD-Optimierung (Default: 4.0)
+      - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200 # SSD-Optimierung (Default: 1)
+      - POSTGRES_WAL_BUFFERS=16MB             # Write-Ahead Log
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -25,6 +36,12 @@ services:
     restart: unless-stopped
     networks:
       - asciisky-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G          # PostgreSQL max 2GB (von 8GB App-Budget)
+        reservations:
+          memory: 512M        # Mindestens 512MB
 
   # ===== RabbitMQ Service =====
   rabbitmq:
