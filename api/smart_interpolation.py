@@ -194,49 +194,92 @@ def _apply_smart_strategy(
         logger.info(f"Both buckets available for {object_type} → performing smart interpolation")
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
     
-    # Case 2: Only previous bucket available → Compute future bucket on-demand
+    # Case 2: Only previous bucket available → Trigger background task or compute on-demand
     if list1 and not list2 and _config.on_demand_enabled:
-        logger.info(f"Only previous bucket available for {object_type} → computing future bucket on-demand")
-        list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
-        if list2:
-            if _config.cache_computed:
-                _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-        logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
-        return list1
-    
-    # Case 3: Only future bucket available → Compute previous bucket on-demand
-    if not list1 and list2 and _config.on_demand_enabled:
-        logger.info(f"Only future bucket available for {object_type} → computing previous bucket on-demand")
-        list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
-        if list1:
-            if _config.cache_computed:
-                _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
+        # Check if background tasks are enabled (async RabbitMQ workers)
+        from config.interpolation_config import get_interpolation_config
+        config = get_interpolation_config()
         
-        # Fallback: Check if future bucket is within acceptable time range
-        time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
-        if time_diff_hours <= _config.max_future_hours:
-            logger.info(f"Using future bucket for {object_type} (within {time_diff_hours:.1f}h limit)")
-            return list2
+        if config.enable_background_tasks:
+            # ASYNC: Trigger RabbitMQ worker, return what we have
+            logger.info(f"Only previous bucket available for {object_type} → triggering background worker for bucket2")
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
+            # Return previous bucket (user gets immediate response)
+            return list1
         else:
-            logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
-            return None
+            # SYNC: Compute on-demand (blocks request)
+            logger.info(f"Only previous bucket available for {object_type} → computing future bucket on-demand (SYNC)")
+            list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
+            if list2:
+                if _config.cache_computed:
+                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
+                return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
+            logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
+            return list1
     
-    # Case 4: No buckets available → Compute both on-demand
+    # Case 3: Only future bucket available → Trigger background task or compute on-demand
+    if not list1 and list2 and _config.on_demand_enabled:
+        from config.interpolation_config import get_interpolation_config
+        config = get_interpolation_config()
+        
+        if config.enable_background_tasks:
+            # ASYNC: Trigger RabbitMQ worker, check if future bucket is usable
+            logger.info(f"Only future bucket available for {object_type} → triggering background worker for bucket1")
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
+            
+            # Check if future bucket is within acceptable time range
+            time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
+            if time_diff_hours <= _config.max_future_hours:
+                logger.info(f"Using future bucket for {object_type} (within {time_diff_hours:.1f}h limit)")
+                return list2
+            else:
+                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
+                return None
+        else:
+            # SYNC: Compute on-demand (blocks request)
+            logger.info(f"Only future bucket available for {object_type} → computing previous bucket on-demand (SYNC)")
+            list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
+            if list1:
+                if _config.cache_computed:
+                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
+                return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
+            
+            # Fallback: Check if future bucket is within acceptable time range
+            time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
+            if time_diff_hours <= _config.max_future_hours:
+                logger.info(f"Using future bucket for {object_type} (within {time_diff_hours:.1f}h limit)")
+                return list2
+            else:
+                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
+                return None
+    
+    # Case 4: No buckets available → Trigger background tasks or compute on-demand
     if not list1 and not list2 and _config.on_demand_enabled:
-        logger.info(f"No buckets available for {object_type} → computing both on-demand")
-        list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
-        list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
+        from config.interpolation_config import get_interpolation_config
+        config = get_interpolation_config()
         
-        if list1 and list2:
-            if _config.cache_computed:
-                _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
-                _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
-            return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-        
-        # Return whatever we could compute
-        return list1 or list2 or None
+        if config.enable_background_tasks:
+            # ASYNC: Trigger RabbitMQ workers for both buckets
+            logger.info(f"No buckets available for {object_type} → triggering background workers for both buckets")
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
+            # Return None (user gets empty response, next request will have data)
+            logger.info(f"Background workers triggered, returning None (data will be available soon)")
+            return None
+        else:
+            # SYNC: Compute both on-demand (blocks request)
+            logger.info(f"No buckets available for {object_type} → computing both on-demand (SYNC)")
+            list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
+            list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
+            
+            if list1 and list2:
+                if _config.cache_computed:
+                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
+                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
+                return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
+            
+            # Return whatever we could compute
+            return list1 or list2 or None
     
     # Default fallback
     logger.warning(f"No strategy applicable for {object_type}, returning None")
@@ -340,6 +383,80 @@ def _load_bucket(
     return None
 
 
+def _trigger_background_worker(
+    object_type: str,
+    lat: float,
+    lon: float,
+    elevation: float,
+    dt_utc: datetime
+) -> None:
+    """
+    Trigger RabbitMQ worker for background computation (ASYNC).
+    Does not block - worker will compute and cache the bucket.
+    """
+    try:
+        import pika
+        import json
+        import os
+        import uuid
+        import time
+        
+        rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
+        
+        # Determine routing key based on object type
+        if object_type == 'asteroids':
+            routing_key = 'compute.asteroid'
+            kind = 'asteroids'
+        else:  # comets
+            routing_key = 'compute.comet'
+            kind = 'comets'
+        
+        task_id = f"{object_type}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        
+        # Task data
+        task = {
+            'task_id': task_id,
+            'kind': kind,
+            'location': {
+                'latitude': lat,
+                'longitude': lon,
+                'elevation': elevation
+            },
+            'time_bucket': dt_utc.isoformat(),
+            'magnitude': 20.0 if object_type == 'asteroids' else None,
+            'max_comets': 1000 if object_type == 'comets' else None
+        }
+        
+        # Publish to RabbitMQ
+        params = pika.URLParameters(rabbitmq_url)
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        
+        # Declare exchange
+        channel.exchange_declare(
+            exchange='computation.direct',
+            exchange_type='direct',
+            durable=True
+        )
+        
+        # Publish task
+        channel.basic_publish(
+            exchange='computation.direct',
+            routing_key=routing_key,
+            body=json.dumps(task),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # persistent
+                priority=5
+            )
+        )
+        
+        connection.close()
+        logger.info(f"✅ Triggered background worker for {object_type}: task_id={task_id}, bucket={dt_utc.isoformat()}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger background worker for {object_type}: {e}")
+
+
 def _compute_bucket_on_demand(
     object_type: str,
     lat: float,
@@ -348,10 +465,11 @@ def _compute_bucket_on_demand(
     dt_utc: datetime
 ) -> Optional[List[Dict[str, Any]]]:
     """
-    Compute missing bucket on-demand.
+    Compute missing bucket on-demand (SYNCHRONOUS - blocks request!).
+    Only used when ENABLE_INTERPOLATION_BACKGROUND_TASKS=false.
     """
     try:
-        logger.info(f"Computing {object_type} bucket on-demand for {dt_utc.isoformat()}")
+        logger.warning(f"⚠️  SYNC computation for {object_type} bucket {dt_utc.isoformat()} - this blocks the request!")
         
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
