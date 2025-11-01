@@ -11,11 +11,11 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
       
-      # Performance Tuning für AsciiSky (Development - konservativ wegen DataFrames)
-      - POSTGRES_SHARED_BUFFERS=256MB         # Konservativ (große Pickle-DataFrames!)
-      - POSTGRES_EFFECTIVE_CACHE_SIZE=1024MB  # 50% of 2GB RAM
-      - POSTGRES_MAINTENANCE_WORK_MEM=64MB    # Reduziert
-      - POSTGRES_WORK_MEM=4MB                 # Konservativ (50 conn × 4MB = 200MB)
+      # Performance Tuning für AsciiSky (Development - balanced für DataFrames)
+      - POSTGRES_SHARED_BUFFERS=256MB         # Moderat
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB  # 75% of 2GB RAM
+      - POSTGRES_MAINTENANCE_WORK_MEM=128MB   # Für VACUUM, CREATE INDEX
+      - POSTGRES_WORK_MEM=16MB                # Muss > 10MB sein für DataFrames! (50 × 16MB = 800MB max)
       - POSTGRES_MAX_CONNECTIONS=50           # Ausreichend für Dev
       - POSTGRES_RANDOM_PAGE_COST=1.1         # SSD optimiert
       - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200 # SSD optimiert

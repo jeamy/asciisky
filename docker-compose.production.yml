@@ -15,17 +15,17 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
       
-      # Performance Tuning für AsciiSky (REDUZIERT wegen OOM Killer!)
-      # Workload: Read-heavy Cache-Lookups + GROSSE Pickle-DataFrames!
-      # Container Limit: 2GB RAM - shared_buffers muss kleiner sein!
-      - POSTGRES_SHARED_BUFFERS=256MB         # Reduziert! (war 1GB → OOM Killer)
-      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB  # 75% of 2GB Container RAM
-      - POSTGRES_MAINTENANCE_WORK_MEM=128MB   # Reduziert (war 256MB)
-      - POSTGRES_WORK_MEM=8MB                 # Reduziert! (50 conn × 8MB = 400MB max)
+      # Performance Tuning für AsciiSky (Balanced für DataFrames)
+      # Workload: Read-heavy Cache-Lookups + GROSSE Pickle-DataFrames (5-10MB)!
+      # Container Limit: 3GB RAM
+      - POSTGRES_SHARED_BUFFERS=512MB         # Moderat (nicht zu hoch wegen DataFrames)
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=2GB     # 66% of 3GB Container RAM
+      - POSTGRES_MAINTENANCE_WORK_MEM=128MB   # Für VACUUM, CREATE INDEX
+      - POSTGRES_WORK_MEM=32MB                # WICHTIG: Muss > 10MB sein für DataFrames! (50 × 32MB = 1.6GB max)
       - POSTGRES_MAX_CONNECTIONS=50           # Web(1) + Updater(1) + Workers(~20) + Reserve
       - POSTGRES_RANDOM_PAGE_COST=1.1         # SSD optimiert (default: 4.0)
       - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200 # SSD optimiert (default: 1)
-      - POSTGRES_WAL_BUFFERS=8MB              # Reduziert (war 16MB)
+      - POSTGRES_WAL_BUFFERS=16MB             # Write-Ahead Log Buffer
       - POSTGRES_DEFAULT_STATISTICS_TARGET=100 # Query Planner Stats
       - POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.9 # Smooth checkpoints
     volumes:
