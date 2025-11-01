@@ -17,6 +17,30 @@
 # - Monitoring: Real-time Dashboard
 
 services:
+  # ===== Data Updater (LOKAL) =====
+  # Jeder Worker-Server braucht eigene DataFrame-Dateien!
+  data_updater:
+    image: asciisky-web:latest
+    build: .
+    pull_policy: never
+    command: ["python", "nightly_data_updater.py"]
+    extra_hosts:
+      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
+    volumes:
+      - ./data:/app/data
+      - ./cache:/app/cache
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
+      - POSTGRES_HOST=${RABBITMQ_MAIN}
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
+      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    restart: unless-stopped
+    networks:
+      - worker-net
+
   # ===== Unified Worker (OPTIMIERT) =====
   # Ersetzt: precompute_worker + asteroid_worker + comet_worker
   # Performance: -80% Memory, +35% Throughput
