@@ -17,16 +17,20 @@
 
 ---
 
-## ⚙️ Production Settings (4-8GB RAM Server)
+## ⚠️ **Production Settings (3GB Container RAM)**
+
+### **WICHTIG: OOM Killer Fix!**
+Ursprüngliche Settings (1GB shared_buffers) waren zu aggressiv für große Pickle-DataFrames!
+PostgreSQL wurde durch Linux OOM Killer beendet (Signal 9: Killed).
 
 ### Implementiert in `docker-compose.production.yml`
 
 ```yaml
-# Memory Settings
-POSTGRES_SHARED_BUFFERS=1GB              # 25% of 4GB RAM
-POSTGRES_EFFECTIVE_CACHE_SIZE=3GB        # 75% of 4GB RAM (OS + PostgreSQL cache)
-POSTGRES_MAINTENANCE_WORK_MEM=256MB      # Für VACUUM, CREATE INDEX, ALTER TABLE
-POSTGRES_WORK_MEM=16MB                   # Pro Query/Sort Operation
+# Memory Settings (REDUZIERT wegen OOM Killer!)
+POSTGRES_SHARED_BUFFERS=256MB            # Konservativ! (war 1GB → OOM)
+POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB     # 75% of 2GB working RAM
+POSTGRES_MAINTENANCE_WORK_MEM=128MB      # Reduziert (war 256MB)
+POSTGRES_WORK_MEM=8MB                    # Reduziert! (50 × 8MB = 400MB max)
 
 # Connection Settings
 POSTGRES_MAX_CONNECTIONS=50              # Web(1) + Updater(1) + Workers(20) + Reserve(28)
@@ -48,23 +52,29 @@ POSTGRES_DEFAULT_STATISTICS_TARGET=100   # Statistics für Query Optimizer (defa
 deploy:
   resources:
     limits:
-      memory: 2G          # Max RAM für PostgreSQL Container
+      memory: 3G          # Erhöht! (war 2G → zu wenig für DataFrames)
     reservations:
-      memory: 1G          # Garantierter RAM
+      memory: 512M        # Reduziert (war 1G)
 ```
+
+**Warum 3GB?**
+- Pickle-DataFrames können 5-10MB groß sein
+- Mehrere gleichzeitige Queries → mehrere DataFrames im RAM
+- shared_buffers (256MB) + work_mem (400MB max) + DataFrames (500MB+) + OS (500MB) = ~2.5GB
+- 3GB gibt ausreichend Puffer gegen OOM Killer
 
 ---
 
-## 🔧 Development Settings (2GB RAM)
+## 🔧 **Development Settings (2GB RAM)**
 
 ### Implementiert in `docker-compose.yml`
 
 ```yaml
-# Memory Settings (weniger aggressiv)
-POSTGRES_SHARED_BUFFERS=512MB            # 25% of 2GB RAM
-POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB     # 75% of 2GB RAM
-POSTGRES_MAINTENANCE_WORK_MEM=128MB      # Reduziert für Dev
-POSTGRES_WORK_MEM=8MB                    # Reduziert für Dev
+# Memory Settings (konservativ wegen DataFrames)
+POSTGRES_SHARED_BUFFERS=256MB            # Konservativ (große Pickle-DataFrames!)
+POSTGRES_EFFECTIVE_CACHE_SIZE=1024MB     # 50% of 2GB RAM
+POSTGRES_MAINTENANCE_WORK_MEM=64MB       # Reduziert
+POSTGRES_WORK_MEM=4MB                    # Konservativ (50 × 4MB = 200MB)
 
 # Connection Settings
 POSTGRES_MAX_CONNECTIONS=50              # Ausreichend für Development

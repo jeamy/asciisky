@@ -15,16 +15,17 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
       
-      # Performance Tuning für AsciiSky (optimiert für 4-8GB RAM Server)
-      # Workload: Read-heavy Cache-Lookups + periodische Worker-Writes
-      - POSTGRES_SHARED_BUFFERS=1GB           # 25% of RAM (bei 4GB RAM)
-      - POSTGRES_EFFECTIVE_CACHE_SIZE=3GB     # 75% of RAM (OS + PG cache)
-      - POSTGRES_MAINTENANCE_WORK_MEM=256MB   # Für VACUUM, CREATE INDEX
-      - POSTGRES_WORK_MEM=16MB                # Pro Query/Sort (max_connections * work_mem < RAM!)
+      # Performance Tuning für AsciiSky (REDUZIERT wegen OOM Killer!)
+      # Workload: Read-heavy Cache-Lookups + GROSSE Pickle-DataFrames!
+      # Container Limit: 2GB RAM - shared_buffers muss kleiner sein!
+      - POSTGRES_SHARED_BUFFERS=256MB         # Reduziert! (war 1GB → OOM Killer)
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB  # 75% of 2GB Container RAM
+      - POSTGRES_MAINTENANCE_WORK_MEM=128MB   # Reduziert (war 256MB)
+      - POSTGRES_WORK_MEM=8MB                 # Reduziert! (50 conn × 8MB = 400MB max)
       - POSTGRES_MAX_CONNECTIONS=50           # Web(1) + Updater(1) + Workers(~20) + Reserve
       - POSTGRES_RANDOM_PAGE_COST=1.1         # SSD optimiert (default: 4.0)
       - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200 # SSD optimiert (default: 1)
-      - POSTGRES_WAL_BUFFERS=16MB             # Write-Ahead Log Buffer
+      - POSTGRES_WAL_BUFFERS=8MB              # Reduziert (war 16MB)
       - POSTGRES_DEFAULT_STATISTICS_TARGET=100 # Query Planner Stats
       - POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.9 # Smooth checkpoints
     volumes:
@@ -38,13 +39,13 @@ services:
     restart: unless-stopped
     networks:
       - asciisky-net
-    # Resource Limits (optional, verhindert OOM)
+    # Resource Limits - WICHTIG gegen OOM Killer!
     deploy:
       resources:
         limits:
-          memory: 2G          # Max RAM für PostgreSQL Container
+          memory: 3G          # Erhöht! (war 2G → zu wenig für DataFrames)
         reservations:
-          memory: 1G          # Garantierter RAM
+          memory: 512M        # Reduziert (war 1G)
 
   # ===== RabbitMQ Service =====
   rabbitmq:
