@@ -8,10 +8,15 @@ import psycopg2.extras
 import pickle
 import json
 import os
+import time
+import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 import threading
+
+# Logger setup
+logger = logging.getLogger(__name__)
 
 # PostgreSQL configuration from environment
 POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
