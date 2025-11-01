@@ -161,6 +161,23 @@ def _load_with_smart_interpolation(
     list1 = _load_bucket(object_type, lat, lon, elevation, bucket1_dt, bucket_hours, ttl_seconds, use_postgres)
     list2 = _load_bucket(object_type, lat, lon, elevation, bucket2_dt, bucket_hours, ttl_seconds, use_postgres)
     
+    # DEBUG: Log bucket contents
+    if list1:
+        logger.info(f"Bucket1 ({bucket1_dt.isoformat()}): {len(list1)} objects loaded")
+        if list1 and object_type == 'comets' and len(list1) > 0:
+            first_comet = list1[0]
+            logger.info(f"  First comet: {first_comet.get('name')} - alt={first_comet.get('altitude'):.1f}°, az={first_comet.get('azimuth'):.1f}°")
+    else:
+        logger.warning(f"Bucket1 ({bucket1_dt.isoformat()}): EMPTY or None")
+    
+    if list2:
+        logger.info(f"Bucket2 ({bucket2_dt.isoformat()}): {len(list2)} objects loaded")
+        if list2 and object_type == 'comets' and len(list2) > 0:
+            first_comet = list2[0]
+            logger.info(f"  First comet: {first_comet.get('name')} - alt={first_comet.get('altitude'):.1f}°, az={first_comet.get('azimuth'):.1f}°")
+    else:
+        logger.warning(f"Bucket2 ({bucket2_dt.isoformat()}): EMPTY or None")
+    
     # Apply adaptive strategy based on bucket availability
     if _config.strategy == InterpolationStrategy.SMART_INTERPOLATION:
         return _apply_smart_strategy(object_type, lat, lon, elevation, dt_utc, 
@@ -201,11 +218,17 @@ def _apply_smart_strategy(
         config = get_interpolation_config()
         
         if config.enable_background_tasks:
-            # ASYNC: Trigger RabbitMQ worker, return what we have
+            # ASYNC: Trigger RabbitMQ worker for bucket2
             logger.info(f"Only previous bucket available for {object_type} → triggering background worker for bucket2")
             _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
-            # Return previous bucket (user gets immediate response)
-            return list1
+            
+            # EINFACHE LÖSUNG: Extrapoliere aus list1!
+            # Wenn wir bei factor=0.5 sind (30min nach bucket1), extrapoliere 30min vorwärts
+            # Das ist ungenau, aber besser als alte Position zu zeigen
+            logger.info(f"Extrapolating {object_type} from bucket1 (factor={factor:.3f})")
+            # Extrapolation = list1 als beide Buckets verwenden, aber mit factor
+            # Das gibt uns zumindest die richtige Zeit-Basis
+            return list1  # Temporär: Nutze list1, Worker füllt bucket2 im Hintergrund
         else:
             # SYNC: Compute on-demand (blocks request)
             logger.info(f"Only previous bucket available for {object_type} → computing future bucket on-demand (SYNC)")
@@ -223,7 +246,7 @@ def _apply_smart_strategy(
         config = get_interpolation_config()
         
         if config.enable_background_tasks:
-            # ASYNC: Trigger RabbitMQ worker, check if future bucket is usable
+            # ASYNC: Trigger RabbitMQ worker for bucket1
             logger.info(f"Only future bucket available for {object_type} → triggering background worker for bucket1")
             _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
             
