@@ -76,19 +76,34 @@ sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
 
 success "DOCKER-USER Chain konfiguriert (blockiert externe Docker-Ports!)"
 
-# Mache DOCKER-USER Regeln persistent
-echo "💾 Speichere DOCKER-USER Regeln persistent..."
+# Mache DOCKER-USER Regeln persistent via UFW after.rules
+echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules hinzu..."
 
-# Installiere iptables-persistent falls nicht vorhanden
-if ! command -v netfilter-persistent &> /dev/null; then
-    echo "📦 Installiere iptables-persistent..."
-    sudo apt-get update
-    sudo apt-get install -y iptables-persistent || error_exit "iptables-persistent Installation fehlgeschlagen"
+# Backup der originalen after.rules
+if [ ! -f /etc/ufw/after.rules.backup ]; then
+    sudo cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
+    success "Backup erstellt: /etc/ufw/after.rules.backup"
 fi
 
-# Speichere iptables Regeln
-sudo netfilter-persistent save
-success "DOCKER-USER Regeln persistent gespeichert"
+# Entferne alte ASCII Sky Worker DOCKER-USER Regeln falls vorhanden
+sudo sed -i '/# ASCII Sky Worker DOCKER-USER rules - START/,/# ASCII Sky Worker DOCKER-USER rules - END/d' /etc/ufw/after.rules
+
+# Füge neue DOCKER-USER Regeln am Ende hinzu (vor COMMIT)
+# WICHTIG: Keine *filter oder :DOCKER-USER - Chain existiert bereits!
+sudo sed -i '/^COMMIT$/i \
+# ASCII Sky Worker DOCKER-USER rules - START\
+# Diese Regeln blockieren alle Docker-Container-Ports von außen\
+# Erlaube localhost zu Docker-Containern\
+-A DOCKER-USER -s 127.0.0.1 -j ACCEPT -m comment --comment "Allow localhost to containers"\
+# BLOCKIERE alle anderen eingehenden TCP/UDP Verbindungen\
+-A DOCKER-USER -p tcp -j DROP -m comment --comment "Block external TCP to containers"\
+-A DOCKER-USER -p udp -j DROP -m comment --comment "Block external UDP to containers"\
+# RETURN (lässt andere Verbindungen durch)\
+-A DOCKER-USER -j RETURN\
+# ASCII Sky Worker DOCKER-USER rules - END\
+' /etc/ufw/after.rules
+
+success "DOCKER-USER Regeln zu /etc/ufw/after.rules hinzugefügt"
 
 # ===== STATUS ANZEIGEN =====
 echo ""
@@ -119,7 +134,7 @@ echo ""
 echo "📝 Nützliche Befehle:"
 echo "   sudo iptables -L DOCKER-USER -n -v         # DOCKER-USER Chain anzeigen"
 echo "   sudo iptables -L DOCKER-USER -n --line-numbers  # Mit Zeilennummern"
-echo "   sudo netfilter-persistent save             # iptables speichern"
+echo "   sudo ufw reload                            # UFW neu laden (lädt after.rules)"
 echo "   sudo iptables -F DOCKER-USER               # DOCKER-USER zurücksetzen"
 echo ""
 
