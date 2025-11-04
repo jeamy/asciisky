@@ -58,19 +58,17 @@ sudo iptables -F DOCKER-USER 2>/dev/null || true
 sudo ip6tables -F DOCKER-USER 2>/dev/null || true
 
 # Worker: BLOCKIERE eingehende Verbindungen von außen, ERLAUBE localhost
+# WICHTIG: Nur eingehende Verbindungen (-i) blockieren, ausgehende erlauben!
+
 # Erlaube localhost (127.0.0.1) zu Docker-Containern
-sudo iptables -A DOCKER-USER -s 127.0.0.1 -j ACCEPT -m comment --comment "Allow localhost to containers"
-sudo ip6tables -A DOCKER-USER -s ::1 -j ACCEPT -m comment --comment "Allow localhost IPv6 to containers"
+sudo iptables -A DOCKER-USER -i eth0 -s 127.0.0.1 -j ACCEPT -m comment --comment "Allow localhost to containers"
+sudo ip6tables -A DOCKER-USER -i eth0 -s ::1 -j ACCEPT -m comment --comment "Allow localhost IPv6 to containers"
 
-# DROP alle anderen eingehenden TCP-Verbindungen auf Docker-Container
-sudo iptables -A DOCKER-USER -p tcp -j DROP -m comment --comment "Block external TCP to containers"
-sudo ip6tables -A DOCKER-USER -p tcp -j DROP -m comment --comment "Block external TCP to containers IPv6"
+# DROP alle anderen eingehenden Verbindungen von außen (über eth0)
+sudo iptables -A DOCKER-USER -i eth0 -j DROP -m comment --comment "Block external to containers"
+sudo ip6tables -A DOCKER-USER -i eth0 -j DROP -m comment --comment "Block external to containers IPv6"
 
-# DROP alle anderen eingehenden UDP-Verbindungen auf Docker-Container
-sudo iptables -A DOCKER-USER -p udp -j DROP -m comment --comment "Block external UDP to containers"
-sudo ip6tables -A DOCKER-USER -p udp -j DROP -m comment --comment "Block external UDP to containers IPv6"
-
-# WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
+# RETURN für alle anderen (ausgehende Verbindungen, andere Interfaces)
 sudo iptables -A DOCKER-USER -j RETURN
 sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
 
@@ -92,13 +90,12 @@ sudo sed -i '/# ASCII Sky Worker DOCKER-USER rules - START/,/# ASCII Sky Worker 
 # WICHTIG: Keine *filter oder :DOCKER-USER - Chain existiert bereits!
 sudo sed -i '/^COMMIT$/i \
 # ASCII Sky Worker DOCKER-USER rules - START\
-# Diese Regeln blockieren alle Docker-Container-Ports von außen\
+# Diese Regeln blockieren eingehende Verbindungen von außen\
 # Erlaube localhost zu Docker-Containern\
--A DOCKER-USER -s 127.0.0.1 -j ACCEPT -m comment --comment "Allow localhost to containers"\
-# BLOCKIERE alle anderen eingehenden TCP/UDP Verbindungen\
--A DOCKER-USER -p tcp -j DROP -m comment --comment "Block external TCP to containers"\
--A DOCKER-USER -p udp -j DROP -m comment --comment "Block external UDP to containers"\
-# RETURN (lässt andere Verbindungen durch)\
+-A DOCKER-USER -i eth0 -s 127.0.0.1 -j ACCEPT -m comment --comment "Allow localhost to containers"\
+# BLOCKIERE alle anderen eingehenden Verbindungen von außen (eth0)\
+-A DOCKER-USER -i eth0 -j DROP -m comment --comment "Block external to containers"\
+# RETURN (lässt ausgehende Verbindungen und andere Interfaces durch)\
 -A DOCKER-USER -j RETURN\
 # ASCII Sky Worker DOCKER-USER rules - END\
 ' /etc/ufw/after.rules
