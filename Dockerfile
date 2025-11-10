@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     python3-dev \
+    libpq-dev \
     tzdata \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
