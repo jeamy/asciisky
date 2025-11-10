@@ -104,7 +104,7 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
     """Store computed asteroid positions in PostgreSQL."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        serialized_data = pickle.dumps(position_data)
         
         cursor.execute("""
             INSERT INTO cached_positions (
@@ -202,7 +202,7 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
     """Store computed comet positions in PostgreSQL."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        serialized_data = pickle.dumps(position_data)
         
         cursor.execute("""
             INSERT INTO cached_positions (
