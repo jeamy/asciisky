@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.13.3-slim
 
 WORKDIR /app
 
@@ -17,7 +17,6 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir numpy==1.23.5 && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
