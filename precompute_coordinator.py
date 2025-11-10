@@ -125,6 +125,57 @@ def get_target_locations() -> List[Dict[str, Any]]:
     return unique_locations
 
 
+def get_existing_queue_tasks() -> set:
+    """
+    Hole alle Tasks, die bereits in der precompute.tasks Queue sind.
+    
+    Returns:
+        Set von Task-Keys (format: "kind_location_timebucket")
+    """
+    existing_tasks = set()
+    
+    try:
+        connection = get_rabbitmq_connection()
+        if not connection:
+            logger.warning("Cannot check existing tasks - no RabbitMQ connection")
+            return existing_tasks
+        
+        channel = connection.channel()
+        
+        # Hole alle Messages aus der Queue (ohne sie zu löschen)
+        method_frame, header_frame, body = channel.basic_get(queue='precompute.tasks', auto_ack=False)
+        
+        while method_frame:
+            try:
+                task = json.loads(body)
+                kind = task.get('kind', 'unknown')
+                location = task.get('location', {})
+                time_bucket = task.get('time_bucket', '')
+                
+                # Erstelle eindeutigen Key
+                loc_key = f"{location.get('latitude', 0):.4f}_{location.get('longitude', 0):.4f}_{location.get('elevation', 0):.0f}"
+                task_key = f"{kind}_{loc_key}_{time_bucket}"
+                existing_tasks.add(task_key)
+                
+                # Message zurück in die Queue (requeue)
+                channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=True)
+                
+            except (json.JSONDecodeError, KeyError):
+                # Ignoriere ungültige Messages, aber requeue sie
+                channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=True)
+            
+            # Nächste Message
+            method_frame, header_frame, body = channel.basic_get(queue='precompute.tasks', auto_ack=False)
+        
+        connection.close()
+        logger.info(f"Found {len(existing_tasks)} existing tasks in queue")
+        
+    except Exception as e:
+        logger.error(f"Error checking existing queue tasks: {e}")
+    
+    return existing_tasks
+
+
 def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> List[Dict]:
     """
     Erstelle Precompute-Tasks für alle Locations und Zeitfenster.
@@ -139,8 +190,13 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
     from cache_utils import normalize_location, location_key, time_bucket_utc
     from db_utils import get_asteroid_positions, get_comet_positions
     
+    # Hole existierende Tasks aus der Queue (Duplikat-Schutz!)
+    existing_tasks = get_existing_queue_tasks()
+    
     tasks = []
     skipped = 0
+    skipped_queue = 0  # Bereits in Queue
+    total_possible = 0
     now = datetime.now(timezone.utc)
     
     # Runde auf volle Stunde
@@ -164,6 +220,9 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
             # Priorität: Nächste 24h = HIGH (10), danach NORMAL (5)
             priority = 10 if hour_offset < 24 else 5
             
+            # Location Key für Duplikat-Check
+            loc_key_dup = f"{lat_norm:.4f}_{lon_norm:.4f}_{elev_norm:.0f}"
+            
             # Prüfe ob Asteroiden-Daten schon vorhanden
             asteroid_cached = False
             try:
@@ -172,20 +231,26 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
             except Exception:
                 pass
             
-            # Task für Asteroiden nur wenn nicht gecached
+            # Task für Asteroiden nur wenn nicht gecached UND nicht in Queue
             if not asteroid_cached:
-                tasks.append({
-                    'kind': 'asteroids',
-                    'location': {
-                        'latitude': lat,
-                        'longitude': lon,
-                        'elevation': elevation,
-                        'name': name
-                    },
-                    'time_bucket': target_time.isoformat(),
-                    'magnitude': 20.0,  # Asteroid max magnitude
-                    'priority': priority
-                })
+                total_possible += 1
+                task_key = f"asteroids_{loc_key_dup}_{bucket}"
+                
+                if task_key not in existing_tasks:
+                    tasks.append({
+                        'kind': 'asteroids',
+                        'location': {
+                            'latitude': lat,
+                            'longitude': lon,
+                            'elevation': elevation,
+                            'name': name
+                        },
+                        'time_bucket': target_time.isoformat(),
+                        'magnitude': 20.0,  # Default max magnitude
+                        'priority': priority
+                    })
+                else:
+                    skipped_queue += 1
             else:
                 skipped += 1
             
@@ -197,25 +262,31 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
             except Exception:
                 pass
             
-            # Task für Kometen nur wenn nicht gecached
+            # Task für Kometen nur wenn nicht gecached UND nicht in Queue
             if not comet_cached:
-                tasks.append({
-                    'kind': 'comets',
-                    'location': {
-                        'latitude': lat,
-                        'longitude': lon,
-                        'elevation': elevation,
-                        'name': name
-                    },
-                    'time_bucket': target_time.isoformat(),
-                    'magnitude': 14.0,  # Comet max magnitude
-                    'priority': priority
-                })
+                total_possible += 1
+                task_key = f"comets_{loc_key_dup}_{bucket}"
+                
+                if task_key not in existing_tasks:
+                    tasks.append({
+                        'kind': 'comets',
+                        'location': {
+                            'latitude': lat,
+                            'longitude': lon,
+                            'elevation': elevation,
+                            'name': name
+                        },
+                        'time_bucket': target_time.isoformat(),
+                        'magnitude': 14.0,  # Comet max magnitude
+                        'priority': priority
+                    })
+                else:
+                    skipped_queue += 1
             else:
                 skipped += 1
     
     total_possible = len(locations) * hours_ahead * 2
-    logger.info(f"Created {len(tasks)} precompute tasks (skipped {skipped} already cached, total {total_possible})")
+    logger.info(f"Created {len(tasks)} precompute tasks (skipped {skipped} already cached, {skipped_queue} already in queue, total {total_possible})")
     return tasks
 
 

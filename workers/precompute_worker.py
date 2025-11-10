@@ -31,6 +31,10 @@ import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import store_asteroid_positions, store_comet_positions
 
+# Worker Utils (same directory)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import worker_utils
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -41,21 +45,7 @@ logger = logging.getLogger(__name__)
 WORKER_ID = os.getenv('WORKER_ID', 'precompute-worker-unknown')
 
 
-def get_rabbitmq_connection():
-    """Erstelle RabbitMQ-Verbindung"""
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
-    
-    try:
-        params = pika.URLParameters(rabbitmq_url)
-        # Deaktiviere Heartbeat für lange Berechnungen (0 = disabled)
-        # Berechnungen können mehrere Minuten dauern
-        params.heartbeat = 0
-        params.blocked_connection_timeout = 0
-        connection = pika.BlockingConnection(params)
-        return connection
-    except Exception as e:
-        logger.error(f"Failed to connect to RabbitMQ: {e}")
-        return None
+# Removed: get_rabbitmq_connection() - now using worker_utils.setup_rabbitmq_connection()
 
 
 def process_task(task: Dict[str, Any]) -> bool:
@@ -230,10 +220,12 @@ def main():
     logger.info(f"  - Worker ID: {WORKER_ID}")
     logger.info(f"  - Prefetch Count: {prefetch_count}")
     
+    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    
     while True:
         try:
             # Verbinde zu RabbitMQ
-            connection = get_rabbitmq_connection()
+            connection = worker_utils.setup_rabbitmq_connection(rabbitmq_url, heartbeat=0)
             if not connection:
                 logger.error("Cannot connect to RabbitMQ - retrying in 10s...")
                 time.sleep(10)
@@ -241,14 +233,10 @@ def main():
             
             channel = connection.channel()
             
-            # Deklariere Queue
-            channel.queue_declare(
-                queue='precompute.tasks',
-                durable=True,
-                arguments={
-                    'x-max-priority': 10
-                }
-            )
+            # Deklariere alle Queues
+            logger.info(f"[{WORKER_ID}] Declaring queues...")
+            worker_utils.declare_computation_queues(channel)
+            logger.info(f"[{WORKER_ID}] ✅ All queues declared")
             
             # Fair Dispatch (nur 1 Task gleichzeitig pro Worker)
             channel.basic_qos(prefetch_count=prefetch_count)
@@ -274,43 +262,12 @@ def main():
             time.sleep(10)
 
 
-def wait_for_database():
-    """Warte bis Daten in PostgreSQL vorhanden sind"""
-    from db_utils import get_asteroid_dataframe, get_comet_dataframe
-    
-    logger.info(f"[{WORKER_ID}] Checking if database has data...")
-    
-    max_wait = 600  # 10 Minuten
-    check_interval = 30  # Alle 30 Sekunden prüfen
-    waited = 0
-    
-    while waited < max_wait:
-        try:
-            asteroid_df = get_asteroid_dataframe()
-            comet_df = get_comet_dataframe()
-            
-            if asteroid_df and comet_df:
-                logger.info(f"[{WORKER_ID}] ✅ Database has data - starting worker")
-                return True
-            else:
-                if waited == 0:
-                    logger.info(f"[{WORKER_ID}] ⏳ Waiting for data_updater to populate database...")
-                waited += check_interval
-                time.sleep(check_interval)
-        except Exception as e:
-            if waited == 0:
-                logger.warning(f"[{WORKER_ID}] Database not ready: {e}")
-                logger.info(f"[{WORKER_ID}] ⏳ Waiting for database...")
-            waited += check_interval
-            time.sleep(check_interval)
-    
-    logger.error(f"[{WORKER_ID}] ❌ Timeout waiting for database data after {max_wait}s")
-    return False
+# Removed: wait_for_database() - now using worker_utils.wait_for_database()
 
 
 if __name__ == '__main__':
     # Warte bis Daten vorhanden sind
-    if not wait_for_database():
+    if not worker_utils.wait_for_database(WORKER_ID, check_both=True):
         sys.exit(1)
     
     # Starte Worker
