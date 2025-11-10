@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies and configure timezone
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
     python3-dev \
     tzdata \
     docker.io \
