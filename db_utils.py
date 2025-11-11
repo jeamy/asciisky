@@ -3,8 +3,8 @@ PostgreSQL database utilities for AsciiSky astronomical data caching.
 Provides efficient storage and retrieval of asteroid orbital data and computed positions.
 Multi-host compatible.
 """
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg.rows import dict_row
 import pickle
 import json
 import os
@@ -31,15 +31,15 @@ _thread_local = threading.local()
 def get_db_connection():
     """Get thread-local PostgreSQL connection."""
     if not hasattr(_thread_local, 'connection') or _thread_local.connection is None or _thread_local.connection.closed:
-        _thread_local.connection = psycopg2.connect(
+        _thread_local.connection = psycopg.connect(
             host=POSTGRES_HOST,
             port=POSTGRES_PORT,
-            database=POSTGRES_DB,
+            dbname=POSTGRES_DB,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
-            cursor_factory=psycopg2.extras.RealDictCursor
+            row_factory=dict_row,
+            autocommit=False
         )
-        _thread_local.connection.autocommit = False
     return _thread_local.connection
 
 @contextmanager
@@ -104,7 +104,7 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
     """Store computed asteroid positions in PostgreSQL."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        serialized_data = pickle.dumps(position_data)
         
         cursor.execute("""
             INSERT INTO cached_positions (
@@ -202,7 +202,7 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
     """Store computed comet positions in PostgreSQL."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = psycopg2.Binary(pickle.dumps(position_data))
+        serialized_data = pickle.dumps(position_data)
         
         cursor.execute("""
             INSERT INTO cached_positions (

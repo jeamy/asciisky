@@ -1,11 +1,15 @@
-FROM python:3.9-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
 # Install system dependencies and configure timezone
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
+    make \
+    cmake \
     python3-dev \
+    libpq-dev \
     tzdata \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
@@ -17,7 +21,6 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir numpy==1.23.5 && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
