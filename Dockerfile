@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     python3-dev \
     libpq-dev \
+    libffi-dev \
     tzdata \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
