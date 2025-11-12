@@ -199,7 +199,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - WORKER_ID=precompute-worker-main-{{.Task.Slot}}
+      # WORKER_ID wird automatisch aus Hostname generiert (siehe precompute_worker.py)
+      # Für Docker Swarm: WORKER_ID=precompute-worker-main-{{.Task.Slot}}
       
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres

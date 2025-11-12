@@ -223,7 +223,11 @@ class CometWorker:
 
 if __name__ == '__main__':
     # Konfiguration aus ENV
-    worker_id = os.environ.get('WORKER_ID', 'comet-worker-1')
+    import socket
+    worker_id = os.environ.get('WORKER_ID', '')
+    # Fallback wenn nicht gesetzt, Docker Swarm Template oder Shell-Variable nicht aufgelöst
+    if not worker_id or '{{' in worker_id or '${' in worker_id:
+        worker_id = f'comet-worker-{socket.gethostname()}'
     rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     
     # Warte bis Daten vorhanden sind

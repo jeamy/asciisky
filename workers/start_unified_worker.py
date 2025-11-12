@@ -36,8 +36,9 @@ logger = logging.getLogger(__name__)
 def parse_arguments():
     """Parse Kommandozeilen-Argumente"""
     # Default Worker ID mit Hostname
-    default_worker_id = os.getenv('WORKER_ID')
-    if not default_worker_id or default_worker_id == 'unified-worker-${HOSTNAME:-unknown}':
+    default_worker_id = os.getenv('WORKER_ID', '')
+    # Fallback wenn nicht gesetzt, Docker Swarm Template oder Shell-Variable nicht aufgelöst
+    if not default_worker_id or '{{' in default_worker_id or '${' in default_worker_id:
         # Fallback: Verwende tatsächlichen Hostname
         hostname = socket.gethostname()
         default_worker_id = f'unified-worker-{hostname}'

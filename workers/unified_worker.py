@@ -616,8 +616,9 @@ def wait_for_database(worker_id: str):
 
 def main():
     """Hauptfunktion"""
-    worker_id = os.getenv('WORKER_ID')
-    if not worker_id or worker_id == 'unified-worker-${HOSTNAME:-unknown}':
+    worker_id = os.getenv('WORKER_ID', '')
+    # Fallback wenn nicht gesetzt, Docker Swarm Template oder Shell-Variable nicht aufgelöst
+    if not worker_id or '{{' in worker_id or '${' in worker_id:
         # Fallback: Verwende tatsächlichen Hostname
         hostname = socket.gethostname()
         worker_id = f'unified-worker-{hostname}'

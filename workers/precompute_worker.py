@@ -42,7 +42,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Worker ID (für Logging)
-WORKER_ID = os.getenv('WORKER_ID', 'precompute-worker-unknown')
+import socket
+_worker_id_env = os.getenv('WORKER_ID', '')
+# Fallback wenn Docker Swarm Template nicht aufgelöst wurde
+if '{{' in _worker_id_env or _worker_id_env == '':
+    WORKER_ID = f"precompute-worker-{socket.gethostname()}"
+else:
+    WORKER_ID = _worker_id_env
 
 
 # Removed: get_rabbitmq_connection() - now using worker_utils.setup_rabbitmq_connection()
