@@ -309,12 +309,17 @@ class UnifiedWorker:
             logger.error(f"Invalid precompute task: missing required fields. Task: {task}")
             return False
         
+        # Debug: Zeige komplette Task-Struktur
+        logger.debug(f"Task structure: {json.dumps(task, indent=2)}")
+        
         lat, lon, elevation = location['latitude'], location['longitude'], location['elevation']
+        location_name = location.get('name', f"Lat {lat:.2f}, Lon {lon:.2f}")
+        
         dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
         if dt_utc.tzinfo is None:
             dt_utc = dt_utc.replace(tzinfo=timezone.utc)
         
-        logger.info(f"Processing precompute {kind} for {location.get('name', 'Unknown')}")
+        logger.info(f"Processing precompute {kind} for {location_name} at {dt_utc.strftime('%Y-%m-%d %H:%M UTC')}")
         
         # Normalisiere Location
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
