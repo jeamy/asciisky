@@ -102,6 +102,39 @@ def asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
         # Conservative fallback if anything goes wrong
         return float(H) + 5.0 * math.log10(max(r * delta, 1e-12))
 
+def vectorized_asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
+    """
+    Compute apparent V magnitude using the IAU H-G phase function (vectorized).
+    V = H + 5 log10(r * delta) - 2.5 log10((1 - G) * Phi1 + G * Phi2)
+    
+    Args:
+        H: Absolute magnitude (array)
+        G: Slope parameter (array)
+        r: Heliocentric distance in AU (array)
+        delta: Geocentric distance in AU (array)
+        phase_angle_deg: Phase angle in degrees (array)
+    
+    Returns:
+        Apparent magnitude (array)
+    """
+    alpha = np.radians(phase_angle_deg)
+    tan_half = np.tan(alpha / 2.0)
+    
+    # Phase functions (ensure base is non-negative)
+    tan_half_safe = np.maximum(tan_half, 0)
+    phi1 = np.exp(-3.33 * (tan_half_safe ** 0.63))
+    phi2 = np.exp(-1.87 * (tan_half_safe ** 1.22))
+    
+    # Flux term
+    flux_term = (1.0 - G) * phi1 + G * phi2
+    
+    # Avoid log of zero
+    flux_term = np.maximum(flux_term, 1e-12)
+    distance_term = np.maximum(r * delta, 1e-12)
+    
+    value = H + 5.0 * np.log10(distance_term) - 2.5 * np.log10(flux_term)
+    return value
+
 def download_mpcorb_file():
     """
     Lädt die MPCORB.DAT.gz-Datei von der Minor Planet Center-Website herunter
@@ -197,12 +230,27 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         df = pickle.loads(df_pickle)
         print(f"Loaded {len(df)} asteroids from PostgreSQL database")
         
-        # Filter by magnitude
+        # Step 1: Filter by absolute magnitude
         df_filtered = df[df['magnitude_H'] <= MAX_ABSOLUTE_MAGNITUDE].copy()
         df_filtered = df_filtered.sort_values('magnitude_H')
-        df_filtered = df_filtered.head(MAX_ASTEROIDS * 2)
+        print(f"Step 1: Filtered to {len(df_filtered)} asteroids with H <= {MAX_ABSOLUTE_MAGNITUDE}")
         
-        print(f"Filtered to {len(df_filtered)} asteroids with H <= {MAX_ABSOLUTE_MAGNITUDE}")
+        # Step 2: NumPy Pre-Filter - Rough apparent magnitude estimation
+        # Typical distances: r=2.5 AU (heliocentric), delta=1.5 AU (geocentric)
+        H_array = df_filtered['magnitude_H'].values
+        r_typical = 2.5  # AU
+        delta_typical = 1.5  # AU
+        rough_apparent_mag = H_array + 5 * np.log10(r_typical * delta_typical)
+        
+        # Keep only objects that could be brighter than max_magnitude + 3.0 margin
+        # (margin accounts for variation in actual distances)
+        bright_enough = rough_apparent_mag <= (max_magnitude + 3.0)
+        df_filtered = df_filtered[bright_enough].copy()
+        print(f"Step 2: NumPy pre-filter kept {len(df_filtered)} candidates (rough mag <= {max_magnitude + 3.0})")
+        
+        # Step 3: Limit to reasonable number for processing
+        df_filtered = df_filtered.head(MAX_ASTEROIDS * 2)
+        print(f"Step 3: Limited to {len(df_filtered)} asteroids for processing")
         
     except Exception as e:
         print(f"ERROR: Cannot connect to PostgreSQL database: {e}")

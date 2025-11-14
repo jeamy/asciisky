@@ -77,6 +77,28 @@ def _now() -> datetime:
     return datetime.now()
 
 
+def vectorized_comet_apparent_magnitude(M1, n, delta, r):
+    """
+    Vectorized apparent magnitude calculation for comets.
+    Total magnitude = M1 + 5 * log10(delta) + 2.5 * n * log10(r)
+    
+    Args:
+        M1: Absolute magnitude (array)
+        n: Photometric exponent (array)
+        delta: Geocentric distance in AU (array)
+        r: Heliocentric distance in AU (array)
+    
+    Returns:
+        Apparent magnitude (array)
+    """
+    # Ensure no log of zero or negative numbers
+    delta_safe = np.maximum(delta, 1e-12)
+    r_safe = np.maximum(r, 1e-12)
+    
+    magnitude = M1 + 5.0 * np.log10(delta_safe) + 2.5 * n * np.log10(r_safe)
+    return magnitude
+
+
 def _clear_comet_caches():
     """Clear all comet-related cache files when new data is downloaded"""
     import glob
