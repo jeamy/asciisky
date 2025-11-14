@@ -342,7 +342,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         
         # Cache the results for future requests
         if use_cache:
-            from cache_utils import normalize_location, location_key, time_bucket_utc
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             loc_key = location_key(lat_norm, lon_norm, elev_norm)
             time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
