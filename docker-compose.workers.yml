@@ -15,6 +15,7 @@
 # - Memory: -80% (Shared Skyfield Resources)
 # - Throughput: +35% (Unified Architecture)  
 # - Monitoring: Real-time Dashboard
+# - Deduplication: Hybrid (RabbitMQ + Advisory Locks)
 
 services:
   # ===== Data Updater (LOKAL) =====
@@ -98,7 +99,7 @@ services:
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
       - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
       
-      # Performance Monitoring (NEU)
+      # Performance Monitoring 
       - WORKER_HEALTH_CHECK_INTERVAL=${WORKER_HEALTH_CHECK_INTERVAL:-30}
       - WORKER_AUTO_RESTART_ON_FAILURE=${WORKER_AUTO_RESTART_ON_FAILURE:-true}
       - WORKER_MAX_RETRY_ATTEMPTS=${WORKER_MAX_RETRY_ATTEMPTS:-3}
@@ -113,7 +114,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # ===== Worker Monitor (NEU) =====
+  # ===== Worker Monitor =====
   # Real-time Performance Dashboard
   worker_monitor:
     image: asciisky-web:latest

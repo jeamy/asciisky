@@ -129,22 +129,28 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
     The max_age_seconds parameter is deprecated and ignored.
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Positions for a specific time_bucket are immutable - no TTL needed!
-    # We simply retrieve the most recent calculation for this location/time combination
-    cursor.execute("""
-        SELECT position_data FROM cached_positions
-        WHERE object_type = 'asteroid'
-          AND location_key = %s
-          AND time_bucket = %s
-        ORDER BY computed_at DESC LIMIT 1
-    """, (location_key, time_bucket))
-    
-    row = cursor.fetchone()
-    if row and row['position_data']:
-        return pickle.loads(bytes(row['position_data']))
-    return None
+    try:
+        cursor = conn.cursor()
+        
+        # Positions for a specific time_bucket are immutable - no TTL needed!
+        # We simply retrieve the most recent calculation for this location/time combination
+        cursor.execute("""
+            SELECT position_data FROM cached_positions
+            WHERE object_type = 'asteroid'
+              AND location_key = %s
+              AND time_bucket = %s
+            ORDER BY computed_at DESC LIMIT 1
+        """, (location_key, time_bucket))
+        
+        row = cursor.fetchone()
+        if row and row['position_data']:
+            return pickle.loads(bytes(row['position_data']))
+        return None
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ===== Comet Functions =====
 
@@ -185,16 +191,19 @@ def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
 def get_comets_by_magnitude(max_absolute_mag: float) -> List[Dict]:
     """Get comets filtered by magnitude from PostgreSQL."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT id, designation, m1_mag, orbit_data
-        FROM comet_elements
-        WHERE m1_mag <= %s
-        ORDER BY m1_mag ASC
-    """, (max_absolute_mag,))
-    
-    return [dict(row) for row in cursor.fetchall()]
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, designation, m1_mag, orbit_data
+            FROM comet_elements
+            WHERE m1_mag <= %s
+            ORDER BY m1_mag ASC
+        """, (max_absolute_mag,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                              observer_lat: float, observer_lon: float, observer_elevation: float,
@@ -227,22 +236,28 @@ def get_comet_positions(location_key: str, time_bucket: str,
     The max_age_seconds parameter is deprecated and ignored.
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Positions for a specific time_bucket are immutable - no TTL needed!
-    # We simply retrieve the most recent calculation for this location/time combination
-    cursor.execute("""
-        SELECT position_data FROM cached_positions
-        WHERE object_type = 'comet'
-          AND location_key = %s
-          AND time_bucket = %s
-        ORDER BY computed_at DESC LIMIT 1
-    """, (location_key, time_bucket))
-    
-    row = cursor.fetchone()
-    if row and row['position_data']:
-        return pickle.loads(bytes(row['position_data']))
-    return None
+    try:
+        cursor = conn.cursor()
+        
+        # Positions for a specific time_bucket are immutable - no TTL needed!
+        # We simply retrieve the most recent calculation for this location/time combination
+        cursor.execute("""
+            SELECT position_data FROM cached_positions
+            WHERE object_type = 'comet'
+              AND location_key = %s
+              AND time_bucket = %s
+            ORDER BY computed_at DESC LIMIT 1
+        """, (location_key, time_bucket))
+        
+        row = cursor.fetchone()
+        if row and row['position_data']:
+            return pickle.loads(bytes(row['position_data']))
+        return None
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ===== Data Update Tracking =====
 
@@ -258,82 +273,98 @@ def record_data_update(update_type: str, status: str, message: str = None) -> No
 def get_last_data_update(update_type: str = None) -> Optional[Dict]:
     """Get last data update from PostgreSQL."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    if update_type:
-        cursor.execute("""
-            SELECT * FROM data_updates
-            WHERE update_type = %s
-            ORDER BY updated_at DESC LIMIT 1
-        """, (update_type,))
-    else:
-        cursor.execute("""
-            SELECT * FROM data_updates
-            ORDER BY updated_at DESC LIMIT 1
-        """)
-    
-    row = cursor.fetchone()
-    return dict(row) if row else None
+    try:
+        cursor = conn.cursor()
+        
+        if update_type:
+            cursor.execute("""
+                SELECT * FROM data_updates
+                WHERE update_type = %s
+                ORDER BY updated_at DESC LIMIT 1
+            """, (update_type,))
+        else:
+            cursor.execute("""
+                SELECT * FROM data_updates
+                ORDER BY updated_at DESC LIMIT 1
+            """)
+        
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
 def get_database_stats() -> dict:
     """Get database statistics (asteroid/comet DataFrame availability)."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if DataFrames exist (not individual elements)
-    cursor.execute("SELECT COUNT(*) as count FROM asteroid_dataframes")
-    asteroid_df_count = cursor.fetchone()['count']
-    
-    cursor.execute("SELECT COUNT(*) as count FROM comet_dataframes")
-    comet_df_count = cursor.fetchone()['count']
-    
-    return {
-        'asteroids_count': asteroid_df_count,
-        'comets_count': comet_df_count
-    }
+    try:
+        cursor = conn.cursor()
+        
+        # Check if DataFrames exist (not individual elements)
+        cursor.execute("SELECT COUNT(*) as count FROM asteroid_dataframes")
+        asteroid_df_count = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM comet_dataframes")
+        comet_df_count = cursor.fetchone()['count']
+        
+        return {
+            'asteroids_count': asteroid_df_count,
+            'comets_count': comet_df_count
+        }
+    finally:
+        conn.close()
 
 # ===== Computation Lock Functions =====
 
 def is_computation_in_progress(computation_key: str) -> bool:
-    """Check if a computation is already in progress."""
+    """Check if a computation is already in progress using PostgreSQL Advisory Locks."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
+        
+        # Try to acquire lock in non-blocking mode
+        # Returns 1 if lock acquired, 0 if already locked
+        lock_id = hash(computation_key) & 0x7FFFFFFF  # Ensure positive for advisory lock
+        cursor.execute("SELECT pg_try_advisory_lock(%s) as acquired", (lock_id,))
+        
+        result = cursor.fetchone()
+        acquired = result['acquired']
+        
+        if acquired:
+            # We got the lock, release it immediately (we were just checking)
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+            return False  # No computation in progress
+        else:
+            return True   # Computation is in progress (lock held by someone else)
+    finally:
+        conn.close()
+
+@contextmanager
+def computation_lock(computation_key: str, ttl_seconds: int = 300):
+    """Context manager for PostgreSQL Advisory Locks."""
+    conn = get_db_connection()
+    lock_id = hash(computation_key) & 0x7FFFFFFF  # Ensure positive
     
-    cursor.execute("""
-        SELECT COUNT(*) as count FROM computation_locks
-        WHERE lock_key = %s
-          AND expires_at > NOW()
-    """, (computation_key,))
-    
-    row = cursor.fetchone()
-    return row['count'] > 0 if row else False
-
-def mark_computation_in_progress(computation_key: str, ttl_seconds: int = 300) -> None:
-    """Mark a computation as in progress."""
-    with db_transaction() as conn:
+    try:
         cursor = conn.cursor()
+        # Try to acquire lock (blocking with timeout)
+        cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+        
+        # Set up automatic cleanup after TTL
         cursor.execute("""
-            INSERT INTO computation_locks (lock_key, created_at, expires_at)
-            VALUES (%s, NOW(), NOW() + INTERVAL '%s seconds')
-            ON CONFLICT (lock_key) DO UPDATE SET
-                created_at = NOW(),
-                expires_at = NOW() + INTERVAL '%s seconds'
-        """, (computation_key, ttl_seconds, ttl_seconds))
+            SELECT pg_notify('computation_lock_timeout', %s)
+        """, (f"{computation_key}:{ttl_seconds}",))
+        
+        yield conn
+        
+    finally:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id))
+        except:
+            pass  # Lock might already be released
+        finally:
+            conn.close()
 
-def clear_computation_lock(computation_key: str) -> None:
-    """Clear a computation lock (called by worker when done)."""
-    with db_transaction() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM computation_locks WHERE lock_key = %s
-        """, (computation_key,))
-
-def cleanup_expired_locks() -> int:
-    """Remove expired computation locks. Returns number of removed locks."""
-    with db_transaction() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM computation_locks WHERE expires_at < NOW()
-        """)
-        return cursor.rowcount
+# Advisory Locks cleanup automatically on connection close
+# No manual cleanup needed!
 

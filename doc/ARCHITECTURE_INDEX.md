@@ -4,32 +4,7 @@ Complete overview of the system architecture, data flows, and implementation.
 
 ## 📚 Table of Contents
 
-### 1. [Overview & Precompute Flow](ARCHITECTURE_FLOW.md)
-**File:** `doc/ARCHITECTURE_FLOW.md`
-
-**Contents:**
-- System overview with architecture diagram
-- Precompute flow (hourly precomputation)
-  - Coordinator lifecycle
-  - Task creation for all locations
-  - RabbitMQ queue management
-  - Worker processing (12 workers across 3 hosts)
-  - DataFrame loading (asteroids & comets)
-  - Position computation with Skyfield
-  - Storage in PostgreSQL
-- Code references with line numbers
-
-**Key components:**
-- `api/background.py:precompute_coordinator()` - Hourly coordinator
-- `workers/precompute_worker.py:process_precompute_task()` - Task processing
-- `bright_asteroids.py:load_bright_asteroids()` - Load asteroid data
-- `comets.py:load_comets()` - Load comet data
-- `db_utils.py:store_asteroid_positions()` - Store position cache
-- `db_utils.py:store_comet_positions()` - Store position cache
-
----
-
-### 2. [API Request Flow (On-Demand)](ARCHITECTURE_FLOW_API.md)
+### 1. [API Request Flow (On-Demand)](ARCHITECTURE_FLOW_API.md)
 **File:** `doc/ARCHITECTURE_FLOW_API.md`
 
 **Contents:**
@@ -93,7 +68,18 @@ Complete overview of the system architecture, data flows, and implementation.
 
 ---
 
-### 4. [Database Schema](ARCHITECTURE_DATABASE.md)
+### 2. [Cache Strategy](ARCHITECTURE_CACHE.md)
+**File:** `doc/ARCHITECTURE_CACHE.md`
+
+**Contents:**
+- 3-level cache hierarchy (asteroids & comets only)
+- Performance metrics per cache level
+- Cache invalidation strategy
+- Response times: 100–200ms (position cache) up to 30s (cold start)
+
+---
+
+### 3. [Database Schema](ARCHITECTURE_DATABASE.md)
 **File:** `doc/ARCHITECTURE_DATABASE.md`
 
 **Contents:**
@@ -121,35 +107,29 @@ Complete overview of the system architecture, data flows, and implementation.
 
 ---
 
-### 5. [Worker Setup Guide](WORKER_SETUP.md)
-**File:** `doc/WORKER_SETUP.md`
+### 4. [Hybrid Deduplication](hybrid-deduplication.md)
+**File:** `doc/hybrid-deduplication.md`
 
 **Contents:**
-- Multi-host worker architecture
-- Worker types (precompute, asteroid, comet)
-- Deployment & configuration
-- Monitoring & troubleshooting
-- Firewall setup
+- RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+- Two-layer protection against duplicate computations
+- Performance benefits: -80% memory, +35% throughput
+- Implementation details and monitoring
 
-**Not part of this architecture document, but important for deployment!**
+---
+
+### 5. [Production Deployment](PRODUCTION_DEPLOYMENT.md)
+**File:** `doc/PRODUCTION_DEPLOYMENT.md`
+
+**Contents:**
+- Multi-host deployment guide
+- Firewall configuration
+- Environment variables setup
+- Monitoring and troubleshooting
 
 ---
 
 ## 🔄 Data Flow Overview
-
-### Precompute (hourly)
-
-```
-Coordinator → RabbitMQ Queue → Worker (12x) → PostgreSQL
-                                    │
-                                    ├─ Load DataFrame (MPC)
-                                    ├─ Compute Positions (Skyfield)
-                                    └─ Store Snapshot
-```
-
-**See:** [ARCHITECTURE_FLOW.md](ARCHITECTURE_FLOW.md)
-
----
 
 ### API Request (on-demand)
 
@@ -159,35 +139,27 @@ Browser → FastAPI → Cache Check
                     ┌────┴────┐
                 Cache HIT  Cache MISS
                     │         │
-                Return    RabbitMQ RPC → Worker → Compute → Return
+                Return    RabbitMQ RPC → Unified Worker → Compute → Return
 ```
-
-**See:** [ARCHITECTURE_FLOW_API.md](ARCHITECTURE_FLOW_API.md)
 
 ---
 
-### RabbitMQ queues
+## 📚 Additional Documentation
 
-- Precompute: `precompute.tasks` (Classic, Priority 0–10)
-- On-Demand: `asteroid.compute`, `comet.compute` (Quorum, TTL 1h)
+### [Celestial Objects](asteroids.md | comets.md | planets.md)
+- **Asteroids:** IAU H-G magnitude model, orbital mechanics
+- **Comets:** M1/k1 magnitude model, comet-specific calculations  
+- **Planets:** Direct Skyfield computation, no caching
 
----
+### [PostgreSQL](postgresql.md)
+- Database setup, optimization, and maintenance
+- Advisory locks for Hybrid Deduplication
+- Performance tuning
 
-## 🗄️ Cache hierarchy
-
-```
-Level 1: Position cache (unlimited)
-    │ MISS
-    ▼
-Level 2: DataFrame cache (31 days)
-    │ MISS
-    ▼
-Level 3: MPC Download (5-30s)
-```
-
-**Note:** Only for asteroids & comets. Planets are computed directly (no cache).
-
-**See:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
+### [Firewall Setup](FIREWALL_SETUP.md)
+- UFW configuration for production
+- Port security for RabbitMQ and PostgreSQL
+- Multi-host network security
 
 ---
 

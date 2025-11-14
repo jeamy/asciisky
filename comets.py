@@ -28,7 +28,7 @@ from cache_utils import normalize_location, location_key, time_bucket_utc
 from timezone_utils import get_tzinfo
 from bright_asteroids import format_time
 import logging
-from db_utils import get_db_connection, store_comet_dataframe, store_comet_positions, get_comet_positions
+from db_utils import get_db_connection, store_comet_dataframe, store_comet_positions, get_comet_positions, get_comet_dataframe
 from pathlib import Path
 from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
@@ -453,7 +453,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
         try:
-            from db_utils import get_comet_positions
             cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
             if cached_positions:
                 logger.debug(f"Loading PostgreSQL comet cache for {loc_key}/{time_bucket}")
@@ -464,7 +463,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
     # Load comet dataframe - PostgreSQL ONLY
     df = None
     try:
-        from db_utils import get_comet_dataframe
         df_pickle = get_comet_dataframe()
         if df_pickle:
             df = pickle.loads(df_pickle)
@@ -751,7 +749,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
     # Save final list to cache for faster subsequent loads
     # Store in PostgreSQL cache
     try:
-        from db_utils import store_comet_positions
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)

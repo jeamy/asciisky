@@ -18,6 +18,7 @@ import math
 from types import SimpleNamespace
 from typing import Optional
 from cache_utils import normalize_location, location_key, time_bucket_utc
+from db_utils import get_asteroid_dataframe
 from timezone_utils import get_tzinfo
 from db_utils import (
     store_asteroid_dataframe, store_asteroid_positions,
@@ -219,7 +220,6 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         
     # --- PostgreSQL Loading (ONLY source) ---
     import pickle
-    from db_utils import get_asteroid_dataframe
     
     try:
         df_pickle = get_asteroid_dataframe()
@@ -390,13 +390,11 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         
         # Cache the results for future requests
         if use_cache:
-            from cache_utils import normalize_location, location_key, time_bucket_utc
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             loc_key = location_key(lat_norm, lon_norm, elev_norm)
             time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
             
             try:
-                from db_utils import store_asteroid_positions
                 # Use 0 as representative ID (all asteroids share same location/time)
                 representative_id = 0
                 store_asteroid_positions(
