@@ -17,6 +17,7 @@ from skyfield.data import mpc
 import math
 from types import SimpleNamespace
 from typing import Optional
+import pickle
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_asteroid_dataframe
 from timezone_utils import get_tzinfo
@@ -63,6 +64,31 @@ def clear_in_memory_cache():
     _asteroid_df_cache = None
     _asteroid_df_timestamp = None
     print("Cleared asteroid in-memory DataFrame cache")
+
+
+def load_asteroid_dataframe(use_cache: bool = True) -> pd.DataFrame:
+    """Return cached asteroid DataFrame from filesystem (pickle).
+
+    Mirrors comets.load_comet_dataframe so workers can pre-load data reliably.
+    """
+    global _asteroid_df_cache, _asteroid_df_timestamp
+
+    if use_cache and _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
+        age_seconds = (datetime.now(timezone.utc) - _asteroid_df_timestamp).total_seconds()
+        if age_seconds < ASTEROID_DF_CACHE_TTL_SECONDS:
+            return _asteroid_df_cache
+
+    df_pickle = get_asteroid_dataframe()
+    if not df_pickle:
+        raise RuntimeError("Asteroid DataFrame cache missing. Run nightly_data_updater first.")
+
+    df = pickle.loads(df_pickle)
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("Asteroid DataFrame pickle did not contain a pandas DataFrame")
+
+    _asteroid_df_cache = df
+    _asteroid_df_timestamp = datetime.now(timezone.utc)
+    return df
 
 def format_time(dt, tz=None):
     """
