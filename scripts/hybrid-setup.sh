@@ -51,6 +51,7 @@ show_help() {
     echo "  $0 local           # Start local development (keeps data)"
     echo "  $0 local --clean   # Fresh start with empty database"
     echo "  $0 production      # Deploy to production"
+    echo "  $0 production --clean  # Fresh production deployment"
     echo "  $0 test            # Run tests only"
     echo ""
     echo "Data Safety:"
@@ -264,16 +265,97 @@ EOF
 
 # Production setup
 setup_production() {
-    echo -e "${BLUE}🚀 Production Setup with Hybrid Deduplication${NC}"
-    echo "==============================================="
+    CLEAN_DATA=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --clean)
+                CLEAN_DATA=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+    
+    echo -e "${BLUE}🚀 Production Setup with PostgreSQL Deduplication${NC}"
+    echo "=============================================="
     echo ""
     
+    # Check if docker-compose.production.yml exists
+    if [ ! -f "docker-compose.production.yml" ]; then
+        print_error "docker-compose.production.yml not found. Please run from project root."
+        exit 1
+    fi
+    
+    # Check if scripts/setup-production.sh exists
     if [ ! -f "scripts/setup-production.sh" ]; then
         print_error "Production setup script not found!"
         exit 1
     fi
     
-    print_info "Running production setup with Hybrid Deduplication..."
+    # Check if Docker is running
+    if ! docker info > /dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker first."
+        exit 1
+    fi
+    
+    # Check if docker compose is available
+    if ! docker compose version > /dev/null 2>&1; then
+        print_error "docker compose not found. Please install Docker Compose v2."
+        exit 1
+    fi
+    
+    # Create .env if not present
+    if [ ! -f .env ]; then
+        print_error ".env file not found! Production setup requires .env file."
+        print_info "Please create .env file with production settings:"
+        print_info "  cp .env.example .env"
+        print_info "  # Edit .env with secure passwords and production settings"
+        exit 1
+    fi
+    
+    # Load environment variables
+    source .env
+    
+    print_status ".env loaded successfully"
+    
+    # Check required production variables
+    if [ -z "$POSTGRES_PASSWORD" ]; then
+        print_error "POSTGRES_PASSWORD not set in .env"
+        exit 1
+    fi
+    
+    if [ -z "$RABBITMQ_PASSWORD" ]; then
+        print_error "RABBITMQ_PASSWORD not set in .env"
+        exit 1
+    fi
+    
+    if [ -z "$SESSION_SECRET" ]; then
+        print_warning "SESSION_SECRET not set in .env - using default (not recommended for production)"
+    fi
+    
+    if [ "$CLEAN_DATA" = true ]; then
+        print_warning "⚠️  PRODUCTION CLEAN MODE: ALL PRODUCTION DATA will be deleted!"
+        echo ""
+        read -p "Are you sure you want to delete ALL PRODUCTION data? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Cancelled. Keeping existing production data."
+            echo ""
+        else
+            print_warning "Removing ALL production data..."
+            docker compose -f docker-compose.production.yml down -v
+            docker system prune -f
+            print_status "All production data removed"
+        fi
+    fi
+    
+    print_info "Running production setup with PostgreSQL Advisory Locks..."
     ./scripts/setup-production.sh
 }
 
@@ -369,7 +451,7 @@ case "$COMMAND" in
         setup_local "$@"
         ;;
     "production")
-        setup_production
+        setup_production "$@"
         ;;
     "update")
         update_production
