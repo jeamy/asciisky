@@ -460,13 +460,14 @@ run_tests() {
     print_info "Waiting for RabbitMQ to be ready..."
     sleep 10
     
-    # Setup RabbitMQ (like production)
-    print_info "Setting up RabbitMQ with PostgreSQL Advisory Locks..."
-    ./scripts/setup-rabbitmq-queues.sh || {
-        print_error "RabbitMQ setup failed"
+    # Check RabbitMQ (healthcheck only, queues are created by workers/coordinator)
+    print_info "Checking RabbitMQ..."
+    if docker compose -f docker-compose.production.yml exec -T rabbitmq rabbitmq-diagnostics -q ping; then
+        print_status "RabbitMQ is ready"
+    else
+        print_error "RabbitMQ not ready"
         exit 1
-    }
-    print_status "RabbitMQ ready with PostgreSQL Advisory Locks"
+    fi
     
     # ===== WORKER SERVER B SETUP (if configured) =====
     print_info "Checking Worker B configuration..."

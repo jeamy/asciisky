@@ -184,16 +184,13 @@ sleep 10
 docker exec asciisky-postgres pg_isready -U asciisky -d asciisky || error_exit "PostgreSQL not ready"
 success "PostgreSQL is ready"
 
-# Wait for RabbitMQ
-echo "⏳ Waiting for RabbitMQ to be ready..."
-sleep 10
-
-# Setup RabbitMQ queues for PostgreSQL Advisory Locks (no plugins)
-echo "🐰 Setting up RabbitMQ queues for PostgreSQL Advisory Locks..."
-
-./scripts/setup-rabbitmq-queues.sh || error_exit "RabbitMQ setup failed"
-
-success "RabbitMQ ready with PostgreSQL Advisory Locks (queue configuration applied)"
+# Wait for RabbitMQ (healthcheck only, queues are created by workers/coordinator)
+echo "� Checking RabbitMQ..."
+if docker compose -f docker-compose.production.yml exec -T rabbitmq rabbitmq-diagnostics -q ping; then
+    success "RabbitMQ is ready"
+else
+    error_exit "RabbitMQ not ready"
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
