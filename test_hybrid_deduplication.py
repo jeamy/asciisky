@@ -108,7 +108,16 @@ def test_hybrid_integration():
     
     try:
         # Initialize worker (this will test RabbitMQ connection)
-        worker = UnifiedWorker()
+        rabbitmq_user = os.getenv('RABBITMQ_USER', 'admin')
+        rabbitmq_password = os.getenv('RABBITMQ_PASSWORD', 'changeme')
+        rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+        rabbitmq_port = os.getenv('RABBITMQ_PORT', '5672')
+        rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}/"
+        
+        worker = UnifiedWorker(
+            worker_id="test_worker",
+            rabbitmq_url=rabbitmq_url
+        )
         
         if not worker.connect():
             print("❌ Failed to connect to RabbitMQ")

@@ -374,20 +374,199 @@ update_production() {
     ./scripts/update-production.sh
 }
 
-# Run tests
+# Run tests (FULL PRODUCTION SETUP + TESTS)
 run_tests() {
-    echo -e "${BLUE}🧪 Running Hybrid Deduplication Tests${NC}"
-    echo "=========================================="
+    echo -e "${BLUE}🧪 Running Full Production Setup + Tests${NC}"
+    echo "=============================================="
     echo ""
     
-    # Check if containers are running
-    if ! docker compose exec -T web python -c "print('Web container OK')" 2>/dev/null; then
-        print_error "Web container not running. Please start with: $0 local"
+    # Load environment variables first
+    if [ ! -f .env ]; then
+        print_error ".env file not found! Please create .env for testing."
+        exit 1
+    fi
+    source .env
+    
+    # Check prerequisites
+    if [ ! -f "docker-compose.production.yml" ]; then
+        print_error "docker-compose.production.yml not found. Please run from project root."
         exit 1
     fi
     
-    print_info "Running comprehensive tests..."
-    if docker compose exec -T web python test_hybrid_deduplication.py; then
+    if [ ! -f "docker-compose.workers.yml" ]; then
+        print_error "docker-compose.workers.yml not found. Please run from project root."
+        exit 1
+    fi
+    
+    if ! docker info > /dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker first."
+        exit 1
+    fi
+    
+    # ===== MAIN SERVER SETUP (like production) =====
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🖥️  Setting up: Main Server (Web + RabbitMQ + PostgreSQL)"
+    echo "   Host: localhost"
+    echo "   Compose: docker-compose.production.yml"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    print_info "Building Docker image..."
+    docker compose -f docker-compose.production.yml build || {
+        print_error "Build failed on localhost"
+        exit 1
+    }
+    
+    print_info "Starting main server services..."
+    docker compose -f docker-compose.production.yml up -d \
+        --scale unified_worker=${UNIFIED_WORKERS:-2} \
+        --scale worker_monitor=${WORKER_MONITOR:-1} || {
+        print_error "Startup failed on localhost"
+        exit 1
+    }
+    
+    print_status "Main server started"
+    
+    # Wait for services to be ready
+    print_info "Waiting for PostgreSQL to be ready..."
+    sleep 10
+    docker exec asciisky-postgres pg_isready -U asciisky -d asciisky || {
+        print_error "PostgreSQL not ready"
+        exit 1
+    }
+    print_status "PostgreSQL is ready"
+    
+    print_info "Waiting for RabbitMQ to be ready..."
+    sleep 10
+    
+    # Setup RabbitMQ (like production)
+    print_info "Setting up RabbitMQ with PostgreSQL Advisory Locks..."
+    ./scripts/setup-rabbitmq-queues.sh || {
+        print_error "RabbitMQ setup failed"
+        exit 1
+    }
+    print_status "RabbitMQ ready with PostgreSQL Advisory Locks"
+    
+    # ===== WORKER SERVER B SETUP (if configured) =====
+    if [ "$SETUP_WORKER_B" == "true" ] && [ -n "$RABBITMQ_B" ]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🖥️  Setting up: Worker Server B"
+        echo "   Host: $RABBITMQ_B"
+        echo "   Compose: docker-compose.workers.yml"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        # Check SSH connection
+        if ! ssh "$RABBITMQ_B" "echo 'SSH OK'" 2>/dev/null; then
+            print_warning "Cannot connect to Worker B ($RABBITMQ_B) - skipping"
+        else
+            print_info "Setting up Worker B..."
+            
+            # Git pull/update
+            if ssh "$RABBITMQ_B" "[ -d ~/asciisky/.git ]"; then
+                ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || {
+                    print_error "Git pull failed on $RABBITMQ_B"
+                    exit 1
+                }
+            else
+                ssh "$RABBITMQ_B" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
+                    print_error "Git clone failed on $RABBITMQ_B"
+                    exit 1
+                }
+            fi
+            
+            # Copy .env
+            if [ -f ".env.b" ]; then
+                scp ".env.b" "$RABBITMQ_B:~/asciisky/.env"
+            else
+                scp .env "$RABBITMQ_B:~/asciisky/.env"
+            fi
+            
+            # Build and start
+            ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || {
+                print_error "Build failed on $RABBITMQ_B"
+                exit 1
+            }
+            
+            ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d \
+                --scale unified_worker=\${UNIFIED_WORKERS:-8} \
+                --scale worker_monitor=\${WORKER_MONITOR:-1}" || {
+                print_error "Startup failed on $RABBITMQ_B"
+                exit 1
+            }
+            
+            print_status "Worker B started"
+        fi
+    fi
+    
+    # ===== WORKER SERVER C SETUP (if configured) =====
+    if [ "$SETUP_WORKER_C" == "true" ] && [ -n "$RABBITMQ_C" ]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🖥️  Setting up: Worker Server C"
+        echo "   Host: $RABBITMQ_C"
+        echo "   Compose: docker-compose.workers.yml"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        # Check SSH connection
+        if ! ssh "$RABBITMQ_C" "echo 'SSH OK'" 2>/dev/null; then
+            print_warning "Cannot connect to Worker C ($RABBITMQ_C) - skipping"
+        else
+            print_info "Setting up Worker C..."
+            
+            # Git pull/update
+            if ssh "$RABBITMQ_C" "[ -d ~/asciisky/.git ]"; then
+                ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || {
+                    print_error "Git pull failed on $RABBITMQ_C"
+                    exit 1
+                }
+            else
+                ssh "$RABBITMQ_C" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
+                    print_error "Git clone failed on $RABBITMQ_C"
+                    exit 1
+                }
+            fi
+            
+            # Copy .env
+            if [ -f ".env.c" ]; then
+                scp ".env.c" "$RABBITMQ_C:~/asciisky/.env"
+            else
+                scp .env "$RABBITMQ_C:~/asciisky/.env"
+            fi
+            
+            # Build and start
+            ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || {
+                print_error "Build failed on $RABBITMQ_C"
+                exit 1
+            }
+            
+            ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d \
+                --scale unified_worker=\${UNIFIED_WORKERS:-4} \
+                --scale worker_monitor=\${WORKER_MONITOR:-1}" || {
+                print_error "Startup failed on $RABBITMQ_C"
+                exit 1
+            }
+            
+            print_status "Worker C started"
+        fi
+    fi
+    
+    # Wait for all services to be ready
+    print_info "Waiting for all services to be ready..."
+    sleep 15
+    
+    # Check if web container is running
+    if ! docker compose -f docker-compose.production.yml exec -T web python -c "print('Web container OK')" 2>/dev/null; then
+        print_error "Failed to start web container"
+        exit 1
+    fi
+    
+    print_status "All services ready for testing"
+    
+    print_info "Running comprehensive tests on production setup..."
+    if docker compose -f docker-compose.production.yml exec -T web python test_hybrid_deduplication.py; then
         print_status "All tests passed!"
     else
         print_error "Tests failed!"
@@ -395,8 +574,15 @@ run_tests() {
     fi
     
     echo ""
-    print_info "Additional verification:"
-    echo "   PostgreSQL locks: $(docker compose exec -T postgres psql -U asciisky -tAc "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory';" 2>/dev/null || echo 'N/A')"
+    print_info "Production verification:"
+    echo "   Main Server: $(docker compose -f docker-compose.production.yml --format 'table' ps --services | wc -l) services running"
+    if [ "$SETUP_WORKER_B" == "true" ] && [ -n "$RABBITMQ_B" ]; then
+        echo "   Worker B: $(ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml --format 'table' ps --services | wc -l" 2>/dev/null || echo 'N/A') services"
+    fi
+    if [ "$SETUP_WORKER_C" == "true" ] && [ -n "$RABBITMQ_C" ]; then
+        echo "   Worker C: $(ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml --format 'table' ps --services | wc -l" 2>/dev/null || echo 'N/A') services"
+    fi
+    echo "   PostgreSQL locks: $(docker compose -f docker-compose.production.yml exec -T postgres psql -U asciisky -tAc "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory';" 2>/dev/null || echo 'N/A')"
     echo "   Deduplication: PostgreSQL Advisory Locks (100% protection)"
 }
 
