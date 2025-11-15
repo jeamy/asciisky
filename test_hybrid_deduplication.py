@@ -108,11 +108,25 @@ def test_hybrid_integration():
     
     try:
         # Initialize worker (this will test RabbitMQ connection)
-        rabbitmq_user = os.getenv('RABBITMQ_USER', 'admin')
-        rabbitmq_password = os.getenv('RABBITMQ_PASSWORD', 'changeme')
-        rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
-        rabbitmq_port = os.getenv('RABBITMQ_PORT', '5672')
-        rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}/"
+        rabbitmq_url_env = os.getenv('RABBITMQ_URL')
+        if rabbitmq_url_env:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(rabbitmq_url_env)
+            rabbitmq_user = parsed.username or os.getenv('RABBITMQ_USER', 'admin')
+            rabbitmq_password = parsed.password or os.getenv('RABBITMQ_PASSWORD', 'changeme')
+            rabbitmq_host = parsed.hostname or os.getenv('RABBITMQ_HOST', 'rabbitmq')
+            rabbitmq_port = parsed.port or os.getenv('RABBITMQ_PORT', '5672')
+            rabbitmq_vhost = parsed.path or '/'
+            if not rabbitmq_vhost.startswith('/'):
+                rabbitmq_vhost = f"/{rabbitmq_vhost}"
+            rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
+        else:
+            rabbitmq_user = os.getenv('RABBITMQ_USER', 'admin')
+            rabbitmq_password = os.getenv('RABBITMQ_PASSWORD', 'changeme')
+            rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+            rabbitmq_port = os.getenv('RABBITMQ_PORT', '5672')
+            rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}/"
         
         worker = UnifiedWorker(
             worker_id="test_worker",

@@ -239,6 +239,24 @@ class UnifiedWorker:
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             return False
+
+    def disconnect(self):
+        """Gracefully close RabbitMQ connection and channel"""
+        try:
+            if self.channel and self.channel.is_open:
+                self.channel.close()
+        except Exception as e:
+            logger.debug(f"Error closing channel: {e}")
+        finally:
+            self.channel = None
+
+        try:
+            if self.connection and self.connection.is_open:
+                self.connection.close()
+        except Exception as e:
+            logger.debug(f"Error closing connection: {e}")
+        finally:
+            self.connection = None
     
     def _declare_queues(self):
         """Deklariere alle notwendigen Queues für PostgreSQL Advisory Locks"""
