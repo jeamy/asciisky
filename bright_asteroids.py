@@ -289,148 +289,20 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         from skyfield.data import mpc
         from skyfield.toposlib import Topos
         from skyfield import almanac
-        
-        # Use passed parameters (don't create new ones!)
-        sun = eph['sun']
-        
-        dt_utc = current_dt or datetime.now(timezone.utc)
-        if dt_utc.tzinfo is None:
-            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-        t = ts.from_datetime(dt_utc)
-        topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
-        observer = eph['earth'] + topos
-        
-        asteroid_list = []
-        events_computed = 0
-        
-        for idx, row in df_filtered.iterrows():
-            try:
-                # Create Skyfield orbit object from DataFrame row
-                orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
-                
-                # QUICK PRE-FILTER
-                rough_apparent_mag = row['magnitude_H'] + 5.0
-                if rough_apparent_mag > 22.0:
-                    continue
-                
-                # Determine target
-                center_code = int(getattr(orbit, 'center', 10))
-                target = (sun + orbit) if center_code != 0 else orbit
-                
-                # Calculate position
-                astrometric = observer.at(t).observe(target)
-                
-                # Extract distances for magnitude calculation
-                r = astrometric.distance().au
-                delta = astrometric.radec()[2].au
-                phase_angle = math.degrees(math.acos(
-                    max(-1, min(1, (r**2 + delta**2 - 1) / (2 * r * delta)))
-                ))
-                
-                # Calculate apparent magnitude
-                H = row['magnitude_H']
-                G = row.get('magnitude_G', 0.15)
-                apparent_mag = asteroid_apparent_magnitude(H, G, r, delta, phase_angle)
-                
-                # Filter by magnitude
-                if apparent_mag > max_magnitude:
-                    continue
-                
-                # Get RA/Dec
-                ra, dec, _ = astrometric.radec()
-                
-                # Altitude/Azimuth
-                alt, az, _ = astrometric.apparent().altaz()
-                
-                # Rise/Set/Transit times (from legacy code)
-                rise_time, set_time, transit_time = None, None, None
-                if events_computed < 50:
-                    try:
-                        # Start/end window anchored at simulated day's UTC midnight
-                        start_time = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-                        end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-                        rise_set_func = almanac.risings_and_settings(eph, target, topos)
-                        times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
 
-                        for ti, event in zip(times, events):
-                            if event == 1 and rise_time is None: 
-                                rise_time = ti.utc_datetime()
-                            elif event == 0 and set_time is None: 
-                                set_time = ti.utc_datetime()
-                        
-                        # Transit time calculation
-                        f = almanac.meridian_transits(eph, target, topos)
-                        t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                        if len(t_times):
-                            now_utc = current_dt if current_dt.tzinfo is not None else current_dt.replace(tzinfo=timezone.utc)
-                            candidates = []
-                            for ti, ev in zip(t_times, t_events):
-                                utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                                try:
-                                    alt_deg = observer.at(ti).observe(target).apparent().altaz()[0].degrees
-                                except Exception:
-                                    alt_deg = float('-inf')
-                                candidates.append((utc_dt, alt_deg, int(ev)))
-                            
-                            # Prefer future events
-                            pool = [c for c in candidates if c[0] >= now_utc]
-                            if not pool:
-                                pool = candidates
-                            if pool:
-                                pool.sort(key=lambda x: (-x[1], x[0]))
-                                transit_time = pool[0][0]
-                        
-                        events_computed += 1
-                    except Exception:
-                        pass
-                
-                # Format times (datetime -> string)
-                def format_time_str(dt, tz):
-                    if dt is None:
-                        return None
-                    if not hasattr(dt, 'tzinfo') or dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return dt.astimezone(tz).strftime('%H:%M')
-                
-                asteroid_data = {
-                    'name': row['designation'],
-                    'ra': ra.hours,
-                    'dec': dec.degrees,
-                    'magnitude': round(apparent_mag, 1),
-                    'altitude': alt.degrees,
-                    'azimuth': az.degrees,
-                    'distance': round(delta, 3),
-                    'rise_time': format_time_str(rise_time, tz),
-                    'transit_time': format_time_str(transit_time, tz),
-                    'set_time': format_time_str(set_time, tz),
-                    'type': 'asteroid',
-                    'symbol': '⚸'
-                }
-                
-                asteroid_list.append(asteroid_data)
-                
-            except Exception as e:
-                # Log error for debugging (but continue processing other asteroids)
-                # print(f"Error processing asteroid {row.get('designation', 'unknown')}: {e}")
-                continue
-        
-        # Cache the results for future requests
-        if use_cache:
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
-            
-            try:
-                # Use 0 as representative ID (all asteroids share same location/time)
-                representative_id = 0
-                store_asteroid_positions(
-                    representative_id, loc_key, time_bucket,
-                    lat, lon, elevation, asteroid_list
-                )
-            except Exception as e:
-                print(f"Failed to cache asteroid positions: {e}")
-        
-        return asteroid_list
+        # Use passed parameters (don't create new ones!)
+        return _compute_asteroids_vectorized(
+            df_filtered=df_filtered,
+            ts=ts,
+            eph=eph,
+            lat=lat,
+            lon=lon,
+            elevation=elevation,
+            max_magnitude=max_magnitude,
+            use_cache=use_cache,
+            current_dt=current_dt,
+            tz=tz,
+        )
     else:
         # No data available
         return []
@@ -567,3 +439,241 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     except Exception as e:
         print(f"An unexpected error occurred during asteroid calculation: {e}")
         return []
+
+
+def _compute_asteroids_vectorized(
+    df_filtered,
+    ts,
+    eph,
+    lat,
+    lon,
+    elevation,
+    max_magnitude,
+    use_cache,
+    current_dt,
+    tz,
+):
+    """Vectorized magnitude computation and final asteroid processing.
+
+    This helper mirrors the logic of the existing final processing loop but uses
+    vectorized_asteroid_apparent_magnitude to compute apparent magnitudes for
+    all candidates in one step. The cache always stores objects up to a
+    brightness of min(max_magnitude, 20.0); API routes may apply a stricter
+    user filter on top of that.
+    """
+
+    # Use simulated time if provided; else current UTC
+    dt_utc = current_dt or datetime.now(timezone.utc)
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    t = ts.from_datetime(dt_utc)
+
+    topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elevation)
+    observer = eph['earth'] + topos
+    sun = eph['sun']
+
+    # Build orbits and initial observations, skipping rows that fail
+    orbits = []
+    targets = []
+    observations = []
+    index_map = {}
+
+    for idx, row in df_filtered.iterrows():
+        try:
+            orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+            center_code = int(getattr(orbit, "center", 10))
+            target = (sun + orbit) if center_code != 0 else orbit
+            astrometric = observer.at(t).observe(target)
+
+            index_map[idx] = len(orbits)
+            orbits.append(orbit)
+            targets.append(target)
+            observations.append(astrometric)
+        except Exception:
+            # Skip objects that fail during orbit or observation creation
+            continue
+
+    if not orbits:
+        return []
+
+    # Restrict DataFrame to successfully processed rows and keep order stable
+    valid_indices = list(index_map.keys())
+    candidates_df = df_filtered.loc[valid_indices].copy()
+
+    # Extract distances and phase angles into NumPy arrays
+    deltas = np.array([obs.distance().au for obs in observations])
+    sun_observations = [sun.at(t).observe(target) for target in targets]
+    rs = np.array([obs.distance().au for obs in sun_observations])
+    phase_angles = np.array([obs.phase_angle(sun).degrees for obs in observations])
+
+    # Prepare H and G arrays
+    H_values = candidates_df["magnitude_H"].to_numpy()
+    if "magnitude_G" in candidates_df.columns:
+        G_values = candidates_df["magnitude_G"].fillna(0.15).to_numpy()
+    else:
+        G_values = np.full_like(H_values, 0.15, dtype=float)
+
+    # Vectorized magnitude calculation (IAU H-G model)
+    apparent_magnitudes = vectorized_asteroid_apparent_magnitude(
+        H=H_values,
+        G=G_values,
+        r=rs,
+        delta=deltas,
+        phase_angle_deg=phase_angles,
+    )
+
+    candidates_df["apparent_magnitude"] = apparent_magnitudes
+
+    # Cache limit: never exceed mag 20.0, but respect caller's max_magnitude if lower
+    if max_magnitude is None:
+        cache_limit = min(MAX_APPARENT_MAGNITUDE, 20.0)
+    else:
+        try:
+            cache_limit = min(float(max_magnitude), 20.0)
+        except Exception:
+            cache_limit = 20.0
+
+    bright_df = candidates_df[candidates_df["apparent_magnitude"] <= cache_limit].sort_values(
+        "apparent_magnitude"
+    )
+    top_df = bright_df.head(MAX_ASTEROIDS)
+    print(
+        f"Found {len(top_df)} asteroids with apparent mag <= {cache_limit} (user filter: {max_magnitude})"
+    )
+
+    asteroid_list = []
+    events_computed = 0
+
+    for idx, row in top_df.iterrows():
+        try:
+            pos = index_map.get(idx)
+            if pos is None:
+                continue
+
+            target = targets[pos]
+            astrometric = observer.at(t).observe(target)
+            apparent = astrometric.apparent()
+            ra, dec, distance = apparent.radec()
+            alt, az, _ = apparent.altaz()
+
+            # Event times limited to reduce CPU
+            rise_time, set_time, transit_time = None, None, None
+            if events_computed < ASTEROIDS_EVENTS_MAX:
+                # Start/end window anchored at simulated day's UTC midnight
+                start_time = ts.utc(
+                    t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0)
+                )
+                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
+
+                # Rise/Set times
+                rise_set_func = almanac.risings_and_settings(eph, target, topos)
+                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
+
+                for ti, event in zip(times, events):
+                    if event == 1 and rise_time is None:
+                        rise_time = ti.utc_datetime()
+                    elif event == 0 and set_time is None:
+                        set_time = ti.utc_datetime()
+
+                # Bestimme die nächste Nacht (Rise->Set) nach dt_utc als Fenster für die obere Kulmination
+                night_start_utc, night_end_utc = None, None
+                last_rise_utc = None
+                for ti_rs, ev_rs in zip(times, events):
+                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
+                    if ev_rs == 1:  # rise
+                        last_rise_utc = ev_dt_utc
+                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
+                        # wähle das erste Rise->Set Paar, dessen Set in der Zukunft liegt
+                        if ev_dt_utc >= (
+                            dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)
+                        ):
+                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
+                            break
+                if night_start_utc is None or night_end_utc is None:
+                    # Fallback: benutze die zuerst gefundenen rise/set Zeiten, wenn vorhanden
+                    night_start_utc, night_end_utc = rise_time, set_time
+
+                f = almanac.meridian_transits(eph, target, topos)
+                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
+                # Wähle die nächste obere Kulmination innerhalb des Nachtfensters (UTC-basiert)
+                chosen_time_utc = None
+                if len(t_times):
+                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(
+                        tzinfo=timezone.utc
+                    )
+                    candidates = []
+                    for ti, ev in zip(t_times, t_events):
+                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
+                        # Altitude am Transit-Zeitpunkt bestimmen (höher = obere Kulmination)
+                        try:
+                            alt_deg = (
+                                observer.at(ti)
+                                .observe(target)
+                                .apparent()
+                                .altaz()[0]
+                                .degrees
+                            )
+                        except Exception:
+                            alt_deg = float("-inf")
+                        candidates.append((utc_dt, alt_deg, int(ev)))
+                    # Filtere auf das Nachtfenster (falls vorhanden)
+                    if night_start_utc is not None and night_end_utc is not None:
+                        pool = [
+                            c
+                            for c in candidates
+                            if c[0] >= night_start_utc and c[0] <= night_end_utc
+                        ]
+                    else:
+                        # Bevorzuge zukünftige Ereignisse
+                        pool = [c for c in candidates if c[0] >= now_utc]
+                        if not pool:
+                            pool = candidates
+                    if pool:
+                        pool.sort(key=lambda x: (-x[1], x[0]))
+                        chosen_time_utc = pool[0][0]
+                transit_time = chosen_time_utc
+                events_computed += 1
+
+            asteroid_list.append(
+                {
+                    "name": row["designation"],
+                    "number": str(row.name),
+                    "magnitude": round(float(row["apparent_magnitude"]), 1),
+                    "ra": ra.hours * 15.0,
+                    "dec": dec.degrees,
+                    "altitude": alt.degrees,
+                    "azimuth": az.degrees,
+                    "distance": round(distance.au, 3),
+                    "rise_time": format_time(rise_time, tz),
+                    "set_time": format_time(set_time, tz),
+                    "transit_time": format_time(transit_time, tz),
+                    "type": "asteroid",
+                    "symbol": "⚸",  # Unicode U+26B8 (Asteroid)
+                }
+            )
+        except Exception as e:
+            print(f"Error in final processing for {row.get('designation', 'N/A')}: {e}")
+            continue
+
+    # Cache the results for future requests (same semantics as before)
+    if use_cache:
+        try:
+            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
+
+            # Use 0 as representative ID (all asteroids share same location/time)
+            representative_id = 0
+            store_asteroid_positions(
+                representative_id,
+                loc_key,
+                time_bucket,
+                lat,
+                lon,
+                elevation,
+                asteroid_list,
+            )
+        except Exception as e:
+            print(f"Failed to cache asteroid positions: {e}")
+
+    return asteroid_list
