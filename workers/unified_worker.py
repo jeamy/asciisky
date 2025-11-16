@@ -260,62 +260,10 @@ class UnifiedWorker:
     
     def _declare_queues(self):
         """Deklariere alle notwendigen Queues für PostgreSQL Advisory Locks"""
-        # Common queue arguments
-        queue_args = {
-            'x-message-ttl': 300000,          # 5 minutes TTL
-            'x-max-priority': 10              # Priority support
-        }
-        
-        # Precompute Queue
-        self.channel.queue_declare(
-            queue='precompute.tasks',
-            durable=True,
-            arguments=queue_args
-        )
-        
-        # On-Demand Queues (Smart Interpolation)
-        on_demand_args = {
-            'x-message-ttl': 300000
-        }
-        
-        self.channel.queue_declare(
-            queue='asteroid.compute',
-            durable=True,
-            arguments=on_demand_args
-        )
-        
-        self.channel.queue_declare(
-            queue='comet.compute',
-            durable=True,
-            arguments=on_demand_args
-        )
-        
-        # Status Queue (no deduplication needed)
-        self.channel.queue_declare(
-            queue='computation.status',
-            durable=True
-        )
-        
-        # Exchange für On-Demand Computation
-        self.channel.exchange_declare(
-            exchange='computation.direct',
-            exchange_type='direct',
-            durable=True
-        )
-        
-        # Bindings
-        self.channel.queue_bind(
-            exchange='computation.direct',
-            queue='asteroid.compute',
-            routing_key='compute.asteroid'
-        )
-        
-        self.channel.queue_bind(
-            exchange='computation.direct',
-            queue='comet.compute',
-            routing_key='compute.comet'
-        )
-        
+        # Nutze zentrale Queue-Definition aus worker_utils, damit alle Worker
+        # konsistent dieselben Queue-Argumente verwenden (insbesondere keine
+        # TTL-Differenzen bei bereits existierenden Queues in RabbitMQ).
+        worker_utils.declare_computation_queues(self.channel)
         logger.info("All queues and exchanges declared successfully")
     
     def send_task_with_deduplication(self, queue_name: str, task_data: Dict[str, Any], 
