@@ -8,63 +8,38 @@ Complete overview of the system architecture, data flows, and implementation.
 **File:** `doc/ARCHITECTURE_FLOW_API.md`
 
 **Contents:**
-- **Three API endpoints:**
-  1. **Asteroids** — RabbitMQ workers + cache
-  2. **Comets** — RabbitMQ workers + cache (same as asteroids)
-  3. **Planets** — Direct computation (no workers, no cache)
-- Full request flow for all three types
-- Cache hit vs cache miss scenarios
-- RabbitMQ RPC pattern for asteroids/comets
-- Direct computation for planets (synchronous, ~50–200ms)
-- Comparison table: asteroids/comets vs planets
-- Performance comparison
+- **Three API groups:**
+  1. **Asteroids** (`/api/bright_asteroids`, alias `/api/asteroids`) — cache-first via PostgreSQL, background RabbitMQ workers + precompute.
+  2. **Comets** (`/api/comets`) — same architecture as asteroids.
+  3. **Celestial objects** (`/api/celestial`, `/api/celestial/{body_id}`) — direct real-time computation (no workers, no cache).
+- Full request flow for all three groups.
+- Cache hit vs cache miss scenarios.
+- Background worker + precompute pipeline for asteroids/comets (no RPC in the hot path).
+- Direct computation for celestial objects (synchronous, ~50–200ms).
+- Comparison table: asteroids/comets vs celestial.
+- Performance notes.
 
-**Asteroids/Comets flow:**
-1. Browser → FastAPI endpoint
-2. Position cache check
-3. On cache miss: RabbitMQ RPC (30s timeout)
-4. Worker computes positions (mag 20.0, unfiltered)
-5. Worker stores in cache
-6. FastAPI applies magnitude filters (user_settings.json)
-7. Response back to browser
+**Asteroids/Comets flow (cache-first + background workers):**
+1. Browser → FastAPI endpoint (`/api/bright_asteroids` / `/api/comets`).
+2. Compute location + time bucket, try to load positions from `cached_positions` (with interpolation).
+3. Cache hit → API applies user magnitude filter (`user_settings.json`) and returns JSON.
+4. Cache miss → API checks computation lock (per location/bucket).
+5. If no computation in progress → schedule background worker task via RabbitMQ; current request returns (typically with empty `bodies`).
+6. Worker computes positions (up to mag ~20.0), stores them in `cached_positions` for future requests.
 
-**Planets flow:**
-1. Browser → FastAPI endpoint
-2. Direct computation with Skyfield (50–200ms)
-3. Response back to browser
+**Celestial flow (Sun, Moon, planets via /api/celestial):**
+1. Browser → FastAPI endpoint (`/api/celestial` or `/api/celestial/{body_id}`).
+2. API calls `compute_celestial_snapshot` (Skyfield) to compute positions, magnitudes, and rise/set/transit times on demand.
+3. Response is returned directly; no cache or RabbitMQ involved.
 
 **Key components:**
-- `api/routes/asteroids.py:get_bright_asteroids()` - Asteroids endpoint
-- `api/routes/comets.py:get_comets()` - Comets endpoint (same flow)
-- `api/routes/planets.py:get_planets()` - Planets endpoint (direct)
-- `workers/asteroid_worker.py` - Asteroid worker
-- `workers/comet_worker.py` - Comet worker
-- `planets.py:get_planet_positions()` - Planet computation
-
----
-
-### 3. [Cache Strategy](ARCHITECTURE_CACHE.md)
-**File:** `doc/ARCHITECTURE_CACHE.md`
-
-**Contents:**
-- 3-level cache hierarchy (asteroids & comets only)
-  - **Level 1:** Position cache (unlimited) — `cached_positions`
-  - **Level 2:** DataFrame cache (31 days) — `asteroids`, `comets`
-  - **Level 3:** MPC download (fallback) — MPCORB.DAT, CometEls.txt
-- Planets: NOT cached (direct computation)
-- Cache strategy on magnitude filter changes
-- Performance metrics per cache level
-- Response times: 100–200ms (position cache) up to 30s (cold start)
-
-**Cache invalidation:**
-- User changes filter → **NO** PostgreSQL caches are deleted!
-- All caches contain unfiltered data (reusable)
-- Position caches: All computed positions (up to mag ~22)
-- DataFrames: MPC orbital data (mag 20.0)
-- Filtering: Only in API routes based on user_settings.json
-- Next request: New objects appear immediately without recomputation!
-
-**Code:** `api/routes/filters.py:36-57`
+- `api/routes/asteroids.py:get_bright_asteroids()` – Asteroids endpoint.
+- `api/routes/comets.py:get_comets()` – Comets endpoint (same flow).
+- `api/routes/celestial.py:get_celestial_objects()` / `get_celestial_object()` – Celestial endpoints.
+- `workers/asteroid_worker.py` – On-demand asteroid worker.
+- `workers/comet_worker.py` – On-demand comet worker.
+- `workers/precompute_worker.py` – Precompute worker for asteroids/comets.
+- `api/computation.py:compute_celestial_snapshot()` – Celestial computation.
 
 ---
 
@@ -73,9 +48,22 @@ Complete overview of the system architecture, data flows, and implementation.
 
 **Contents:**
 - 3-level cache hierarchy (asteroids & comets only)
-- Performance metrics per cache level
-- Cache invalidation strategy
-- Response times: 100–200ms (position cache) up to 30s (cold start)
+  - **Level 1:** Position cache (unlimited) — `cached_positions`
+  - **Level 2:** DataFrame cache (filesystem) — `asteroid_dataframe.pkl`, `comet_dataframe.pkl`
+  - **Level 3:** MPC download (fallback) — MPCORB.DAT, comet elements file
+- Performance metrics per cache level.
+- Cache invalidation strategy (filters do not clear caches).
+- Response times: 100–200ms (position cache) up to 30s (cold start).
+
+**Cache invalidation:**
+- User changes filter → **NO** caches are deleted.
+- All caches contain unfiltered data (reusable):
+  - Position cache: all computed positions (up to about mag 20.0).
+  - DataFrame cache files: MPC orbital data (up to mag 20.0, on filesystem).
+- Filtering happens only in API routes based on `user_settings.json`.
+- Next request: New objects appear immediately without recomputation.
+
+**Code:** `api/routes/filters.py:36-57`
 
 ---
 
@@ -83,27 +71,26 @@ Complete overview of the system architecture, data flows, and implementation.
 **File:** `doc/ARCHITECTURE_DATABASE.md`
 
 **Contents:**
-- PostgreSQL table schema with SQL
-- Example data (JSON)
-- TTL & storage per table
-- Data flow: MPC → DataFrame → PostgreSQL → API
+- PostgreSQL schema for `cached_positions` with SQL.
+- Example data (JSON) for cached positions.
+- DataFrame cache layout on filesystem (asteroid/comet DataFrame pickles).
+- TTL & storage per cache layer.
+- Data flow: MPC → DataFrame (filesystem) → PostgreSQL `cached_positions` → API.
 
-**Tables:**
+**Caches:**
 
-#### `asteroids` / `comets` (DataFrame cache)
-- Contents: Pickle-serialized Pandas DataFrames with MPC orbital data
-- TTL: 31 days
-- Size: ~20 MB (asteroids), ~1 MB (comets)
-- Source: MPCORB.DAT, CometEls.txt
+#### DataFrame files (filesystem)
+- Paths: `asteroid_dataframe.pkl`, `comet_dataframe.pkl` under `DATA_DIR`.
+- Contents: pickled Pandas DataFrames with MPC orbital data (up to mag ~20.0).
+- Staleness window: ~49 hours.
 
-#### `cached_positions` (Position cache)
-- Key: `(object_type, location_key, time_bucket)`
-- TTL: Unlimited (positions are immutable)
-- Contents: Computed positions as pickled, unfiltered data
-- Size: ~10 KB per entry
-- Contains: Both asteroids and comets in one table
+#### `cached_positions` (Position cache, PostgreSQL)
+- Key: `(object_type, location_key, time_bucket)`.
+- TTL: Unlimited (positions for a time bucket are immutable).
+- Contents: computed positions as pickled, unfiltered lists (up to mag ~20.0).
+- Contains: both asteroids and comets in one table.
 
-**Total:** ~25–60 MB for a full cache (excluding planets)
+**Total:** ~25–60 MB for a typical cache snapshot (excluding celestial objects).
 
 ---
 
@@ -139,7 +126,7 @@ Browser → FastAPI → Cache Check
                     ┌────┴────┐
                 Cache HIT  Cache MISS
                     │         │
-                Return    RabbitMQ RPC → Unified Worker → Compute → Return
+                Return    RabbitMQ → Workers (on-demand/precompute) → Compute & store in cache
 ```
 
 ---
@@ -170,7 +157,7 @@ Browser → FastAPI → Cache Check
 | **Position cache hit** | Level 1 | 100–200ms | Computed positions available |
 | **DataFrame cache hit** | Level 2 | 2–5s | DataFrame present, computation needed |
 | **Cold start** | Level 3 | 10–30s | MPC download + parse + compute |
-| **Planets** | No cache | 50–200ms | Direct computation (only 8 bodies) |
+| **Celestial (/api/celestial)** | No cache | 50–200ms | Direct computation of Sun/Moon/planets |
 
 **See:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
 
@@ -185,8 +172,8 @@ api/
 ├── routes/
 │   ├── asteroids.py          # GET /api/bright_asteroids
 │   ├── comets.py             # GET /api/comets
+│   ├── celestial.py          # GET /api/celestial, /api/celestial/{body_id}
 │   └── filters.py            # GET/POST /api/filters
-└── background.py             # Precompute Coordinator
 ```
 
 ### Worker layer
@@ -214,9 +201,8 @@ settings.py                   # user_settings.json
 
 ```python
 load_bright_asteroids(loader, ts, eph, observer_loc, max_magnitude=20.0, current_dt=None)
-# Loads DataFrame from PostgreSQL cache or MPC MPCORB.DAT
-# Computes positions with Skyfield
-# Lines: 200–360
+# Loads asteroid DataFrame from filesystem cache (or MPCORB.DAT on cold start)
+# Computes positions with Skyfield and stores results in cached_positions
 ```
 
 ### Comet computation
@@ -224,19 +210,17 @@ load_bright_asteroids(loader, ts, eph, observer_loc, max_magnitude=20.0, current
 
 ```python
 load_comets(ts, eph, observer_loc, max_comets=100, max_magnitude=20.0, current_dt=None)
-# Loads DataFrame from PostgreSQL cache or MPC CometEls.txt
-# Computes positions with Skyfield
-# Lines: 280–450
+# Loads comet DataFrame from filesystem cache (or MPC comet elements file on cold start)
+# Computes positions with Skyfield and stores results in cached_positions
 ```
 
-### Planet computation
-**File:** `planets.py`
+### Celestial computation (Sun, Moon, planets)
+**File:** `api/computation.py`
 
 ```python
-get_planet_positions(lat, lon, elevation, time=None)
-# Direct computation (no cache)
-# Uses Skyfield's built-in planetary ephemeris (de421.bsp)
-# Lines: 50–200
+compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+# Direct computation (no cache) using Skyfield
+# Computes alt/az, distance, magnitude, rise/set/transit times
 ```
 
 ### Cache management
@@ -262,11 +246,11 @@ get_comet_positions(location_key, time_bucket)                         # Zeilen:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Main server ($RABBITMQ_MAIN)                                  │
-│ - FastAPI Web                                                │
-│ - RabbitMQ (Message Broker)                                  │
-│ - PostgreSQL (Cache/DB)                                      │
-│ - Precompute Worker (4x)                                     │
+│ Main server ($RABBITMQ_MAIN)                                │
+│ - FastAPI Web                                               │
+│ - RabbitMQ (Message Broker)                                 │
+│ - PostgreSQL (Cache/DB)                                     │
+│ - Precompute Worker (4x)                                    │
 └────────────────────┬────────────────────────────────────────┘
                      │
           ┌──────────┴──────────┐

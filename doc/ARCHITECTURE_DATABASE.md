@@ -1,47 +1,38 @@
 # Database Schema
 
-## PostgreSQL Tables
+## DataFrame Cache (Filesystem)
 
-### 1. asteroids / comets (DataFrame cache)
+### 1. Asteroid / Comet orbital elements
 
-Stores raw MPC data as pickled Pandas DataFrames.
+Raw MPC orbital data for asteroids and comets is stored as pickled Pandas
+DataFrames on the filesystem (not in PostgreSQL tables):
 
-```sql
-CREATE TABLE asteroids (
-    id SERIAL PRIMARY KEY,
-    dataframe_pickle BYTEA NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
+- **Asteroids:** `DATA_DIR/asteroid_dataframe.pkl`
+  - Written by `db_utils.store_asteroid_dataframe(df_pickle)`.
+  - Read by `db_utils.get_asteroid_dataframe(max_age_seconds=49*3600)` and
+    `bright_asteroids.load_asteroid_dataframe()`.
+- **Comets:** `DATA_DIR/comet_dataframe.pkl`
+  - Written by `db_utils.store_comet_dataframe(df_pickle)`.
+  - Read by `db_utils.get_comet_dataframe(max_age_seconds=49*3600)` and
+    `comets.load_comet_dataframe()`.
 
-CREATE TABLE comets (
-    id SERIAL PRIMARY KEY,
-    dataframe_pickle BYTEA NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-```
+**Contents (both DataFrames):**
+- Designation / name
+- Photometric parameters (e.g. H/G for asteroids, M1/k1 for comets)
+- Orbital elements (e, q, i, Ω, ω, epoch, etc.)
 
-**Contents:** Pickle-serialized Pandas DataFrames with orbital elements:
-- Designation (Name)
-- H (Absolute Magnitude)
-- G (Slope Parameter)
-- Epoch
-- M (Mean Anomaly)
-- Peri (Argument of Perihelion)
-- Node (Longitude of Ascending Node)
-- i (Inclination)
-- e (Eccentricity)
-- n (Mean Daily Motion)
-- a (Semimajor Axis)
+**Sources:**
+- Asteroids: `MPCORB.DAT` from MPC (~200 MB)
+- Comets: MPC comet elements file (e.g. `CometEls.txt`)
 
-**Source:**
-- Asteroids: https://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT (~200 MB)
-- Comets: https://minorplanetcenter.net/iau/Ephemerides/Comets/CometEls.txt (~100 KB)
-
-**Code:** `db_utils.py:55-90`
+**Notes:**
+- These files are typically refreshed by a nightly updater script.
+- The `max_age_seconds` argument in `get_*_dataframe` (~49h) is used as a
+  staleness threshold for the on-disk cache.
 
 ---
+
+## PostgreSQL Tables
 
 ### 2. cached_positions (Position cache)
 
@@ -68,9 +59,11 @@ CREATE INDEX idx_cached_computed ON cached_positions(computed_at);
 CREATE INDEX idx_cached_type ON cached_positions(object_type);
 ```
 
-**location_key:** Format `lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ`
+**location_key:** Normalized location key derived from latitude, longitude,
+and elevation (see `cache_utils.location_key`).
 
-**Contents:** Unfiltered computed positions (all objects up to mag ~22)
+**Contents:** Unfiltered computed positions (all cached objects up to about
+**mag 20.0**)
 
 **Example content:**
 ```json
@@ -93,13 +86,14 @@ CREATE INDEX idx_cached_type ON cached_positions(object_type);
 ]
 ```
 
-**Important:** Contains ALL computed objects (unfiltered)! Filtering happens in API routes.
+**Important:** Contains all computed objects for that bucket (unfiltered by
+user magnitude). Filtering happens later in the API routes.
 
-**Code:** 
-- `db_utils.py:store_asteroid_positions()` — lines 90–112
-- `db_utils.py:store_comet_positions()` — lines 180–206
-- `db_utils.py:get_asteroid_positions()` — lines 114–138
-- `db_utils.py:get_comet_positions()` — lines 208–232
+**Code:**
+- `db_utils.store_asteroid_positions`
+- `db_utils.store_comet_positions`
+- `db_utils.get_asteroid_positions`
+- `db_utils.get_comet_positions`
 
 ---
 
@@ -115,7 +109,7 @@ Pandas DataFrame (Orbital Elements)
          │
          │ Pickle Serialization
          ▼
-PostgreSQL: asteroids/comets Tabellen
+Filesystem: asteroid_dataframe.pkl / comet_dataframe.pkl
          │
          │ Load & Deserialize
          ▼
@@ -135,10 +129,10 @@ API Routes (asteroids.py, comets.py)
 
 ## TTL (Time-To-Live)
 
-| Table | TTL | Reason |
-|-------|-----|--------|
-| asteroids/comets | 31 days | Orbital elements change slowly |
-| cached_positions | Unlimited | Positions for a specific timestamp are immutable |
+| Storage                          | TTL / Staleness window | Reason |
+|----------------------------------|------------------------|--------|
+| asteroid/comet DataFrame files   | ~49 hours              | Refreshed regularly; orbital elements change slowly |
+| cached_positions (PostgreSQL)    | Unlimited              | Positions for a specific timestamp are immutable |
 
 **Position cache:**
 
@@ -152,14 +146,16 @@ Positions for a **specific timestamp** (time_bucket) are **immutable**:
 - Recommendation: delete positions with `time_bucket` < now() - 1 year
 - Typical storage: ~10 KB per location/time combination
 
-**Planets:** NOT cached (direct computation for each request)
+**Celestial objects (Sun, Moon, planets):** NOT cached (direct computation
+via `/api/celestial` for each request)
 
 ## Storage Usage
 
-| Table | Size (approx.) | Per entry |
-|-------|-----------------|-----------|
-| asteroids | 20–50 MB | ~20 MB (DataFrame with ~1M objects) |
-| comets | 1–5 MB | ~1 MB (DataFrame with ~1000 objects) |
-| cached_positions | 100–500 KB | ~10 KB (pickled array, unfiltered) |
+| Storage              | Size (approx.)       | Per entry / file                |
+|----------------------|----------------------|---------------------------------|
+| asteroid DataFrame   | 20–50 MB             | ~20 MB (DataFrame with ~1M rows) |
+| comet DataFrame      | 1–5 MB               | ~1 MB (DataFrame with ~1000 rows) |
+| cached_positions row | 100–500 KB           | ~10 KB (pickled list, unfiltered) |
 
-**Total:** ~25–60 MB for a full cache (excluding planets)
+**Total:** ~25–60 MB for a typical cache snapshot (excluding celestial
+objects, which are computed on demand).

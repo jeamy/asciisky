@@ -168,8 +168,8 @@ python -c "from workers.unified_worker import generate_precompute_message_id; pr
 
 **URL:** http://localhost:15672
 - Queue depth and message rates
-- Deduplication statistics
-- Consumer monitoring
+- Consumer monitoring (number of unified workers, precompute/on-demand load)
+- Inspect queues used for deduplicated tasks (`precompute.tasks`, `asteroid.compute`, `comet.compute`)
 
 ### PostgreSQL Advisory Locks
 
@@ -184,43 +184,14 @@ WHERE locktype = 'advisory'
 AND NOT granted;
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-1. **RabbitMQ Plugin Not Enabled**
-   ```bash
-   docker exec rabbitmq rabbitmq-plugins enable rabbitmq_message_deduplication
-   ```
-
-2. **Advisory Lock Timeout**
-   - Increase TTL in `computation_lock()` calls
-   - Check for long-running computations
-
-3. **Message ID Collisions**
-   - Verify deterministic hash generation
-   - Check parameter ordering in message ID creation
-
-### Debug Commands
-
-```bash
-# Check RabbitMQ plugins
-docker exec rabbitmq rabbitmq-plugins list
-
-# Monitor queues
-docker exec rabbitmq rabbitmqctl list_queues
-
-# Check PostgreSQL locks
-docker exec postgres psql -U asciisky -d asciisky -c "SELECT * FROM pg_locks WHERE locktype = 'advisory';"
-```
-
 ## Migration Guide
 
 ### From Custom Locks to Hybrid
 
 1. **Update Docker Compose:**
-   - Add deduplication plugin script
-   - Update RabbitMQ configuration
+   - Ensure RabbitMQ 4.x (or newer) is used.
+   - Make sure queues `precompute.tasks`, `asteroid.compute`, and `comet.compute`
+     are declared consistently (see `worker_utils.declare_computation_queues`).
 
 2. **Update Worker Code:**
    - Replace custom lock checks with message ID generation

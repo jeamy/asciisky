@@ -61,9 +61,9 @@ WORKER_C_IP=$(dig +short $RABBITMQ_C | tail -n1)
 echo "Worker-B IP: $WORKER_B_IP"
 echo "Worker-C IP: $WORKER_C_IP"
 
-# WICHTIG: Docker-Bypass verhindern (DOCKER-USER Chain)
-# Docker fügt automatisch Regeln ein, die VOR UFW greifen!
-# Wir müssen explizit DOCKER-USER Chain konfigurieren:
+# IMPORTANT: prevent Docker bypass (DOCKER-USER chain)
+# Docker automatically injects rules that are evaluated BEFORE UFW!
+# We must explicitly configure the DOCKER-USER chain:
 
 # Lösche alte DOCKER-USER Regeln
 sudo iptables -F DOCKER-USER 2>/dev/null || true
@@ -77,19 +77,19 @@ sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m co
 # Erlaube localhost auf RabbitMQ Management UI
 sudo iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
 
-# BLOCKIERE alle anderen auf diesen Ports
+# BLOCK all other sources on these ports
 sudo iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
 sudo iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
 sudo iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
 
-# WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
+# IMPORTANT: RETURN at the end (lets other traffic pass)
 sudo iptables -A DOCKER-USER -j RETURN
 
 # Mache iptables-Regeln persistent
 sudo apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 
-# UFW-Regeln als zusätzliche Sicherheitsebene (Backup)
+# UFW rules as an additional safety layer (backup)
 sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
 sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
@@ -128,21 +128,21 @@ sudo ufw enable
 
 ---
 
-## ⚠️ Docker Firewall Bypass Problem
+## ⚠️ Docker firewall bypass problem
 
-### Das Problem
+### The problem
 
-**Docker umgeht UFW standardmäßig!**
+**Docker bypasses UFW by default!**
 
-Docker fügt automatisch Regeln in die `DOCKER-USER` iptables-Chain ein, die **VOR** den UFW-Regeln ausgewertet werden. Das bedeutet:
+Docker automatically injects rules into the `DOCKER-USER` iptables chain that are evaluated **before** UFW rules. This means:
 
-- ❌ UFW-Regeln wie `ufw allow from X.X.X.X to any port 5432` werden **IGNORIERT**
-- ❌ Docker-Container-Ports sind **für ALLE IPs erreichbar**, auch wenn UFW sie blockieren sollte
-- ❌ PostgreSQL (5432) und RabbitMQ (5672) sind **öffentlich zugänglich**, trotz UFW-Konfiguration!
+- ❌ UFW rules like `ufw allow from X.X.X.X to any port 5432` may be **ignored**
+- ❌ Docker container ports can be **reachable from all IPs**, even if UFW should block them
+- ❌ PostgreSQL (5432) and RabbitMQ (5672) can be **publicly accessible** despite UFW configuration
 
-### Die Lösung: DOCKER-USER Chain
+### The solution: DOCKER-USER chain
 
-Die `DOCKER-USER` Chain ist eine spezielle iptables-Chain, die Docker respektiert:
+The `DOCKER-USER` chain is a special iptables chain that Docker respects:
 
 ```
 Packet Flow:
@@ -151,25 +151,25 @@ Packet Flow:
 3. UFW Chains (werden zu spät ausgewertet)
 ```
 
-**Unser Setup:**
-1. **DOCKER-USER Chain** blockiert alle IPs außer Worker-B/C auf Ports 5432/5672/15672
-2. **UFW-Regeln** als zusätzliche Sicherheitsebene (Backup)
-3. **iptables-persistent** macht Regeln persistent (überleben Neustart)
+**Our setup:**
+1. **DOCKER-USER chain** blocks all IPs except Worker-B/C on ports 5432/5672/15672
+2. **UFW rules** act as an additional safety layer (backup)
+3. **iptables-persistent** keeps rules persistent across reboots
 
-### Verifikation
+### Verification
 
 ```bash
-# DOCKER-USER Chain anzeigen (WICHTIG!)
+# Show DOCKER-USER chain (IMPORTANT!)
 sudo iptables -L DOCKER-USER -n -v
 
-# Sollte zeigen:
-# - ACCEPT von Worker-B IP auf Port 5672/5432
-# - ACCEPT von Worker-C IP auf Port 5672/5432
-# - ACCEPT von 127.0.0.1 auf Port 15672
-# - DROP auf Port 5672/5432/15672 (alle anderen)
-# - RETURN (am Ende)
+# Expected:
+# - ACCEPT from Worker-B IP on ports 5672/5432
+# - ACCEPT from Worker-C IP on ports 5672/5432
+# - ACCEPT from 127.0.0.1 on port 15672
+# - DROP on ports 5672/5432/15672 (all others)
+# - RETURN (at the end)
 
-# UFW Status (zusätzlich)
+# UFW status (additional check)
 sudo ufw status verbose
 ```
 
@@ -212,11 +212,11 @@ sudo ufw status numbered | grep -E '5672|5432'
 
 **If you need to configure manually:**
 ```bash
-# IPs automatisch ermitteln
+# Automatically resolve worker IPs
 WORKER_B_IP=$(dig +short $RABBITMQ_B | tail -n1)
 WORKER_C_IP=$(dig +short $RABBITMQ_C | tail -n1)
 
-# Regeln hinzufügen
+# Add rules
 sudo ufw allow from $WORKER_B_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-B'
 sudo ufw allow from $WORKER_C_IP to any port 5672 proto tcp comment 'RabbitMQ from Worker-C'
 sudo ufw allow from $WORKER_B_IP to any port 5432 proto tcp comment 'PostgreSQL from Worker-B'
@@ -241,7 +241,7 @@ Password: <RABBITMQ_PASSWORD from .env>
 
 **Check:**
 ```bash
-# Auf $RABBITMQ_MAIN
+# On $RABBITMQ_MAIN
 sudo ufw status | grep 15672
 
 # Should show:

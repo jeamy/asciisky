@@ -102,15 +102,21 @@ Frontend display: the UI simplifies display names by stripping numeric designati
 
 ## Caching
 
-- PostgreSQL DataFrame Cache (table `asteroids`)
-  - Stores pickled MPCORB DataFrame
-  - TTL: 31 days
-- PostgreSQL Position Cache (table `cached_positions`)
-  - Key: `(object_type='asteroid', location_key, time_bucket)`
-  - Stores computed positions as pickled, unfiltered arrays (all objects up to mag ~22)
-  - TTL: Unlimited (positions for a specific hour are immutable)
+- DataFrame cache (filesystem)
+  - File: `asteroid_dataframe.pkl` under `DATA_DIR`.
+  - Written by `db_utils.store_asteroid_dataframe()` and read via
+    `db_utils.get_asteroid_dataframe()` / `bright_asteroids.load_asteroid_dataframe()`.
+  - Staleness window: ~49 hours (see `ASTEROID_DF_CACHE_TTL_SECONDS`).
+- Position cache (PostgreSQL, table `cached_positions`)
+  - Key: `(object_type='asteroid', location_key, time_bucket)`.
+  - Stores computed positions as pickled, unfiltered lists (all objects up to
+    about mag 20.0).
+  - TTL: Unlimited (positions for a specific hour are immutable).
 
-Filtering is not part of the caches. The API route applies the user magnitude filter from `user_settings.json` (see `/api/filters`). Workers always compute using `max_magnitude=20.0` and store unfiltered results. This makes caches reusable across different user filter settings.
+Filtering is not part of the caches. The API route applies the user magnitude
+filter from `user_settings.json` (see `/api/filters`). Workers always compute
+using `max_magnitude` up to about 20.0 and store unfiltered results. This makes
+the caches reusable across different user filter settings.
 
 ## Endpoint
 
@@ -132,3 +138,9 @@ GET /api/bright_asteroids?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T
 - You can adjust brightness thresholds in `bright_asteroids.py`:
   - `MAX_ABSOLUTE_MAGNITUDE` (H) and `MAX_APPARENT_MAGNITUDE` (V).
 - Default `G` fallback of 0.15 is a common choice when the slope parameter is missing.
+
+## Related architecture docs
+
+- [API Request Flow](ARCHITECTURE_FLOW_API.md)
+- [Cache Strategy](ARCHITECTURE_CACHE.md)
+- [Database Schema](ARCHITECTURE_DATABASE.md)

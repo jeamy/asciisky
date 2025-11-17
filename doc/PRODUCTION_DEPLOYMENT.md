@@ -29,12 +29,12 @@
         │                                       │
         ▼                                       ▼
 ┌──────────────────────┐            ┌──────────────────────┐
-│ $RABBITMQ_B │            │ $RABBITMQ_C │
+│ $RABBITMQ_B          │            │ $RABBITMQ_C          │
 │ ┌──────────────────┐ │            │ ┌──────────────────┐ │
-│ │Precompute x4     │ │            │ │Precompute x4     │ │
-│ │Asteroid x2       │ │            │ │Asteroid x2       │ │
-│ │Comet x2          │ │            │ │Comet x2          │ │
-│ │(scalable)        │ │            │ │(scalable)        │ │
+│ │Unified Workers   │ │            │ │Unified Workers   │ │
+│ │(precompute +     │ │            │ │(precompute +     │ │
+│ │asteroids +       │ │            │ │asteroids +       │ │
+│ │comets, scalable) │ │            │ │comets, scalable) │ │
 │ └──────────────────┘ │            │ └──────────────────┘ │
 └──────────────────────┘            └──────────────────────┘
 ```
@@ -44,25 +44,26 @@
 | Server | Components | Ports | Purpose |
 |--------|-------------|-------|-------|
 | **$RABBITMQ_MAIN** | Web (nginx), RabbitMQ, PostgreSQL, Data Updater, Precompute Coordinator, 4 Precompute Workers | 80, 5672, 15672, 5432 | Main server with UI and databases |
-| **$RABBITMQ_B** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker pool B (scalable) |
-| **$RABBITMQ_C** | 4 Precompute + 2 Asteroid + 2 Comet Workers | - | Worker pool C (scalable) |
+| **$RABBITMQ_B** | Unified workers (handle precompute + asteroids + comets) + 1 Worker Monitor | - | Worker pool B (scalable via `UNIFIED_WORKERS` in .env.b) |
+| **$RABBITMQ_C** | Unified workers (handle precompute + asteroids + comets) + 1 Worker Monitor | - | Worker pool C (scalable via `UNIFIED_WORKERS` in .env.c) |
 
-**Total (default): 12 Precompute + 4 Asteroid + 4 Comet Workers**
+**Total (default example):**
+- Main server: 4 Precompute workers
+- Worker B: 8 Unified workers + 1 monitor (see `.env.b.example`)
+- Worker C: 4 Unified workers + 1 monitor (see `.env.c.example`)
 
 **Worker scaling** via `.env`:
 ```bash
-# Main server
+# Main server (docker-compose.production.yml)
 PRECOMPUTE_WORKERS=4
 
-# Worker Server B
-PRECOMPUTE_WORKERS_B=4
-ASTEROID_WORKERS_B=2
-COMET_WORKERS_B=2
+# Worker Server B (see .env.b.example)
+UNIFIED_WORKERS=8
+WORKER_MONITOR=1
 
-# Worker Server C
-PRECOMPUTE_WORKERS_C=4
-ASTEROID_WORKERS_C=2
-COMET_WORKERS_C=2
+# Worker Server C (see .env.c.example)
+UNIFIED_WORKERS=4
+WORKER_MONITOR=1
 ```
 
 ---
@@ -226,7 +227,7 @@ The script:
 - If `.env.b` or `.env.c` exist, they are used for the respective worker servers
 - You do **not** need to copy .env files manually to each server!
 
-**Nach dem Deployment:**
+**After deployment:**
 ```bash
 # Configure firewall on main server
 ssh $RABBITMQ_MAIN
@@ -262,7 +263,7 @@ docker exec asciisky-data-updater python nightly_data_updater.py
 ### On $RABBITMQ_B
 
 ```bash
-# 1. Repository klonen
+# 1. Clone repository
 git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
@@ -277,14 +278,14 @@ docker compose -f docker-compose.worker-b.yml up -d
 ### On $RABBITMQ_C
 
 ```bash
-# 1. Repository klonen
+# 1. Clone repository
 git clone <repo-url> ~/asciisky
 cd ~/asciisky
 
-# 2. .env von Hauptserver kopieren
+# 2. Copy .env from main server
 scp $RABBITMQ_MAIN:~/asciisky/.env .env
 
-# 3. Worker starten
+# 3. Start workers
 docker compose -f docker-compose.worker-c.yml build
 docker compose -f docker-compose.worker-c.yml up -d
 ```
@@ -348,6 +349,20 @@ ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
 docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT * FROM cache_statistics;"
 ```
 
+### API smoke test (/api/celestial)
+
+Use `/api/celestial` as the canonical endpoint for Sun, Moon, and planets.
+
+```bash
+# From $RABBITMQ_MAIN (or via SSH)
+curl "http://localhost:8000/api/celestial?lat=48.2&lon=16.3&elevation=180&time=2025-01-15T21:30:00Z" \
+  | jq '.bodies.sun'
+```
+
+If this returns a JSON object with sensible values for altitude, azimuth, distance,
+and magnitude, the celestial pipeline (including the former “planets” functionality)
+is working correctly.
+
 ---
 
 ## 🔄 Updates
@@ -393,10 +408,8 @@ chmod +x scripts/update-production.sh
 ### Clear cache
 
 ```bash
-# Clear PostgreSQL cache
-docker exec asciisky-postgres psql -U asciisky -d asciisky -c "
-DELETE FROM cached_positions WHERE expires_at < CURRENT_TIMESTAMP;
-"
+# Clear old cached positions (example: older than 60 days, see init-postgres.sql)
+docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT cleanup_old_positions();"
 ```
 
 ### Rotate logs
@@ -482,8 +495,8 @@ docker exec asciisky-rabbitmq rabbitmqctl list_queues name messages consumers
 
 1. **Configure firewall (IMPORTANT!)**
    ```bash
-   # Auf $RABBITMQ_MAIN:
-sudo ./scripts/setup-firewall.sh
+   # On $RABBITMQ_MAIN:
+   sudo ./scripts/setup-firewall.sh
    ```
    
    The script:

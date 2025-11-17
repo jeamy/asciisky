@@ -8,10 +8,12 @@ This document explains how ASCII Sky computes positions, magnitudes, and event t
 - Time: `dt_utc` resolved from optional `time` query param (ISO 8601; supports trailing `Z` or TZ offset). Defaults to current UTC. `t = ts.from_datetime(dt_utc)`
 - Observer: topocentric Earth location using `wgs84.latlon(lat, lon, elevation_m)`
 - Output: altitude, azimuth, Earth-center distance (AU), and magnitude, plus rise/set/transit times
-- API: `/api/planets` (all bodies)
+- API: `/api/celestial` (all bodies) and `/api/celestial/{body_id}` (single body)
 
-Backend implementation: see `api/routes/planets.py` function `get_planets()`.
-Note: Planets are computed **synchronously** (no RabbitMQ workers), as they are fast to calculate.
+Backend implementation: see `api/routes/celestial.py` and
+`api/computation.py:compute_celestial_snapshot()`.
+Note: Celestial objects (Sun, Moon, planets) are computed **synchronously**
+(no RabbitMQ workers), as they are fast to calculate.
 
 ## Geometry and Distances
 
@@ -69,12 +71,15 @@ Note: Unlike asteroids/comets (which use `almanac.meridian_transits()`), planeta
 
 ## Endpoint Summary
 
-- `GET /api/planets?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
+- `GET /api/celestial?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>`
+  - Returns a snapshot for all supported bodies (Sun, Moon, planets).
+- `GET /api/celestial/{body_id}?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>`
+  - Returns the snapshot entry for a single body (e.g. `sun`, `moon`, `mars`).
 
 Example:
 
 ```
-GET /api/planets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
+GET /api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
 ```
 
 ## Frontend Integration
@@ -85,3 +90,9 @@ GET /api/planets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
 ## Caching
 
 - Planet/Sun/Moon calculations run on demand and are not cached server-side.
+
+## Related architecture docs
+
+- [API Request Flow](ARCHITECTURE_FLOW_API.md)
+- [Cache Strategy](ARCHITECTURE_CACHE.md)
+- [Database Schema](ARCHITECTURE_DATABASE.md)

@@ -5,34 +5,34 @@
 ```
 Level 1: Position Cache (PostgreSQL)
 ┌────────────────────────────────────────────────────────────────┐
-│ Tabelle: cached_positions                                      │
+│ Table: cached_positions                                      │
 │ Key: (object_type, location_key, time_bucket)                  │
 │ TTL: Unlimited (positions are immutable)                       │
 │ Contents: Computed positions (unfiltered)                      │
-│ Created by: Precompute workers (hourly) + on-demand            │
+│ Created by: Precompute workers (hourly) + on-demand workers    │
 │ Used by: All API requests (first check)                        │
-│ Planets: NOT cached (direct computation)                       │
+│ Celestial (Sun/Moon/planets): NOT cached (direct via/celestial)│
 └────────────────────────────────────────────────────────────────┘
          │ Cache MISS
          ▼
-Level 2: DataFrame Cache (PostgreSQL)
+Level 2: DataFrame Cache (Filesystem)
 ┌────────────────────────────────────────────────────────────────┐
-│ Tabellen: asteroids, comets                                    │
-│ TTL: 31 Tage                                                   │
-│ Inhalt: Rohdaten von MPC (Orbital Elements)                    │
-│ Erstellt von: Worker beim ersten Load                          │
-│ Verwendet von: Worker für Position-Berechnungen                │
+│ Files: asteroid_dataframe.pkl, comet_dataframe.pkl             │
+│ Staleness: ~49 hours (max_age_seconds in db_utils)            │
+│ Content: raw MPC data (orbital elements)                      │
+│ Created by: nightly updater / db_utils.store_*_dataframe      │
+│ Used by: bright_asteroids/comets for position computation     │
 └────────────────────────────────────────────────────────────────┘
          │ Cache MISS
          ▼
-Level 3: Download von MPC
+Level 3: MPC download
 ┌────────────────────────────────────────────────────────────────┐
 │ URLs:                                                          │
-│ - Asteroiden: https://minorplanetcenter.net/iau/MPCORB/...    │
-│   MPCORB.DAT (~200 MB, ~1M Objekte)                           │
-│ - Kometen: https://minorplanetcenter.net/iau/Ephemerides/...  │
-│   Comets/CometEls.txt (~100 KB, ~1000 Objekte)                │
-│ Dauer: 5-30 Sekunden (Asteroiden), 1-5 Sekunden (Kometen)     │
+│ - Asteroids: https://minorplanetcenter.net/iau/MPCORB/...      │
+│   MPCORB.DAT (~200 MB, ~1M objects)                            │
+│ - Comets: https://minorplanetcenter.net/iau/Ephemerides/...    │
+│   Comets/CometEls.txt (~100 KB, ~1000 objects)                 │
+│ Duration: 5–30 seconds (asteroids), 1–5 seconds (comets)       │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,19 +62,16 @@ User changes Magnitude Filter (e.g., 14 → 18)
 │    - asteroids (MPC MPCORB.DAT, mag 20.0)                      │
 │    - comets (MPC CometEls.txt, mag 20.0)                       │
 │                                                                │
-│    Filtering happens in API routes!                             │
+│    Filtering happens in API routes!                            │
 └────────┬───────────────────────────────────────────────────────┘
          ▼
 ┌────────────────────────────────────────────────────────────────┐
-│ 4. Next Request                                            │
-│    - DataFrame cache available (mag 20.0)                     │
-│    - Position cache available (unfiltered)                    │
-│    - API filters to mag 18.0
-│    - Objects 14–18 appear immediately!
-│    - No recomputation required!
-│    - API-Route filtert auf neues Limit (z.B. 18)              │
-│    - Neue Objekte (14-18) erscheinen sofort!                  │
-│    - Keine Neuberechnung nötig!                                │
+│ 4. Next Request                                                │
+│    - DataFrame cache available (mag 20.0)                      │
+│    - Position cache available (unfiltered)                     │
+│    - API filters to mag 18.0                                   │
+│    - Objects 14–18 appear immediately!                         │
+│    - No recomputation required!                                │ 
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,16 +93,16 @@ On filter change (e.g., 14 → 18) **NO** PostgreSQL caches are deleted!
 ```
 asteroid_positions  ← Unfiltered, contains ALL computed positions
 comet_positions     ← Unfiltered, contains ALL computed positions
-asteroids           ← MPC MPCORB.DAT - orbital data, mag 20
-comets              ← MPC CometEls.txt - orbital data, mag 20
+asteroid_dataframe  ← MPCORB.DAT-based orbital data, mag 20 (filesystem)
+comet_dataframe     ← MPC comet elements orbital data, mag 20 (filesystem)
 ```
 
 **Why are caches NOT deleted?**
 
-All PostgreSQL caches contain **unfiltered** data:
-- Position caches: all computed positions (up to mag ~22)
-- DataFrame caches: all objects up to mag 20.0
-- Filtering happens **only** in API routes (lines 188–189 in `asteroids.py`)
+All caches used by workers contain **unfiltered** data:
+- Position cache (`cached_positions`): all computed positions (up to about mag 20.0)
+- DataFrame cache files: all objects up to mag 20.0
+- Filtering happens **only** in API routes (based on `user_settings.json`)
 - **Reusable for all filter settings!**
 
 **Sequence after a filter change:**
@@ -118,10 +115,10 @@ All PostgreSQL caches contain **unfiltered** data:
    - Objects 14–18 appear **immediately**!
    - **No recomputation required!** 🚀
 
-**Planets:**
+**Celestial objects (Sun, Moon, planets):**
 - Are **not** cached
-- Direct computation for each request (~50–200ms)
-- Only 8 bodies, fast enough without cache
+- Direct computation for each request (~50–200ms) via `/api/celestial`
+- Only a small fixed set of bodies, fast enough without cache
 
 **Code references:**
 - `workers/precompute_worker.py:305` — `max_magnitude=20.0`
@@ -136,16 +133,17 @@ All PostgreSQL caches contain **unfiltered** data:
 
 ### Asteroids & Comets
 
-| Scenario | Cache | Time |
-|----------|-------|------|
-| Position cache hit | Level 1 | 100–200ms |
-| DataFrame cache hit | Level 2 | 2–5s |
-| Cold start (MPC download) | Level 3 | 10–30s |
+| Scenario                | Cache | Time     |
+|-------------------------|-------|----------|
+| Position cache hit      | L1    | 100–200ms|
+| DataFrame cache hit     | L2    | 2–5s     |
+| Cold start (MPC download)| L3   | 10–30s   |
 
-### Planets
+### Celestial (Sun, Moon, planets)
 
-| Szenario | Cache | Zeit |
-|----------|-------|------|
-| Direct computation | No cache | 50–200ms |
+| Scenario           | Cache    | Time      |
+|--------------------|----------|-----------|
+| Direct computation | No cache | 50–200ms  |
 
-**Note:** Planets are faster than asteroids/comets on cache miss because only 8 bodies are computed.
+**Note:** Celestial objects are faster than asteroids/comets on cache miss because only a
+small fixed set of bodies is computed.
