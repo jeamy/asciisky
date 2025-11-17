@@ -275,18 +275,19 @@ of unified workers per worker host (see `.env.b.example` / `.env.c.example`).
 ## 📖 Reading order (recommended)
 
 1. **Start here:** [ARCHITECTURE_INDEX.md](ARCHITECTURE_INDEX.md) ← You are here!
-2. **System overview:** [ARCHITECTURE_FLOW.md](ARCHITECTURE_FLOW.md)
-3. **API flow:** [ARCHITECTURE_FLOW_API.md](ARCHITECTURE_FLOW_API.md)
-4. **Cache details:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
-5. **Database:** [ARCHITECTURE_DATABASE.md](ARCHITECTURE_DATABASE.md)
-6. **Deployment:** [WORKER_SETUP.md](WORKER_SETUP.md)
+2. **API flow:** [ARCHITECTURE_FLOW_API.md](ARCHITECTURE_FLOW_API.md)
+3. **Cache details:** [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
+4. **Database:** [ARCHITECTURE_DATABASE.md](ARCHITECTURE_DATABASE.md)
+5. **Deployment:** [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)
+6. **Firewall:** [FIREWALL_SETUP.md](FIREWALL_SETUP.md)
+7. **Hybrid deduplication:** [hybrid-deduplication.md](hybrid-deduplication.md)
 
 ---
 
 ## 🔍 Quick reference
 
 **Question:** How does the hourly precompute work?
-→ [ARCHITECTURE_FLOW.md](ARCHITECTURE_FLOW.md) - Precompute flow
+→ [ARCHITECTURE_FLOW_API.md](ARCHITECTURE_FLOW_API.md) – see "Precompute Pipeline" section
 
 **Question:** What happens on an API request?
 → [ARCHITECTURE_FLOW_API.md](ARCHITECTURE_FLOW_API.md)
@@ -294,11 +295,11 @@ of unified workers per worker host (see `.env.b.example` / `.env.c.example`).
 **Question:** How does caching work?
 → [ARCHITECTURE_CACHE.md](ARCHITECTURE_CACHE.md)
 
-**Question:** Which database tables exist?
+**Question:** Which database tables and caches exist?
 → [ARCHITECTURE_DATABASE.md](ARCHITECTURE_DATABASE.md)
 
 **Question:** How do I deploy the workers?
-→ [WORKER_SETUP.md](WORKER_SETUP.md)
+→ [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)
 
 ---
 
