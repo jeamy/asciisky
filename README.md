@@ -46,13 +46,11 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - 3-stage pipeline: H-filter → NumPy pre-filter → precise calculation
   - Overall performance: 2-4x faster (7-8x with many objects)
 - Automatic nightly updates of asteroid and comet orbital data (configurable; default 4:00 AM)
-- DB-first loading strategy for optimal performance (10x faster than file parsing)
+- DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
 
 ## Prerequisites
 
 - Docker and Docker Compose
-
-Korrigiere readme und bringe ## Running the Application
 
 ### Development Setup (Local)
 
@@ -394,7 +392,6 @@ Notes:
 - [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
 - [Cache Strategy](doc/ARCHITECTURE_CACHE.md)
 - [Database Schema](doc/ARCHITECTURE_DATABASE.md)
-- [Worker Setup](doc/WORKER_SETUP.md)
 - [Production Deployment](doc/PRODUCTION_DEPLOYMENT.md)
 - [Firewall Setup](doc/FIREWALL_SETUP.md)
 
@@ -455,11 +452,8 @@ ASCII Sky uses NumPy vectorization for maximum performance:
 - Phase angle: 50-100x faster
 - Rise/set: 10-50x faster (top 30-50 objects)
 
-### Hybrid Deduplication
-See the section above for complete details on RabbitMQ + PostgreSQL deduplication.
-
 ### Database Optimization
-- DB-first loading strategy (10x faster than file parsing)
+- DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
 - Intelligent caching with TTL and precompute windows
 - PostgreSQL advisory locks for database consistency
 
