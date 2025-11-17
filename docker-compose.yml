@@ -135,18 +135,20 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
     restart: unless-stopped
 
-  # ===== Precompute Worker (skalierbar mit --scale precompute_worker=N) =====
-  precompute_worker:
+  # ===== Unified Worker (für lokales Testing) =====
+  # Ersetzt: precompute_worker + asteroid_worker + comet_worker
+  # Verarbeitet alle Task-Typen in einem Worker
+  # HYBRID DEDUPLICATION: RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+  unified_worker:
     image: asciisky-worker
     build: .
     pull_policy: never
-    command: ["python", "workers/precompute_worker.py"]
+    command: ["python", "workers/unified_worker.py"]
     volumes:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      # WORKER_ID wird automatisch von Docker gesetzt (Container-Name)
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -156,89 +158,61 @@ services:
       # RabbitMQ Configuration
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-60}
-      - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-2}
+      - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-1}
       # Worker Configuration
       - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
+      # Hybrid Deduplication Configuration
+      - ASCII_SKY_DEDUPLICATION_TTL=${ASCII_SKY_DEDUPLICATION_TTL:-300}
+      - ASCII_SKY_ADVISORY_LOCK_TTL=${ASCII_SKY_ADVISORY_LOCK_TTL:-300}
+      - ENABLE_HYBRID_DEDUPLICATION=${ENABLE_HYBRID_DEDUPLICATION:-true}
       # Magnitude Limits
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
-      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
+      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-20.0}
+      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-18.0}
+      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-20.0}
+      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-30}
+      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-20}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import workers.unified_worker; print('Worker healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
-      replicas: ${PRECOMPUTE_WORKERS:-4}  # Anzahl aus .env (Default: 4)
-
-  # ===== RABBITMQ WORKER (skalierbar) =====
+      replicas: 2  # Nur 2 Worker für lokales Testing
   
-  asteroid-worker:
-    image: asciisky-worker
+  # ===== Worker Monitor =====
+  # Real-time Performance Dashboard
+  worker_monitor:
+    image: asciisky-web:latest
     build: .
     pull_policy: never
-    command: ["python", "workers/asteroid_worker.py"]
+    command: ["python", "workers/monitor_dashboard.py"]
+    extra_hosts:
+      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
     volumes:
-      - .:/app
+      - ./cache:/app/cache
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
-      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-60}
-      - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-2}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
+      - MONITOR_HOST=0.0.0.0
+      - MONITOR_PORT=${MONITOR_PORT:-8080}
       - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
-      - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
-      - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}
-      - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+    ports:
+      - "${MONITOR_PORT:-8080}:8080"  # Dashboard Port
     restart: unless-stopped
-    deploy:
-      replicas: ${ASTEROID_WORKERS:-2}  # Anzahl aus .env (Default: 2)
-  
-  comet-worker:
-    image: asciisky-worker
-    build: .
-    pull_policy: never
-    command: ["python", "workers/comet_worker.py"]
-    volumes:
-      - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB:-asciisky}
-      - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-60}
-      - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-2}
-      - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
-      - ASCII_SKY_COMET_MAX_ABSOLUTE_MAG=${ASCII_SKY_COMET_MAX_ABSOLUTE_MAG:-20.0}
-      - ASCII_SKY_COMET_MAX_APPARENT_MAG=${ASCII_SKY_COMET_MAX_APPARENT_MAG:-14.0}
-      - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      replicas: ${COMET_WORKERS:-2}  # Anzahl aus .env (Default: 2)
-  
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MONITOR_PORT:-8080}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   postgres_data:

@@ -30,13 +30,14 @@ from dataclasses import dataclass
 from enum import Enum
 import psutil
 import pika
+import hashlib
 
 # ASCII Sky Imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import store_asteroid_positions, store_comet_positions
+from db_utils import store_asteroid_positions, store_comet_positions, computation_lock, get_asteroid_dataframe, get_comet_dataframe
 from api.on_demand_computation import OnDemandComputationService
 from api.astronomical_corrections import AstronomicalCorrector
 from config.interpolation_config import get_interpolation_config
@@ -57,6 +58,30 @@ class TaskType(Enum):
     PRECOMPUTE = "precompute"
     ON_DEMAND = "on_demand"
     RPC = "rpc"
+
+
+def generate_computation_message_id(task_type: str, location_key: str, time_bucket: str, **kwargs) -> str:
+    """Generate unique message ID for computation deduplication"""
+    # Create deterministic hash from computation parameters
+    components = [task_type, location_key, time_bucket]
+    
+    # Add optional parameters sorted by key
+    for key in sorted(kwargs.keys()):
+        components.append(f"{key}:{kwargs[key]}")
+    
+    computation_string = "|".join(components)
+    return hashlib.sha256(computation_string.encode()).hexdigest()
+
+
+def generate_precompute_message_id(lat: float, lon: float, elevation: float, time_bucket: str, object_type: str) -> str:
+    """Generate message ID for precompute tasks"""
+    loc_key = location_key(lat, lon, elevation)
+    return generate_computation_message_id(
+        task_type=f"precompute_{object_type}",
+        location_key=loc_key,
+        time_bucket=time_bucket,
+        object_type=object_type
+    )
 
 
 @dataclass
@@ -214,54 +239,53 @@ class UnifiedWorker:
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             return False
+
+    def disconnect(self):
+        """Gracefully close RabbitMQ connection and channel"""
+        try:
+            if self.channel and self.channel.is_open:
+                self.channel.close()
+        except Exception as e:
+            logger.debug(f"Error closing channel: {e}")
+        finally:
+            self.channel = None
+
+        try:
+            if self.connection and self.connection.is_open:
+                self.connection.close()
+        except Exception as e:
+            logger.debug(f"Error closing connection: {e}")
+        finally:
+            self.connection = None
     
     def _declare_queues(self):
-        """Deklariere alle notwendigen Queues"""
-        # Precompute Queue
-        self.channel.queue_declare(
-            queue='precompute.tasks',
-            durable=True,
-            arguments={'x-max-priority': 10}
-        )
-        
-        # On-Demand Queues (Smart Interpolation)
-        self.channel.queue_declare(
-            queue='asteroid.compute',
-            durable=True
-        )
-        
-        self.channel.queue_declare(
-            queue='comet.compute',
-            durable=True
-        )
-        
-        # Status Queue
-        self.channel.queue_declare(
-            queue='computation.status',
-            durable=True
-        )
-        
-        # Exchange für On-Demand Computation
-        self.channel.exchange_declare(
-            exchange='computation.direct',
-            exchange_type='direct',
-            durable=True
-        )
-        
-        # Bindings
-        self.channel.queue_bind(
-            exchange='computation.direct',
-            queue='asteroid.compute',
-            routing_key='compute.asteroid'
-        )
-        
-        self.channel.queue_bind(
-            exchange='computation.direct',
-            queue='comet.compute',
-            routing_key='compute.comet'
-        )
-        
+        """Deklariere alle notwendigen Queues für PostgreSQL Advisory Locks"""
+        # Nutze zentrale Queue-Definition aus worker_utils, damit alle Worker
+        # konsistent dieselben Queue-Argumente verwenden (insbesondere keine
+        # TTL-Differenzen bei bereits existierenden Queues in RabbitMQ).
+        worker_utils.declare_computation_queues(self.channel)
         logger.info("All queues and exchanges declared successfully")
+    
+    def send_task_with_deduplication(self, queue_name: str, task_data: Dict[str, Any], 
+                                    message_id: str, priority: int = 0) -> bool:
+        """Send task with RabbitMQ deduplication"""
+        try:
+            self.channel.basic_publish(
+                exchange='',
+                routing_key=queue_name,
+                body=json.dumps(task_data),
+                properties=pika.BasicProperties(
+                    message_id=message_id,
+                    delivery_mode=2,  # Persistent
+                    priority=priority,
+                    expiration='300000'  # 5 minutes
+                )
+            )
+            logger.debug(f"Sent task to {queue_name} with deduplication ID: {message_id[:16]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send task to {queue_name}: {e}")
+            return False
     
     def process_task(self, task: Dict[str, Any]) -> bool:
         """
@@ -329,44 +353,58 @@ class UnifiedWorker:
             'elevation': elev_norm
         }
         
-        if kind == 'asteroids':
-            # Nutze shared resources und konfigurierbare Limits
-            max_mag = min(magnitude, self.config.max_magnitude_asteroids)
-            
-            asteroids_data = bright_asteroids.load_bright_asteroids(
-                self.loader, self.ts, self.eph, observer_loc,
-                max_magnitude=max_mag,
-                current_dt=dt_utc
-            )
-            
-            if asteroids_data:
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                tb = time_bucket_utc(dt_utc)
-                store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
-                count = len(asteroids_data)
-            else:
-                count = 0
+        # Create computation key for Advisory Locks
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        computation_key = f"precompute_{kind}:{loc_key}:{time_bucket_str}"
         
-        elif kind == 'comets':
-            # Nutze konfigurierbare Limits
-            max_comets = min(1000, self.config.max_comets)
-            
-            comets_data = comets.load_comets(
-                self.ts, self.eph, observer_loc,
-                max_comets=max_comets,
-                current_dt=dt_utc
-            )
-            
-            if comets_data:
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                tb = time_bucket_utc(dt_utc)
-                store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
-                count = len(comets_data)
-            else:
-                count = 0
-        
-        else:
-            logger.error(f"Unknown kind: {kind}")
+        # Use Advisory Locks for database operations (Hybrid approach)
+        # RabbitMQ handles task deduplication, Advisory Locks protect DB operations
+        try:
+            with computation_lock(computation_key, ttl_seconds=300):
+                logger.debug(f"Acquired Advisory Lock for: {computation_key}")
+                
+                if kind == 'asteroids':
+                    # Nutze shared resources und globale Magnituden-Limits
+                    max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
+                    
+                    asteroids_data = bright_asteroids.load_bright_asteroids(
+                        self.loader, self.ts, self.eph, observer_loc,
+                        max_magnitude=max_mag,
+                        current_dt=dt_utc
+                    )
+                    
+                    if asteroids_data:
+                        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                        tb = time_bucket_utc(dt_utc)
+                        store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
+                        count = len(asteroids_data)
+                    else:
+                        count = 0
+                
+                elif kind == 'comets':
+                    # Nutze konfigurierbare Limits
+                    max_comets = min(1000, self.config.max_comets)
+                    
+                    comets_data = comets.load_comets(
+                        self.ts, self.eph, observer_loc,
+                        max_comets=max_comets,
+                        current_dt=dt_utc
+                    )
+                    
+                    if comets_data:
+                        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                        tb = time_bucket_utc(dt_utc)
+                        store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
+                        count = len(comets_data)
+                    else:
+                        count = 0
+                
+                else:
+                    logger.error(f"Unknown kind: {kind}")
+                    count = 0
+                    
+        except Exception as e:
+            logger.error(f"Failed to acquire Advisory Lock for {computation_key}: {e}")
             return False
         
         logger.info(f"✅ Precompute {kind} completed: {count} objects")
@@ -593,6 +631,29 @@ class UnifiedWorker:
             
         except Exception as e:
             logger.error(f"Error sending heartbeat: {e}")
+    
+    def send_precompute_task_with_deduplication(self, kind: str, location: Dict[str, Any], 
+                                            time_bucket: str, magnitude: float = 20.0) -> bool:
+        """Send precompute task with RabbitMQ deduplication"""
+        task_data = {
+            'type': 'precompute',
+            'kind': kind,
+            'location': location,
+            'time_bucket': time_bucket,
+            'magnitude': magnitude,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Generate deduplication message ID
+        message_id = generate_precompute_message_id(
+            location['latitude'], 
+            location['longitude'], 
+            location['elevation'], 
+            time_bucket, 
+            kind
+        )
+        
+        return self.send_task_with_deduplication('precompute.tasks', task_data, message_id, priority=5)
     
     def stop(self):
         """Stoppe den Worker gracefully"""

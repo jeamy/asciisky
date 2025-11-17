@@ -106,12 +106,13 @@ def process_task(task: Dict[str, Any]) -> bool:
             }
             
             # Berechne
+            max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
             asteroids_data = bright_asteroids.load_bright_asteroids(
                 loader,
                 ts,
                 eph,
                 observer_loc,
-                max_magnitude=magnitude,
+                max_magnitude=max_mag,
                 current_dt=dt_utc
             )
             

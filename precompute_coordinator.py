@@ -142,6 +142,14 @@ def get_existing_queue_tasks() -> set:
         
         channel = connection.channel()
         
+        channel.queue_declare(
+            queue='precompute.tasks',
+            durable=True,
+            arguments={
+                'x-max-priority': 10
+            }
+        )
+        
         # Hole alle Messages aus der Queue (ohne sie zu löschen)
         method_frame, header_frame, body = channel.basic_get(queue='precompute.tasks', auto_ack=False)
         
@@ -311,7 +319,7 @@ def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
             queue='precompute.tasks',
             durable=True,
             arguments={
-                'x-max-priority': 10  # Priority Queue
+                'x-max-priority': 10              # Priority Queue
             }
         )
         

@@ -92,35 +92,11 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- =====================================================
--- Computation Locks Table
--- Prevents redundant calculations for the same bucket
+-- Computation Locks
+-- Using PostgreSQL Advisory Locks instead of custom table
 -- =====================================================
-
-CREATE TABLE IF NOT EXISTS computation_locks (
-    lock_key VARCHAR(200) PRIMARY KEY,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-);
-
--- Index for fast expiry checks
-CREATE INDEX IF NOT EXISTS idx_computation_locks_expiry 
-ON computation_locks(expires_at);
-
--- Cleanup function for expired locks
-CREATE OR REPLACE FUNCTION cleanup_expired_computation_locks()
-RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    DELETE FROM computation_locks WHERE expires_at < NOW();
-    GET DIAGNOSTICS deleted_count = ROW_COUNT;
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON TABLE computation_locks IS 'Prevents redundant bucket calculations';
-COMMENT ON COLUMN computation_locks.lock_key IS 'Format: computing:{type}:{location_key}:{time_bucket}';
-COMMENT ON COLUMN computation_locks.expires_at IS 'Lock expires after 5 minutes (default TTL)';
+-- No table needed - using pg_advisory_lock() functions
+-- Benefits: automatic cleanup, better performance, distributed
 
 -- ===== Statistics View =====
 CREATE OR REPLACE VIEW cache_statistics AS
@@ -147,5 +123,6 @@ DO $$
 BEGIN
     RAISE NOTICE 'ASCII Sky PostgreSQL database initialized successfully!';
     RAISE NOTICE 'Tables created: asteroid_elements, asteroid_dataframes, comet_elements, comet_dataframes, cached_positions, data_updates';
+    RAISE NOTICE 'Using PostgreSQL Advisory Locks for computation coordination';
     RAISE NOTICE 'Ready for data import via nightly_data_updater.py';
 END $$;

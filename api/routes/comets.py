@@ -219,13 +219,13 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
                 computation_key = f"computing:comet:{loc_key}:{bucket_key}"
                 
                 # Prüfe ob bereits in Berechnung
-                from db_utils import is_computation_in_progress, mark_computation_in_progress
+                from db_utils import is_computation_in_progress, computation_lock
                 if is_computation_in_progress(computation_key):
                     logger.info(f"⏳ Computation already in progress for bucket {bucket_key}")
                     comet_list = []  # Warte auf laufende Berechnung
                 else:
                     # Markiere als "in progress" und trigger Worker
-                    mark_computation_in_progress(computation_key, ttl_seconds=300)  # 5 Min Timeout
+                    computation_lock(computation_key, ttl_seconds=300)  # 5 Min Timeout
                     logger.warning(f"❌ Cache MISS - triggering comet worker for bucket {bucket_key}")
                     # Starte Task als FastAPI Background Task (läuft NACH Response)
                     # Wichtig: Übergebe BUCKET-Zeit, nicht Request-Zeit!

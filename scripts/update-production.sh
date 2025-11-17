@@ -59,12 +59,32 @@ git pull || error_exit "Git pull failed"
 echo "🔨 Building new images (no cache to ensure latest code)..."
 docker compose -f docker-compose.production.yml build || error_exit "Build failed"
 
-echo "🚀 Restarting services with unified worker scaling..."
+echo "🚀 Restarting services with Hybrid Deduplication..."
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
 
-echo "ℹ️  Note: Queues are automatically managed by workers (RabbitMQ 4.x)"
+# Verify Hybrid Deduplication is active
+echo "🔍 Verifying Hybrid Deduplication components..."
+echo "  Checking RabbitMQ Message Deduplication plugin..."
+if docker exec asciisky-rabbitmq rabbitmq-plugins list | grep -q "rabbitmq_message_deduplication"; then
+    success "RabbitMQ Message Deduplication plugin active"
+else
+    echo "🔧 Enabling RabbitMQ Message Deduplication plugin..."
+    docker exec asciisky-rabbitmq rabbitmq-plugins enable rabbitmq_message_deduplication
+    docker restart asciisky-rabbitmq
+    sleep 5
+    success "RabbitMQ Message Deduplication plugin enabled"
+fi
 
-success "Main server updated"
+echo "  Checking PostgreSQL Advisory Locks support..."
+if docker exec asciisky-postgres psql -U asciisky -d asciisky -c "SELECT 1;" >/dev/null 2>&1; then
+    success "PostgreSQL Advisory Locks available"
+else
+    error_exit "PostgreSQL not responding for Advisory Locks"
+fi
+
+echo "ℹ️  Note: Queues with deduplication are automatically managed by workers (RabbitMQ 4.x)"
+
+success "Main server updated with Hybrid Deduplication"
 echo ""
 
 # ===== WORKER B =====
@@ -112,8 +132,9 @@ echo "🔍 Monitoring:"
 echo "   RabbitMQ UI:        http://$RABBITMQ_MAIN:15672"
 echo "   Worker Monitor:     http://$RABBITMQ_B:8080 (Unified Worker Dashboard)"
 echo "   Worker Connections: Should see unified workers + 3 precompute (main)"
-echo "   Precompute Queue:   Queues → precompute.tasks"
+echo "   Precompute Queue:   Queues → precompute.tasks (with deduplication)"
 echo "   Smart Interpolation: Enabled via ENABLE_SMART_INTERPOLATION=true"
+echo "   Hybrid Deduplication: RabbitMQ + PostgreSQL Advisory Locks active"
 echo ""
 echo "📝 Useful commands:"
 echo "   docker logs -f asciisky-precompute-coordinator  # Precompute coordinator"
@@ -121,4 +142,10 @@ echo "   docker compose -f docker-compose.production.yml logs -f precompute_work
 echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
 echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f worker_monitor'  # Worker monitor dashboard"
 echo "   ssh $RABBITMQ_C 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
+echo ""
+echo "🔒 Hybrid Deduplication Commands:"
+echo "   docker exec asciisky-rabbitmq rabbitmqctl list_queues  # Check queue depths"
+echo "   docker exec asciisky-postgres psql -U asciisky -c \"SELECT * FROM pg_locks WHERE locktype = 'advisory';\"  # Check advisory locks"
+echo "   docker exec asciisky-web python test_hybrid_deduplication.py  # Run deduplication tests"
+echo "   curl -s \"http://$RABBITMQ_MAIN:8000/api/bright_asteroids?lat=46.7632&lon=14.8417&elevation=405\"  # Test API with deduplication"
 echo ""
