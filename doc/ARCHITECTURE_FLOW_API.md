@@ -257,7 +257,7 @@ Planets (und andere helle Himmelskörper) werden heute über die
 | Aspect                | Asteroids/Comets                                           | Celestial (Sun, Moon, planets)                 |
 |-----------------------|------------------------------------------------------------|-----------------------------------------------|
 | Number of objects     | Many (up to thousands in cache per bucket)                | 9 bodies (Sun, Moon, 7 major planets)         |
-| Data source           | MPC data (downloaded, stored in PostgreSQL)               | Skyfield ephemeris (`de421.bsp`)              |
+| Data source           | MPC orbital files + DataFrame cache on filesystem         | Skyfield ephemeris (`de421.bsp` on filesystem) |
 | Cache                 | PostgreSQL `cached_positions` (1‑hour buckets)            | No cache                                      |
 | Workers               | RabbitMQ workers + precompute pipeline                    | No workers                                    |
 | Response time         | Best case: cache hit (few 10–100 ms)                      | Typically 50–200 ms                           |
