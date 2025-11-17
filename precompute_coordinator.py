@@ -142,6 +142,14 @@ def get_existing_queue_tasks() -> set:
         
         channel = connection.channel()
         
+        channel.queue_declare(
+            queue='precompute.tasks',
+            durable=True,
+            arguments={
+                'x-max-priority': 10
+            }
+        )
+        
         # Hole alle Messages aus der Queue (ohne sie zu löschen)
         method_frame, header_frame, body = channel.basic_get(queue='precompute.tasks', auto_ack=False)
         
