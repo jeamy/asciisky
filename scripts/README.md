@@ -13,13 +13,12 @@ Automated setup and deployment scripts for ASCII Sky with **Hybrid Deduplication
 **Purpose:** All-in-One Hybrid Deduplication Setup (replaces `setup-dev.sh`)
 
 **What it does:**
-- ✅ Creates `.env` with Hybrid Deduplication configuration if missing
+- ✅ Creates `.env` with deduplication-friendly defaults if missing
 - ✅ Docker & Docker Compose validation
 - ✅ Builds Docker images with latest optimizations
 - ✅ Starts all services (Web, PostgreSQL, RabbitMQ, Unified Workers)
-- ✅ Enables RabbitMQ Message Deduplication plugin
-- ✅ Configures PostgreSQL Advisory Locks
-- ✅ Runs comprehensive Hybrid Deduplication tests
+- ✅ Configures PostgreSQL Advisory Locks for deduplication
+- ✅ Runs Hybrid Deduplication smoke tests
 - ✅ **Data Safety**: Preserves all data by default
 - ✅ **Vectorized Performance**: NumPy optimizations enabled
 
@@ -69,10 +68,9 @@ Automated setup and deployment scripts for ASCII Sky with **Hybrid Deduplication
 - ✅ Deploys to $RABBITMQ_MAIN (Main server: Web, PostgreSQL, RabbitMQ)
 - ✅ Deploys to $RABBITMQ_B (Worker B: Unified Workers + Monitor)
 - ✅ Deploys to $RABBITMQ_C (Worker C: Unified Workers + Monitor)
-- ✅ **NEW**: Enables RabbitMQ Message Deduplication plugin
-- ✅ **NEW**: Configures PostgreSQL Advisory Locks
-- ✅ **NEW**: Initializes Hybrid Deduplication system
-- ✅ **NEW**: Runs production verification tests
+- ✅ Configures PostgreSQL Advisory Locks for deduplication
+- ✅ Initializes Hybrid Deduplication (RabbitMQ message IDs + PG locks)
+- ✅ Runs production verification tests
 - ✅ Copies `.env` to all servers automatically
 - ✅ Scales unified workers via environment variables
 
@@ -138,9 +136,8 @@ ASCII_SKY_PRECOMPUTE_HOURS=720  # precompute 30 days ahead
 - ✅ Git pull on all servers
 - ✅ Rebuild Docker images
 - ✅ Rolling restart (no downtime)
-- ✅ **NEW**: Verifies Hybrid Deduplication after update
-- ✅ **NEW**: Tests RabbitMQ plugin status
-- ✅ **NEW**: Validates PostgreSQL Advisory Locks
+- ✅ Verifies Hybrid Deduplication (RabbitMQ message IDs + PG locks)
+- ✅ Validates PostgreSQL Advisory Locks
 
 **Usage:**
 ```bash
@@ -243,9 +240,6 @@ docker compose logs -f unified_worker
 
 **Solution:**
 ```bash
-# Check RabbitMQ plugin
-docker exec rabbitmq rabbitmq-plugins list | grep deduplication
-
 # Check PostgreSQL locks
 docker exec postgres psql -U asciisky -c "SELECT * FROM pg_locks WHERE locktype = 'advisory';"
 
@@ -285,9 +279,8 @@ ssh $RABBITMQ_B "echo OK"
 - [ ] Web UI reachable: http://$RABBITMQ_MAIN
 - [ ] Unified workers running on Worker B/C
 - [ ] Worker Monitor Dashboard accessible: http://$RABBITMQ_B:8080
-- [ ] **NEW**: Hybrid Deduplication verified: `./scripts/hybrid-setup.sh test`
-- [ ] **NEW**: RabbitMQ Message Deduplication plugin enabled
-- [ ] **NEW**: PostgreSQL Advisory Locks working
+- [ ] Hybrid Deduplication verified: `./scripts/hybrid-setup.sh test`
+- [ ] PostgreSQL Advisory Locks working
 - [ ] Check logs: `docker compose -f docker-compose.production.yml logs -f`
 
 ---
