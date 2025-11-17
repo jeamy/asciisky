@@ -189,7 +189,7 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 ### Cache Architecture
 
 - **PostgreSQL Database**
-  - All asteroid and comet orbital data (~2200 asteroids, ~1200 comets)
+  - All MPC orbital data (currently >1.1 million minor planets, ~4,000 comets)
   - Pre-computed positions cached per location and time bucket
   - Automatic nightly updates via `data_updater` service
   - Multi-host capable: All workers connect to central PostgreSQL instance
