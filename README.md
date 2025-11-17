@@ -237,11 +237,12 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 - `de421.bsp` - JPL ephemeris used by Skyfield
 
 ### RabbitMQ Workers (Unified Architecture)
-- `workers/unified_worker.py` - **Unified Worker** with Hybrid Deduplication (replaces all separate workers)
+- `workers/unified_worker.py` - **Unified Worker** with Hybrid Deduplication (replaces separate asteroid/comet workers)
   - Handles all task types: precompute, asteroids, comets
-  - Uses RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+  - Uses deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
   - Vectorized magnitude calculations for performance
-- `workers/precompute_coordinator.py` - Coordinates precomputation across workers
+- `workers/precompute_worker.py` - Dedicated precompute worker consuming `precompute.tasks` and writing positions to PostgreSQL
+- `workers/precompute_coordinator.py` - Coordinates precomputation across workers (schedules tasks to RabbitMQ)
 
 ### Deployment Scripts
 - `scripts/hybrid-setup.sh` - **All-in-One Hybrid Deduplication Setup** (local, production, tests, monitoring)
