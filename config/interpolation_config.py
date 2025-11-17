@@ -80,9 +80,6 @@ class SmartInterpolationConfig:
         float(os.getenv('INTERPOLATION_MAX_ERROR_DEGREES', '2.0')))
     
     # Computation limits
-    max_magnitude_asteroids: float = field(default_factory=lambda:
-        float(os.getenv('INTERPOLATION_MAX_MAGNITUDE_ASTEROIDS', '20.0')))
-    
     max_comets: int = field(default_factory=lambda:
         int(os.getenv('INTERPOLATION_MAX_COMETS', '1000')))
     

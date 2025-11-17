@@ -364,8 +364,8 @@ class UnifiedWorker:
                 logger.debug(f"Acquired Advisory Lock for: {computation_key}")
                 
                 if kind == 'asteroids':
-                    # Nutze shared resources und konfigurierbare Limits
-                    max_mag = min(magnitude, self.config.max_magnitude_asteroids)
+                    # Nutze shared resources und globale Magnituden-Limits
+                    max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
                     
                     asteroids_data = bright_asteroids.load_bright_asteroids(
                         self.loader, self.ts, self.eph, observer_loc,
