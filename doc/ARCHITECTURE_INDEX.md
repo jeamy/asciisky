@@ -257,15 +257,18 @@ get_comet_positions(location_key, time_bucket)                         # Zeilen:
           │                     │
 ┌─────────▼────────┐   ┌────────▼─────────┐
 │ Worker Host B    │   │ Worker Host C    │
-│ - Precompute (4x)│   │ - Precompute (4x)│
-│ - Asteroid (2x)  │   │ - Asteroid (2x)  │
-│ - Comet (2x)     │   │ - Comet (2x)     │
+│ - Unified        │   │ - Unified        │
+│   Workers        │   │   Workers        │
+│   (precompute +  │   │   (precompute +  │
+│    asteroids +   │   │    asteroids +   │
+│    comets)       │   │    comets)       │
 └──────────────────┘   └──────────────────┘
 ```
 
-**Total:** 12 Precompute + 4 Asteroid + 4 Comet Worker
+**Example:** 4 precompute workers on the main server and a configurable number
+of unified workers per worker host (see `.env.b.example` / `.env.c.example`).
 
-**See:** [WORKER_SETUP.md](WORKER_SETUP.md)
+**See:** [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)
 
 ---
 
