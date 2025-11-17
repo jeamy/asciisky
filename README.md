@@ -480,6 +480,11 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet and SWE-1. Babysitting by a human in a virtual environment.
 
 
+## Live Demo
+
+You can try ASCII Sky online at: https://asciisky.eibrain.org/
+When switching to a new location for the first time, calculations may take longer because asteroid and comet sky data for that location must be computed and cached first.
+
 ## License
 
 This repository is released under the [MIT License](LICENSE).
