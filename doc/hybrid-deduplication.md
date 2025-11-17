@@ -3,10 +3,10 @@
 
 ## Overview
 
-ASCII Sky uses **PostgreSQL Advisory Locks** for complete task deduplication:
-- **PostgreSQL Advisory Locks** for database operations
-- **Deterministic task IDs** for lock generation
-- **ACID-safe deduplication** across all workers
+ASCII Sky uses **deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks** for task deduplication:
+- **Deterministic task IDs** are sent via RabbitMQ to avoid duplicate messages
+- **PostgreSQL Advisory Locks** guard database operations
+- **ACID-safe deduplication** across all workers/hosts
 
 This provides 100% protection against duplicate tasks with minimal complexity.
 
@@ -95,18 +95,7 @@ ADVISORY_LOCK_TTL = 300      # Auto-cleanup
 
 ### RabbitMQ Configuration
 
-**File:** `config/rabbitmq.conf`
-```ini
-# Message Deduplication Configuration
-# Enable rabbitmq_message_deduplication plugin
-queue_master_locator = min-masters
-```
-
-**Plugin Activation:** `scripts/enable-rabbitmq-deduplication.sh`
-```bash
-#!/bin/bash
-rabbitmq-plugins enable rabbitmq_message_deduplication
-```
+RabbitMQ 4.1 is used with classic queues. Deduplication relies on deterministic `message_id` plus per-message TTL (300 s) handled by the workers; no additional plugins are required.
 
 ## Usage Examples
 
