@@ -311,7 +311,6 @@ def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
             queue='precompute.tasks',
             durable=True,
             arguments={
-                'x-message-ttl': 300000,          # 5 minutes TTL
                 'x-max-priority': 10              # Priority Queue
             }
         )
