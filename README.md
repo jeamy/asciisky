@@ -35,7 +35,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - PostgreSQL database backend for efficient data storage and retrieval
 - RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md) and [Worker Setup](doc/WORKER_SETUP.md)
-- **Hybrid Deduplication (Phase 3)**: RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+- **Hybrid Deduplication (Phase 3)**: Deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
   - Prevents duplicate computations across all workers
   - Scales horizontally across unlimited worker hosts
   - Automatic cleanup and monitoring
@@ -52,7 +52,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 - Docker and Docker Compose
 
-## Running the Application
+Korrigiere readme und bringe ## Running the Application
 
 ### Development Setup (Local)
 
@@ -67,24 +67,14 @@ A web application that displays the current positions of celestial bodies (Sun, 
 4. Open your browser and navigate to `http://localhost:8000`
 
 The Hybrid setup automatically:
-- ✅ Enables RabbitMQ Message Deduplication plugin
-- ✅ Configures PostgreSQL Advisory Locks
-- ✅ Starts Unified Workers with hybrid protection
-- ✅ Builds Docker images with latest code
-- ✅ Starts all services (web, PostgreSQL, RabbitMQ, workers)
-- ✅ Initializes the database
-- ✅ Downloads initial asteroid/comet data
-- ✅ Runs comprehensive deduplication tests
+- ✅ Configures PostgreSQL Advisory Locks for deduplication
+- ✅ Starts all core services (FastAPI, PostgreSQL, RabbitMQ, workers)
+- ✅ Builds Docker images with the latest code
+- ✅ Initializes the database and downloads asteroid/comet data
+- ✅ Launches unified workers (with per-message dedup IDs + Advisory Locks)
+- ✅ Runs the hybrid deduplication smoke tests
 
-#### Traditional Setup (Legacy)
-
-1. Clone this repository
-2. Navigate to the project directory
-3. Run the setup script:
-   ```bash
-   ./scripts/hybrid-setup.sh local
-   ```
-4. Open your browser and navigate to `http://localhost:8000`
+> **Legacy note:** Der frühere `setup-dev.sh` wurde vollständig durch `./scripts/hybrid-setup.sh local` ersetzt. Es gibt kein separates "Legacy"-Setup mehr.
 
 
 **Data Safety:** By default, all data (database, cache, etc.) is preserved when restarting. Only use `./scripts/hybrid-setup.sh local --clean` if you want to delete everything.
@@ -145,24 +135,31 @@ Compose files for production:
 
 ### Docker Services
 
-The application runs multiple services with **PostgreSQL Advisory Locks**:
+The application runs multiple services. In local development these are defined in `docker-compose.yml`, in production on the main server in `docker-compose.production.yml`, and on worker hosts in `docker-compose.workers.yml`.
 
-- **`web`** - FastAPI web server (port 8000)
-- **`postgres`** - PostgreSQL database with Advisory Locks support (port 5432)
-- **`rabbitmq`** - RabbitMQ 4.1 message broker for task distribution (ports 5672, 15672)
-- **`unified_worker`** - **Unified Workers** with PostgreSQL Advisory Locks (replaces separate precompute/asteroid/comet workers)
-  - Handles all task types: precompute, asteroids, comets
-  - Uses PostgreSQL Advisory Locks for deduplication
-  - Configurable scaling via environment variables
-- **`precompute_coordinator`** - Coordinates precomputation tasks
-- **`data_updater`** - Nightly data update service (runs at 2:00 AM)
+**Core services (main server / local):**
 
-**Performance Benefits:**
-- 🚀 **-80% Memory Usage** - Unified Workers share resources
-- ⚡ **+35% Throughput** - PostgreSQL Advisory Locks eliminate duplicate work
-- 🔄 **Unlimited Scaling** - Horizontal scaling across multiple hosts
-- 🛡️ **100% Deduplication** - No duplicate computations guaranteed
-- 🚀 **RabbitMQ 4.1** - Latest version, 2x faster Quorum Queues
+- **`web`** – FastAPI web server (port 8000)
+- **`postgres`** – PostgreSQL database with Advisory Locks support (port 5432)
+- **`rabbitmq`** – RabbitMQ 4.1 message broker for task distribution (ports 5672, 15672)
+- **`data_updater`** – Nightly data update service (runs via `nightly_data_updater.py`)
+- **`precompute_coordinator`** – Coordinates creation of precompute tasks and publishes them to RabbitMQ
+- **`precompute_worker`** – Dedicated precompute workers that consume `precompute.tasks` and write asteroid/comet positions to PostgreSQL (production main server)
+
+**Unified Workers and monitoring (local + worker hosts):**
+
+- **`unified_worker`** – Unified Worker(s) with hybrid deduplication
+  - Handles all task types: precompute, on-demand asteroids, on-demand comets
+  - Uses RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+  - Runs as a single container in local `docker-compose.yml` and as scalable workers in `docker-compose.workers.yml`
+- **`worker_monitor`** – Real-time performance dashboard for workers (port configurable via `MONITOR_PORT`)
+
+**Performance Benefits (Unified Worker Architecture):**
+- 🚀 **-80% Memory Usage** – Unified Workers share Skyfield resources
+- ⚡ **+35% Throughput** – Hybrid deduplication eliminates duplicate work
+- 🔄 **Unlimited Scaling** – Horizontal scaling across multiple worker hosts
+- 🛡️ **Hybrid Deduplication** – RabbitMQ + PostgreSQL Advisory Locks for duplicate protection
+- 🚀 **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
 
 All services restart automatically unless stopped.
 
@@ -371,12 +368,12 @@ Notes:
 - `ASCII_SKY_UPDATE_HOUR` - Hour of day for automatic data updates (default: 4, meaning 4:00 AM)
 
 ### Magnitude Limits Configuration
-- `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for asteroid prefiltering (default: 12.0)
-- `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` - Maximum apparent magnitude for asteroid display (default: 10.0)
-- `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` - Maximum absolute magnitude for comet prefiltering (default: 20.0)
-- `ASCII_SKY_COMET_MAX_APPARENT_MAG` - Maximum apparent magnitude for comet display (default: 14.0)
-- `ASCII_SKY_ASTEROIDS_EVENTS_MAX` - Maximum number of asteroid events (default: 100)
-- `ASCII_SKY_COMET_EVENTS_MAX` - Maximum number of comet events (default: 50)
+- `ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG` – Maximum absolute magnitude for asteroid prefiltering (Docker default: 14.0, code fallback: 12.0)
+- `ASCII_SKY_ASTEROID_MAX_APPARENT_MAG` – Maximum apparent magnitude for asteroid processing/display (default: 10.0)
+- `ASCII_SKY_COMET_MAX_ABSOLUTE_MAG` – Maximum absolute magnitude for comet prefiltering (Docker default: 20.0, code fallback: 18.0)
+- `ASCII_SKY_COMET_MAX_APPARENT_MAG` – Maximum apparent magnitude for comets (default: 14.0)
+- `ASCII_SKY_ASTEROIDS_EVENTS_MAX` – Max rise/set/transit computations per asteroid (default: 50)
+- `ASCII_SKY_COMET_EVENTS_MAX` – Max rise/set/transit computations per comet (Docker default: 50, code fallback: 300)
 
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)
@@ -404,7 +401,7 @@ Notes:
 
 - **Backend**: FastAPI, [Skyfield](https://rhodesmill.org/skyfield/), PostgreSQL with Advisory Locks
 - **Performance**: NumPy vectorization for high-speed magnitude calculations
-- **Message Queue**: RabbitMQ 4.1 with Message Deduplication plugin and async workers
+- **Message Queue**: RabbitMQ 4.1 with async workers (deterministic IDs + PostgreSQL locks for dedup)
 - **Frontend**: HTML, CSS, JavaScript
 - **Containerization**: Docker, Docker Compose
 
@@ -485,7 +482,7 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 
 ## Attribution
 
-This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, Claude 3.7, 4.5 Sonnet and SWE-1. Babysitting by a human in a virtual environment.
+This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet and SWE-1. Babysitting by a human in a virtual environment.
 
 
 ## License
