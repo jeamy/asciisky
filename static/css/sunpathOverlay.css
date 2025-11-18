@@ -7,6 +7,11 @@
   max-width: 80vw;
   pointer-events: auto;
   z-index: 10000;
+
+  background: var(--panel-bg, #111);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
 }
 
 .sunpath-bg {

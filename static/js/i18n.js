@@ -80,6 +80,9 @@ export const i18n = {
         'phase': 'Phase',
         'magnitude': 'Helligkeit',
         'day_length': 'Tageslänge',
+        'astronomical_twilight': 'Astronomische Dämmerung',
+        'nautical_twilight': 'Nautische Dämmerung',
+        'civil_twilight': 'Bürgerliche Dämmerung',
         
         // Mondphasen
         'new_moon': 'Neumond',
@@ -317,6 +320,9 @@ export const i18n = {
         'phase': 'Phase',
         'magnitude': 'Magnitude',
         'day_length': 'Day length',
+        'astronomical_twilight': 'Astronomical twilight',
+        'nautical_twilight': 'Nautical twilight',
+        'civil_twilight': 'Civil twilight',
         
         // Moon phases
         'new_moon': 'New Moon',

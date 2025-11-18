@@ -158,8 +158,10 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
     location = wgs84.latlon(lat, lon, elevation_m=elevation)
     sun = CELESTIAL_BODIES["sun"]
 
-    # Build rising/setting function once, reuse for each day
+    # Build functions once, reuse for each day
     f = almanac.risings_and_settings(eph, sun, location)
+    # dark_twilight_day only needs ephemeris and observer (location)
+    twilight_f = almanac.dark_twilight_day(eph, location)
 
     def local_midnight(day: datetime) -> datetime:
         """Return local midnight for given date, handling pytz and stdlib timezones."""
@@ -214,6 +216,74 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         else:
             length_hours = None
 
+        # Twilight phases (astronomical, nautical, civil)
+        astro_start = astro_end = None
+        naut_start = naut_end = None
+        civil_start = civil_end = None
+
+        try:
+            # Build segments of twilight states over [t0, t1]
+            state0 = int(twilight_f(t0))
+            tw_times, tw_states = almanac.find_discrete(t0, t1, twilight_f)
+
+            segments = []
+            last_time = t0
+            last_state = state0
+            for ti, st in zip(tw_times, tw_states):
+                seg_start_utc = last_time.utc_datetime()
+                seg_end_utc = ti.utc_datetime()
+                segments.append((seg_start_utc, seg_end_utc, int(last_state)))
+                last_time = ti
+                last_state = int(st)
+
+            # Final segment to t1
+            seg_start_utc = last_time.utc_datetime()
+            seg_end_utc = t1.utc_datetime()
+            segments.append((seg_start_utc, seg_end_utc, int(last_state)))
+
+            day_start_local = lm
+            day_end_local = lm + timedelta(days=1)
+
+            def update_range(kind: str, start_dt: datetime, end_dt: datetime):
+                nonlocal astro_start, astro_end, naut_start, naut_end, civil_start, civil_end
+                if kind == 'astronomical':
+                    if astro_start is None or start_dt < astro_start:
+                        astro_start = start_dt
+                    if astro_end is None or end_dt > astro_end:
+                        astro_end = end_dt
+                elif kind == 'nautical':
+                    if naut_start is None or start_dt < naut_start:
+                        naut_start = start_dt
+                    if naut_end is None or end_dt > naut_end:
+                        naut_end = end_dt
+                elif kind == 'civil':
+                    if civil_start is None or start_dt < civil_start:
+                        civil_start = start_dt
+                    if civil_end is None or end_dt > civil_end:
+                        civil_end = end_dt
+
+            for seg_start_utc, seg_end_utc, state in segments:
+                # Convert to local time and clip to this local day
+                seg_start_local = seg_start_utc.astimezone(tz)
+                seg_end_local = seg_end_utc.astimezone(tz)
+                start_local_clipped = max(seg_start_local, day_start_local)
+                end_local_clipped = min(seg_end_local, day_end_local)
+                if end_local_clipped <= start_local_clipped:
+                    continue
+
+                # State codes: 0=night, 1=astronomical, 2=nautical, 3=civil, 4=day
+                if state == 1:
+                    update_range('astronomical', start_local_clipped, end_local_clipped)
+                elif state == 2:
+                    update_range('nautical', start_local_clipped, end_local_clipped)
+                elif state == 3:
+                    update_range('civil', start_local_clipped, end_local_clipped)
+        except Exception:
+            # Twilight information is optional; ignore errors
+            astro_start = astro_end = None
+            naut_start = naut_end = None
+            civil_start = civil_end = None
+
         points.append({
             "date": day_date.isoformat(),
             "sunrise": sunrise_dt.isoformat() if sunrise_dt else None,
@@ -221,6 +291,12 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             "sunrise_hours": to_hours(sunrise_dt),
             "sunset_hours": to_hours(sunset_dt),
             "day_length_hours": length_hours,
+            "astronomical_twilight_start": astro_start.isoformat() if astro_start else None,
+            "astronomical_twilight_end": astro_end.isoformat() if astro_end else None,
+            "nautical_twilight_start": naut_start.isoformat() if naut_start else None,
+            "nautical_twilight_end": naut_end.isoformat() if naut_end else None,
+            "civil_twilight_start": civil_start.isoformat() if civil_start else None,
+            "civil_twilight_end": civil_end.isoformat() if civil_end else None,
         })
 
         current = current + timedelta(days=1)

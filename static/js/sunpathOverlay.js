@@ -229,7 +229,10 @@ export class SunpathOverlay {
         const sunset = formatTime(point.sunset);
         let dayLen = '—';
         if (typeof point.day_length_hours === 'number') {
-            dayLen = `${point.day_length_hours.toFixed(1)} h`;
+            const totalMinutes = Math.round(point.day_length_hours * 60);
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            dayLen = `${hours} h ${minutes.toString().padStart(2, '0')} min`;
         }
 
         const labelDate = t('date');
@@ -237,7 +240,40 @@ export class SunpathOverlay {
         const labelSunset = t('set_time');
         const labelLength = t('day_length') || 'Tageslänge';
 
-        tooltip.innerHTML = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
+        const formatInterval = (startIso, endIso) => {
+            if (!startIso || !endIso) return '—';
+            try {
+                const s = new Date(startIso);
+                const e = new Date(endIso);
+                if (isNaN(s.getTime()) || isNaN(e.getTime())) return '—';
+                const sStr = s.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+                const eStr = e.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+                return `${sStr}–${eStr}`;
+            } catch (_) {
+                return '—';
+            }
+        };
+
+        const astro = formatInterval(point.astronomical_twilight_start, point.astronomical_twilight_end);
+        const naut = formatInterval(point.nautical_twilight_start, point.nautical_twilight_end);
+        const civil = formatInterval(point.civil_twilight_start, point.civil_twilight_end);
+
+        const labelAstro = t('astronomical_twilight');
+        const labelNaut = t('nautical_twilight');
+        const labelCivil = t('civil_twilight');
+
+        let html = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
+        if (astro !== '—') {
+            html += `<br>${labelAstro}: ${astro}`;
+        }
+        if (naut !== '—') {
+            html += `<br>${labelNaut}: ${naut}`;
+        }
+        if (civil !== '—') {
+            html += `<br>${labelCivil}: ${civil}`;
+        }
+
+        tooltip.innerHTML = html;
 
         const pageX = evt.pageX || (evt.clientX + window.scrollX);
         const pageY = evt.pageY || (evt.clientY + window.scrollY);
