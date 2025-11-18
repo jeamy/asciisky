@@ -60,12 +60,14 @@ class TaskPublisher:
                 # Idempotent: Wenn Queue existiert, passiert nichts
                 _thread_local.channel.queue_declare(
                     queue='asteroid.compute',
-                    durable=True
+                    durable=True,
+                    arguments={'x-max-priority': 10}
                 )
                 
                 _thread_local.channel.queue_declare(
                     queue='comet.compute',
-                    durable=True
+                    durable=True,
+                    arguments={'x-max-priority': 10}
                 )
                 
                 _thread_local.channel.queue_declare(

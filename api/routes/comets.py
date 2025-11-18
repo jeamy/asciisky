@@ -69,13 +69,14 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 logger.info(f"📤 Publishing task: {task['task_id']}")
                 
                 # Publiziere an computation.direct Exchange mit routing_key compute.comet
+                # On-Demand Tasks für aktuellen Standort/Zeitpunkt mit höchster Priorität
                 channel.basic_publish(
                     exchange='computation.direct',
                     routing_key='compute.comet',
                     body=json.dumps(task),
                     properties=pika.BasicProperties(
                         delivery_mode=2,  # persistent
-                        priority=5
+                        priority=10
                     )
                 )
                 

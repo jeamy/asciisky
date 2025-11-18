@@ -228,12 +228,14 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
     # On-Demand Queues
     channel.queue_declare(
         queue='asteroid.compute',
-        durable=True
+        durable=True,
+        arguments={'x-max-priority': 10}
     )
     
     channel.queue_declare(
         queue='comet.compute',
-        durable=True
+        durable=True,
+        arguments={'x-max-priority': 10}
     )
     
     # Status Queue
