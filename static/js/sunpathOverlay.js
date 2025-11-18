@@ -52,6 +52,29 @@ function formatIsoInterval(startIso, endIso) {
     return `${start.formatted}–${end.formatted}`;
 }
 
+function formatIsoIntervals(periods, fallbackStart, fallbackEnd) {
+    const usePeriods = Array.isArray(periods) && periods.length > 0
+        ? periods
+        : (fallbackStart && fallbackEnd ? [{ start: fallbackStart, end: fallbackEnd }] : []);
+
+    if (!usePeriods.length) {
+        return '—';
+    }
+    const parts = usePeriods.map((period) => formatIsoInterval(period.start, period.end)).filter((p) => p !== '—');
+    return parts.length ? parts.join(', ') : '—';
+}
+
+function normalizeTwilightPeriods(periods, fallbackStart, fallbackEnd) {
+    const arr = Array.isArray(periods) ? periods.filter((p) => p && p.start && p.end) : [];
+    if (arr.length > 0) {
+        return arr;
+    }
+    if (fallbackStart && fallbackEnd) {
+        return [{ start: fallbackStart, end: fallbackEnd }];
+    }
+    return [];
+}
+
 function getDecimalHourFromIso(iso) {
     const parts = parseIsoLocalTime(iso);
     return parts ? parts.decimalHour : null;
@@ -302,9 +325,21 @@ export class SunpathOverlay {
         const labelSunset = t('set_time');
         const labelLength = t('day_length') || 'Tageslänge';
 
-        const astro = formatIsoInterval(point.astronomical_twilight_start, point.astronomical_twilight_end);
-        const naut = formatIsoInterval(point.nautical_twilight_start, point.nautical_twilight_end);
-        const civil = formatIsoInterval(point.civil_twilight_start, point.civil_twilight_end);
+        const astro = formatIsoIntervals(
+            point.astronomical_twilight_periods,
+            point.astronomical_twilight_start,
+            point.astronomical_twilight_end
+        );
+        const naut = formatIsoIntervals(
+            point.nautical_twilight_periods,
+            point.nautical_twilight_start,
+            point.nautical_twilight_end
+        );
+        const civil = formatIsoIntervals(
+            point.civil_twilight_periods,
+            point.civil_twilight_start,
+            point.civil_twilight_end
+        );
 
         const labelAstro = t('astronomical_twilight');
         const labelNaut = t('nautical_twilight');
@@ -431,26 +466,29 @@ export class SunpathOverlay {
         twilightGroup.setAttribute('class', 'sunpath-twilight');
         svg.appendChild(twilightGroup);
 
-        const addTwilightRect = (startIso, endIso, xLeft, width, cssClass) => {
-            const startH = getDecimalHourFromIso(startIso);
-            const endH = getDecimalHourFromIso(endIso);
-            if (startH === null || endH === null) {
-                return;
-            }
+        const addTwilightRects = (periods, fallbackStart, fallbackEnd, xLeft, width, cssClass) => {
+            const ranges = normalizeTwilightPeriods(periods, fallbackStart, fallbackEnd);
+            ranges.forEach((period) => {
+                const startH = getDecimalHourFromIso(period.start);
+                const endH = getDecimalHourFromIso(period.end);
+                if (startH === null || endH === null) {
+                    return;
+                }
 
-            const yStart = yForHour(startH);
-            const yEnd = yForHour(endH);
-            const y = Math.min(yStart, yEnd);
-            const h = Math.abs(yEnd - yStart);
-            if (h <= 0.5) return; // ignore extremely small bands
+                const yStart = yForHour(startH);
+                const yEnd = yForHour(endH);
+                const y = Math.min(yStart, yEnd);
+                const h = Math.abs(yEnd - yStart);
+                if (h <= 0.5) return;
 
-            const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            r.setAttribute('x', String(xLeft));
-            r.setAttribute('y', String(y));
-            r.setAttribute('width', String(width));
-            r.setAttribute('height', String(h));
-            r.setAttribute('class', cssClass);
-            twilightGroup.appendChild(r);
+                const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                r.setAttribute('x', String(xLeft));
+                r.setAttribute('y', String(y));
+                r.setAttribute('width', String(width));
+                r.setAttribute('height', String(h));
+                r.setAttribute('class', cssClass);
+                twilightGroup.appendChild(r);
+            });
         };
 
         for (let i = 0; i < days; i++) {
@@ -463,21 +501,24 @@ export class SunpathOverlay {
             }
             const w = xRight - xLeft;
 
-            addTwilightRect(
+            addTwilightRects(
+                pt.astronomical_twilight_periods,
                 pt.astronomical_twilight_start,
                 pt.astronomical_twilight_end,
                 xLeft,
                 w,
                 'sunpath-twilight-astronomical'
             );
-            addTwilightRect(
+            addTwilightRects(
+                pt.nautical_twilight_periods,
                 pt.nautical_twilight_start,
                 pt.nautical_twilight_end,
                 xLeft,
                 w,
                 'sunpath-twilight-nautical'
             );
-            addTwilightRect(
+            addTwilightRects(
+                pt.civil_twilight_periods,
                 pt.civil_twilight_start,
                 pt.civil_twilight_end,
                 xLeft,

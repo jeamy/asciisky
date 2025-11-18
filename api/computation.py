@@ -220,6 +220,11 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         astro_start = astro_end = None
         naut_start = naut_end = None
         civil_start = civil_end = None
+        twilight_periods = {
+            'astronomical': [],
+            'nautical': [],
+            'civil': [],
+        }
 
         try:
             # Build segments of twilight states over [t0, t1]
@@ -261,6 +266,12 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                         civil_start = start_dt
                     if civil_end is None or end_dt > civil_end:
                         civil_end = end_dt
+                periods = twilight_periods.get(kind)
+                if periods is not None:
+                    periods.append({
+                        'start': start_dt.isoformat(),
+                        'end': end_dt.isoformat(),
+                    })
 
             for seg_start_utc, seg_end_utc, state in segments:
                 # Convert to local time and clip to this local day
@@ -283,6 +294,11 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             astro_start = astro_end = None
             naut_start = naut_end = None
             civil_start = civil_end = None
+            twilight_periods = {
+                'astronomical': [],
+                'nautical': [],
+                'civil': [],
+            }
 
         points.append({
             "date": day_date.isoformat(),
@@ -297,6 +313,9 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             "nautical_twilight_end": naut_end.isoformat() if naut_end else None,
             "civil_twilight_start": civil_start.isoformat() if civil_start else None,
             "civil_twilight_end": civil_end.isoformat() if civil_end else None,
+            "astronomical_twilight_periods": twilight_periods['astronomical'],
+            "nautical_twilight_periods": twilight_periods['nautical'],
+            "civil_twilight_periods": twilight_periods['civil'],
         })
 
         current = current + timedelta(days=1)
