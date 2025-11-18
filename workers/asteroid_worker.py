@@ -68,7 +68,7 @@ class AsteroidWorker:
                 queue='asteroid.compute',
                 durable=True,
                 arguments={
-                    'x-queue-type': 'quorum',
+                    'x-queue-type': 'classic',
                     'x-max-priority': 10,
                     'x-message-ttl': 3600000  # 1 Stunde
                 }

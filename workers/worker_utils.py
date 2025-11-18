@@ -225,12 +225,12 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         arguments={'x-max-priority': 10}
     )
     
-    # On-Demand Queues
+    # On-Demand Queues (Classic mit Priorität + TTL)
     channel.queue_declare(
         queue='asteroid.compute',
         durable=True,
         arguments={
-            'x-queue-type': 'quorum',
+            'x-queue-type': 'classic',
             'x-max-priority': 10,
             'x-message-ttl': 3600000
         }
@@ -240,7 +240,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         queue='comet.compute',
         durable=True,
         arguments={
-            'x-queue-type': 'quorum',
+            'x-queue-type': 'classic',
             'x-max-priority': 10,
             'x-message-ttl': 3600000
         }
