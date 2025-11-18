@@ -149,6 +149,96 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
     return result
 
 
+def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) -> dict:
+    """Compute sunrise and sunset times for each day of a year at a given location.
+
+    Returns local times and day lengths, suitable for plotting a yearly curve.
+    """
+    tz = get_tzinfo(lat, lon)
+    location = wgs84.latlon(lat, lon, elevation_m=elevation)
+    sun = CELESTIAL_BODIES["sun"]
+
+    # Build rising/setting function once, reuse for each day
+    f = almanac.risings_and_settings(eph, sun, location)
+
+    def local_midnight(day: datetime) -> datetime:
+        """Return local midnight for given date, handling pytz and stdlib timezones."""
+        naive = datetime(day.year, day.month, day.day)
+        try:
+            # pytz-style API
+            if hasattr(tz, "localize"):
+                return tz.localize(naive)
+        except Exception:
+            pass
+        # Fallback: attach tzinfo directly
+        return naive.replace(tzinfo=tz)
+
+    def to_hours(dt) -> float | None:
+        if dt is None:
+            return None
+        return dt.hour + dt.minute / 60.0 + dt.second / 3600.0
+
+    points = []
+    current = datetime(year, 1, 1)
+    last = datetime(year + 1, 1, 1)
+
+    while current < last:
+        lm = local_midnight(current)
+        day_date = lm.date()
+
+        # Use a 2-day window around this midnight to catch rise/set of that local day
+        start_utc = lm.astimezone(timezone.utc)
+        t0 = ts.from_datetime(start_utc)
+        t1 = ts.from_datetime(start_utc + timedelta(days=2))
+
+        sunrise_dt = None
+        sunset_dt = None
+        try:
+            times, events = almanac.find_discrete(t0, t1, f)
+            for ti, ev in zip(times, events):
+                dt_local = ti.utc_datetime().astimezone(tz)
+                if dt_local.date() != day_date:
+                    continue
+                if ev == 1 and sunrise_dt is None:
+                    sunrise_dt = dt_local
+                elif ev == 0 and sunset_dt is None:
+                    sunset_dt = dt_local
+        except Exception:
+            sunrise_dt = None
+            sunset_dt = None
+
+        if sunrise_dt and sunset_dt:
+            length_hours = (sunset_dt - sunrise_dt).total_seconds() / 3600.0
+            if length_hours < 0:
+                length_hours += 24.0
+        else:
+            length_hours = None
+
+        points.append({
+            "date": day_date.isoformat(),
+            "sunrise": sunrise_dt.isoformat() if sunrise_dt else None,
+            "sunset": sunset_dt.isoformat() if sunset_dt else None,
+            "sunrise_hours": to_hours(sunrise_dt),
+            "sunset_hours": to_hours(sunset_dt),
+            "day_length_hours": length_hours,
+        })
+
+        current = current + timedelta(days=1)
+
+    tz_name = getattr(tz, "zone", None) or str(tz)
+
+    return {
+        "year": year,
+        "location": {
+            "latitude": lat,
+            "longitude": lon,
+            "elevation": elevation,
+            "timezone": tz_name,
+        },
+        "points": points,
+    }
+
+
 def load_constellations():
     """
     Lädt Constellation-Daten aus Stellarium

@@ -79,6 +79,7 @@ export const i18n = {
         'transit_time': 'Höchststand',
         'phase': 'Phase',
         'magnitude': 'Helligkeit',
+        'day_length': 'Tageslänge',
         
         // Mondphasen
         'new_moon': 'Neumond',
@@ -187,6 +188,10 @@ export const i18n = {
         'help_magnitude_filters_desc': 'Über den ⚙️-Button unter "Sichtbare Objekte" können Sie die Helligkeitsfilter für Asteroiden und Kometen anpassen (Magnitude 10-20). Bei Änderung der Filter werden die Daten neu berechnet, was einige Minuten dauern kann. Die Objekte werden automatisch angezeigt, sobald sie verfügbar sind.',
         'help_github': 'Quellcode',
         'help_github_desc': 'ASCII Sky ist Open Source. Der vollständige Quellcode ist auf GitHub verfügbar:',
+        // Sonnenbahn-Jahreskurve
+        'sunpath_curve': 'Sonnenauf-/untergang (Jahreskurve)',
+        'toggle_sunpath': 'Sonnenauf-/untergangskurve ein/ausblenden',
+        'sunpath_title': 'Sonnenauf-/untergang für',
         
         // Object count display
         'visible_objects': 'Sichtbare Objekte',
@@ -311,6 +316,7 @@ export const i18n = {
         'transit_time': 'Transit',
         'phase': 'Phase',
         'magnitude': 'Magnitude',
+        'day_length': 'Day length',
         
         // Moon phases
         'new_moon': 'New Moon',
@@ -410,6 +416,10 @@ export const i18n = {
         'help_magnitude_filters_desc': 'Use the ⚙️ button under "Visible Objects" to adjust brightness filters for asteroids and comets (magnitude 10-20). Changing filters will recalculate the data, which may take several minutes. Objects will be displayed automatically once available.',
         'help_github': 'Source Code',
         'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:',
+        // Sunpath yearly curve
+        'sunpath_curve': 'Sunrise/sunset (year curve)',
+        'toggle_sunpath': 'Toggle sunrise/sunset curve',
+        'sunpath_title': 'Sunrise/sunset for',
         
         // Object count display
         'visible_objects': 'Visible Objects',

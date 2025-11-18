@@ -1,0 +1,80 @@
+#sunpath-overlay.sunpath-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vw;
+  max-width: 80vw;
+  pointer-events: auto;
+  z-index: 10000;
+}
+
+.sunpath-bg {
+  fill: var(--panel-bg, #111);
+  stroke: var(--border-color, #333);
+  stroke-width: 1;
+}
+
+.sunpath-axis line {
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 1;
+}
+
+.sunpath-axis text {
+  fill: var(--primary-color, #00ff00);
+  font-size: 10px;
+}
+
+.sunpath-title {
+  padding: 10px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  background: var(--panel-bg, #111);
+}
+
+.sunpath.sunrise {
+  fill: none;
+  stroke: #ffcc33;
+  stroke-width: 1.5;
+}
+
+.sunpath.sunset {
+  fill: none;
+  stroke: dodgerblue;
+  stroke-width: 1.5;
+}
+
+.sunpath-hitareas rect {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.sunpath-hover-line {
+  stroke: rgba(0, 255, 0, 0.8);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.sunpath-tooltip {
+  position: absolute;
+  background: var(--panel-bg, #111);
+  color: var(--primary-color, #00ff00);
+  border: 1px solid var(--border-color, #333);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-family: 'Courier New', monospace;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+  pointer-events: none;
+  z-index: 10001;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  #sunpath-overlay.sunpath-overlay {
+    top: 50%;
+    width: 95vw;
+    max-width: 95vw;
+  }
+}
