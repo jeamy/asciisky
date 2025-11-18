@@ -3,9 +3,16 @@ import { t, getCurrentLanguage } from './i18n.js';
 import { settingsManager } from './settings.js';
 
 const SUNPATH_CACHE = new Map();
+const SUNPATH_FETCH_MAX_RETRIES = 6;
+const SUNPATH_FETCH_BASE_DELAY_MS = 1200;
+const SUNPATH_FETCH_MAX_DELAY_MS = 6000;
 
 function pad2(value) {
     return String(value).padStart(2, '0');
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseIsoLocalTime(iso) {
@@ -233,13 +240,29 @@ export class SunpathOverlay {
                 year: String(year),
                 nocache: '1'
             });
-            const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
-            if (!resp.ok) {
-                throw new Error(`HTTP ${resp.status}`);
-            }
-            const json = await resp.json();
+            const attemptFetch = async (attempt = 1) => {
+                const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
+                if (resp.status === 503) {
+                    if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
+                        throw new Error('Sunpath data not ready yet (max retries exceeded)');
+                    }
+                    const delay = Math.min(
+                        SUNPATH_FETCH_MAX_DELAY_MS,
+                        Math.round(SUNPATH_FETCH_BASE_DELAY_MS * Math.pow(1.5, attempt - 1))
+                    );
+                    console.info(`Sunpath data pending (503). Retrying in ${delay} ms (attempt ${attempt + 1}).`);
+                    await sleep(delay);
+                    return attemptFetch(attempt + 1);
+                }
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}`);
+                }
+                return resp.json();
+            };
+
+            const json = await attemptFetch();
             this.data = json;
-             this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
+            this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
             if (key) {
                 SUNPATH_CACHE.set(key, json);
             }
