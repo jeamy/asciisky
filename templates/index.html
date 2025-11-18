@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="./static/css/constellations.css">
     <link rel="stylesheet" href="./static/css/visibleObjects.css">
     <link rel="stylesheet" href="./static/css/magnitudeFilter.css">
+    <link rel="stylesheet" href="./static/css/sunpathOverlay.css">
 </head>
 <body>
 <header>
@@ -77,10 +78,12 @@
     import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     import { initVisibleObjectsList, updateVisibleObjectsList } from './static/js/visibleObjectsList.js';
     import { MagnitudeFilterDialog } from './static/js/magnitudeFilterDialog.js';
+    import { SunpathOverlay } from './static/js/sunpathOverlay.js';
     
     let renderer;
     let locationDialog;
     let magnitudeFilterDialog;
+    let sunpathOverlay;
     let __csSecondPassTimer = null;
     
     function refreshCacheStatus() {
@@ -115,6 +118,15 @@
             initVisibleObjectsList('visible-objects-panel', renderer, magnitudeFilterDialog);
         }, 100);
         
+        // 3d) Sunpath-Overlay initialisieren (SVG-Layer über der Sky-Ansicht)
+        const skyContainer = document.getElementById('sky-container');
+        if (skyContainer) {
+            sunpathOverlay = new SunpathOverlay(skyContainer);
+        }
+        try {
+            SunpathOverlay.preloadForCurrentLocation();
+        } catch (_) { /* noop */ }
+
         // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
         setTimeout(() => {
             setupObjectList();
@@ -224,6 +236,13 @@
             if (constellationBtn) {
                 constellationBtn.innerHTML = '✦ ' + t('constellations');
                 constellationBtn.title = t('toggle_constellations');
+            }
+
+            // Aktualisiere den Sonnenbahn-Button, wenn vorhanden
+            const sunpathBtn = document.getElementById('sunpath-toggle');
+            if (sunpathBtn) {
+                sunpathBtn.innerHTML = '☉ ' + t('sunpath_curve');
+                sunpathBtn.title = t('toggle_sunpath');
             }
             
             // Aktualisiere den Standort-Button-Tooltip
@@ -561,6 +580,24 @@
                     }
                 };
                 container.appendChild(constellationBtn);
+
+                // Sonnenbahn-Button neben Sternbilder hinzufügen
+                const sunpathBtn = document.createElement('button');
+                sunpathBtn.id = 'sunpath-toggle';
+                sunpathBtn.className = 'object-btn';
+                sunpathBtn.innerHTML = '☉ ' + t('sunpath_curve');
+                sunpathBtn.title = t('toggle_sunpath');
+                sunpathBtn.onclick = async () => {
+                    try {
+                        if (!sunpathOverlay) return;
+                        await sunpathOverlay.toggleForCurrentLocation();
+                        const isActive = !!sunpathOverlay.visible;
+                        sunpathBtn.classList.toggle('active', isActive);
+                    } catch (e) {
+                        console.error('Failed to toggle sunpath overlay:', e);
+                    }
+                };
+                container.appendChild(sunpathBtn);
             }
         }
         
@@ -573,6 +610,20 @@
         function setupMagnitudeFilters() {
             // Leere Funktion für Kompatibilität
         }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' || e.key === 'Esc') {
+                try {
+                    if (sunpathOverlay && sunpathOverlay.visible) {
+                        sunpathOverlay.hide();
+                    }
+                    const sunpathBtn = document.getElementById('sunpath-toggle');
+                    if (sunpathBtn) {
+                        sunpathBtn.classList.remove('active');
+                    }
+                } catch (_) { /* noop */ }
+            }
+        });
     </script>
 </body>
 </html>

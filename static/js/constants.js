@@ -6,6 +6,7 @@ export const API_ENDPOINTS = {
     BRIGHT_ASTEROIDS: '/api/bright_asteroids',
     COMETS: '/api/comets',
     ZODIAC: '/api/zodiac',
+    SUNPATH: '/api/celestial/sunpath',
     // Legacy endpoints removed (RabbitMQ migration):
     // CACHE_STATUS: '/api/cache_status',
     // PRECOMPUTE_WINDOW: '/api/precompute_window',

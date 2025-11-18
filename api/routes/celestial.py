@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
-from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES
+from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
 
 router = APIRouter()
 
@@ -19,6 +19,25 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
         return snapshot
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+ 
+@router.get("/celestial/sunpath")
+async def get_sunpath_year(request: Request, lat: float = None, lon: float = None, elevation: float = None, year: int = None, time: Optional[str] = None):
+    """Return sunrise/sunset curve for a full year at the given or session location.
+
+    The result contains one entry per calendar day with local sunrise/sunset and day length
+    in hours, suitable for plotting as a curve.
+    """
+    try:
+        lat, lon, elevation = get_location_params(request, lat, lon, elevation)
+        dt_utc = parse_time_param(time)
+        target_year = year or dt_utc.year
+        return compute_sunpath_year(lat, lon, elevation, target_year)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/celestial/{body_id}")
 async def get_celestial_object(body_id: str, request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
@@ -38,5 +57,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
             return {**snapshot["bodies"][body_id], "id": body_id}
         else:
             raise HTTPException(status_code=500, detail=f"Snapshot missing body '{body_id}'")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
