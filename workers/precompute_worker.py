@@ -29,7 +29,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import store_asteroid_positions, store_comet_positions
+from db_utils import (
+    store_asteroid_positions,
+    store_comet_positions,
+    store_sunpath_year,
+)
+from api.computation import compute_sunpath_year
 
 # Worker Utils (same directory)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -87,6 +92,9 @@ def process_task(task: Dict[str, Any]) -> bool:
         # Berechne Positionen
         start_time = time.time()
         
+        # Normalisierte Location nur einmal berechnen
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+
         if kind == 'asteroids':
             # Lade und berechne Asteroiden
             from skyfield.api import Loader
@@ -94,9 +102,6 @@ def process_task(task: Dict[str, Any]) -> bool:
             loader = Loader(str(DATA_DIR))
             ts = loader.timescale()
             eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
-            
-            # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             
             # Erstelle Observer Location Dict für bright_asteroids
             observer_loc = {
@@ -142,9 +147,6 @@ def process_task(task: Dict[str, Any]) -> bool:
             ts = loader.timescale()
             eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
             
-            # Normalisiere Location (gibt Tuple zurück: (lat, lon, elevation))
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            
             # Erstelle Observer Location Dict für comets
             observer_loc = {
                 'latitude': lat_norm,
@@ -179,6 +181,15 @@ def process_task(task: Dict[str, Any]) -> bool:
             else:
                 count = 0
         
+        elif kind == 'sunpath':
+            year = dt_utc.year
+            result = compute_sunpath_year(lat, lon, elevation, year)
+
+            loc_key = location_key(lat_norm, lon_norm, elev_norm)
+            year_bucket = str(year)
+            store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+            count = len(result.get('points', []))
+
         else:
             logger.error(f"Unknown kind: {kind}")
             return False
