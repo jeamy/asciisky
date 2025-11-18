@@ -2,6 +2,8 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
 from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
+from cache_utils import normalize_location, location_key
+from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
 
 router = APIRouter()
 
@@ -32,7 +34,22 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
         target_year = year or dt_utc.year
-        return compute_sunpath_year(lat, lon, elevation, target_year)
+
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        year_bucket = str(target_year)
+
+        cached = get_cached_sunpath_year(loc_key, year_bucket)
+        if cached is not None:
+            return cached
+
+        result = compute_sunpath_year(lat, lon, elevation, target_year)
+        try:
+            store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+        except Exception:
+            # Cache-Fehler sollen die API nicht brechen
+            pass
+        return result
     except HTTPException:
         raise
     except Exception as e:

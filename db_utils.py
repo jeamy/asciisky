@@ -152,6 +152,74 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
     finally:
         conn.close()
 
+# ===== Sunpath Functions =====
+
+def store_sunpath_year(location_key: str, year_bucket: str,
+                        observer_lat: float, observer_lon: float, observer_elevation: float,
+                        sunpath_data: Dict[str, Any]) -> None:
+    """Store yearly sunpath data in PostgreSQL cached_positions.
+
+    Uses object_type='sunpath' and the year (as string) as time_bucket, so the
+    combination (object_type, location_key, time_bucket) stays unique just like
+    for asteroid/comet buckets.
+    """
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        serialized_data = pickle.dumps(sunpath_data)
+
+        cursor.execute("""
+            INSERT INTO cached_positions (
+                object_type, object_id, location_key, time_bucket,
+                observer_lat, observer_lon, observer_elevation,
+                computed_at, position_data
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (object_type, location_key, time_bucket)
+            DO NOTHING
+        """, (
+            'sunpath', 0, location_key, year_bucket,
+            observer_lat, observer_lon, observer_elevation,
+            datetime.now(timezone.utc), serialized_data
+        ))
+
+
+def get_sunpath_year(location_key: str, year_bucket: str,
+                      max_age_seconds: int = None) -> Optional[Dict[str, Any]]:
+    """Retrieve cached yearly sunpath data from PostgreSQL.
+
+    Sunpath for a given (location, year) is effectively immutable, so max_age_seconds
+    is optional and normally unused. If provided and the cached entry is older than
+    max_age_seconds, the function returns None to force a recomputation.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT position_data, computed_at
+            FROM cached_positions
+            WHERE object_type = 'sunpath'
+              AND location_key = %s
+              AND time_bucket = %s
+            ORDER BY computed_at DESC
+            LIMIT 1
+        """, (location_key, year_bucket))
+
+        row = cursor.fetchone()
+        if not row or not row.get('position_data'):
+            return None
+
+        if max_age_seconds is not None:
+            age = (datetime.now(timezone.utc) - row['computed_at']).total_seconds()
+            if age > max_age_seconds:
+                return None
+
+        return pickle.loads(bytes(row['position_data']))
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 # ===== Comet Functions =====
 
 def store_comet_dataframe(df_pickle: bytes) -> None:
