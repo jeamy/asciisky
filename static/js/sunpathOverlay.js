@@ -292,6 +292,12 @@ export class SunpathOverlay {
             this.root.style.display = 'block';
         }
 
+        let monthLocale = 'de-DE';
+        const lang = typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : 'de';
+        if (lang === 'en') {
+            monthLocale = 'en-US';
+        }
+
         const viewportWidth = Math.max(
             document.documentElement ? document.documentElement.clientWidth : 0,
             window.innerWidth || 0
@@ -329,6 +335,7 @@ export class SunpathOverlay {
 
         const points = this.data.points;
         const days = points.length || 1;
+        const step = days > 1 ? innerWidth / (days - 1) : innerWidth;
         const xForIndex = (i) => margin.left + (innerWidth * (days === 1 ? 0.5 : i / (days - 1)));
         const yForHour = (h) => {
             const v = Math.min(24, Math.max(0, h));
@@ -370,6 +377,110 @@ export class SunpathOverlay {
         });
 
         svg.appendChild(axis);
+
+        // Twilight bands (astronomical, nautical, civil) as background rectangles per day
+        const twilightGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        twilightGroup.setAttribute('class', 'sunpath-twilight');
+        svg.appendChild(twilightGroup);
+
+        const addTwilightRect = (startIso, endIso, xLeft, width, cssClass) => {
+            if (!startIso || !endIso) return;
+            try {
+                const s = new Date(startIso);
+                const e = new Date(endIso);
+                if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
+                const startH = s.getHours() + s.getMinutes() / 60 + s.getSeconds() / 3600;
+                const endH = e.getHours() + e.getMinutes() / 60 + e.getSeconds() / 3600;
+                const yStart = yForHour(startH);
+                const yEnd = yForHour(endH);
+                const y = Math.min(yStart, yEnd);
+                const h = Math.abs(yEnd - yStart);
+                if (h <= 0.5) return; // ignore extremely small bands
+
+                const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                r.setAttribute('x', String(xLeft));
+                r.setAttribute('y', String(y));
+                r.setAttribute('width', String(width));
+                r.setAttribute('height', String(h));
+                r.setAttribute('class', cssClass);
+                twilightGroup.appendChild(r);
+            } catch (_) {
+                // ignore broken twilight values silently
+            }
+        };
+
+        for (let i = 0; i < days; i++) {
+            const pt = points[i];
+            const xCenter = xForIndex(i);
+            let xLeft = i === 0 ? margin.left : xCenter - step / 2;
+            let xRight = i === days - 1 ? margin.left + innerWidth : xCenter + step / 2;
+            if (xRight <= xLeft) {
+                xRight = xLeft + 1;
+            }
+            const w = xRight - xLeft;
+
+            addTwilightRect(
+                pt.astronomical_twilight_start,
+                pt.astronomical_twilight_end,
+                xLeft,
+                w,
+                'sunpath-twilight-astronomical'
+            );
+            addTwilightRect(
+                pt.nautical_twilight_start,
+                pt.nautical_twilight_end,
+                xLeft,
+                w,
+                'sunpath-twilight-nautical'
+            );
+            addTwilightRect(
+                pt.civil_twilight_start,
+                pt.civil_twilight_end,
+                xLeft,
+                w,
+                'sunpath-twilight-civil'
+            );
+        }
+
+        const monthGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        monthGroup.setAttribute('class', 'sunpath-months');
+        svg.appendChild(monthGroup);
+
+        let lastMonth = null;
+        for (let i = 0; i < days; i++) {
+            const pt = points[i];
+            if (!pt || !pt.date) {
+                continue;
+            }
+            const d = new Date(pt.date);
+            if (isNaN(d.getTime())) {
+                continue;
+            }
+            const day = d.getDate();
+            const month = d.getMonth();
+            if (day !== 1 || month === lastMonth) {
+                continue;
+            }
+            lastMonth = month;
+
+            const x = xForIndex(i);
+
+            const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            vLine.setAttribute('x1', String(x));
+            vLine.setAttribute('x2', String(x));
+            vLine.setAttribute('y1', String(margin.top));
+            vLine.setAttribute('y2', String(margin.top + innerHeight));
+            vLine.setAttribute('class', 'sunpath-month-line');
+            monthGroup.appendChild(vLine);
+
+            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            label.setAttribute('x', String(x));
+            label.setAttribute('y', String(margin.top + innerHeight + 12));
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'sunpath-month-label');
+            label.textContent = d.toLocaleDateString(monthLocale, { month: 'short' });
+            monthGroup.appendChild(label);
+        }
 
         const buildPath = (key) => {
             let d = '';
@@ -428,7 +539,6 @@ export class SunpathOverlay {
 
         const hitGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         hitGroup.setAttribute('class', 'sunpath-hitareas');
-        const step = days > 1 ? innerWidth / (days - 1) : innerWidth;
 
         for (let i = 0; i < days; i++) {
             const pt = points[i];

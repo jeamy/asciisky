@@ -11,7 +11,7 @@
   background: var(--panel-bg, #111);
   border: 1px solid var(--border-color, #333);
   border-radius: 6px;
-  box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
 }
 
 .sunpath-bg {
@@ -55,10 +55,39 @@
   pointer-events: all;
 }
 
+.sunpath-twilight-astronomical {
+  fill: rgba(0, 64, 128, 0.35);
+  stroke: none;
+  pointer-events: none;
+}
+
+.sunpath-twilight-nautical {
+  fill: rgba(0, 96, 192, 0.25);
+  stroke: none;
+  pointer-events: none;
+}
+
+.sunpath-twilight-civil {
+  fill: rgba(141, 207, 248, 0.18);
+  stroke: none;
+  pointer-events: none;
+}
+
 .sunpath-hover-line {
   stroke: rgba(0, 255, 0, 0.8);
   stroke-width: 1;
   pointer-events: none;
+}
+
+.sunpath-month-line {
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 0.5;
+  pointer-events: none;
+}
+
+.sunpath-month-label {
+  fill: var(--primary-color, #00ff00);
+  font-size: 9px;
 }
 
 .sunpath-tooltip {
