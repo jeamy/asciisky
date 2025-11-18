@@ -28,6 +28,11 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Clickable time display for entering any custom date and time
   - Frontend appends `?time=<ISO8601>` to API calls automatically when enabled
   - Automatic background precomputation for smooth time navigation
+- Yearly sunpath overlay for the current location
+  - Toggleable SVG overlay with sunrise/sunset curves for the whole year
+  - Hover tooltips with localized date, sunrise, sunset, and day length in hours and minutes
+  - Visualization of astronomical, nautical, and civil twilight as colored bands
+  - Monthly markers (vertical lines) on the 1st of each month with short month labels at the bottom
 - Minimalist UI design with optimized space usage
 - Horizontal navigation with arrow controls and mouse drag panning
 - Labels for bright asteroids, comets, and constellations
