@@ -74,7 +74,14 @@ def process_task(task: Dict[str, Any]) -> bool:
         kind = task['kind']
         location = task['location']
         time_bucket_str = task['time_bucket']
-        magnitude = task['magnitude']
+
+        # Magnitude ist optional (Sunpath-Tasks, alte Tasks ohne Feld, etc.)
+        mag_raw = task.get('magnitude', None)
+        if isinstance(mag_raw, (int, float)):
+            magnitude = float(mag_raw)
+        else:
+            # Default wie im Coordinator für Asteroiden; für Kometen/Sunpath wird es aktuell nicht verwendet
+            magnitude = 20.0
         
         lat = location['latitude']
         lon = location['longitude']
