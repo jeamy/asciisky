@@ -33,6 +33,7 @@ from db_utils import (
     store_asteroid_positions,
     store_comet_positions,
     store_sunpath_year,
+    computation_lock,
 )
 from api.computation import compute_sunpath_year
 
@@ -94,104 +95,102 @@ def process_task(task: Dict[str, Any]) -> bool:
         
         # Normalisierte Location nur einmal berechnen
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        computation_key = f"precompute_{kind}:{loc_key}:{time_bucket_str}"
+        logger.debug(f"[{WORKER_ID}] Computation key: {computation_key}")
 
-        if kind == 'asteroids':
-            # Lade und berechne Asteroiden
-            from skyfield.api import Loader
-            from data_paths import DATA_DIR
-            loader = Loader(str(DATA_DIR))
-            ts = loader.timescale()
-            eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
-            
-            # Erstelle Observer Location Dict für bright_asteroids
-            observer_loc = {
-                'latitude': lat_norm,
-                'longitude': lon_norm,
-                'elevation': elev_norm
-            }
-            
-            # Berechne
-            max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
-            asteroids_data = bright_asteroids.load_bright_asteroids(
-                loader,
-                ts,
-                eph,
-                observer_loc,
-                max_magnitude=max_mag,
-                current_dt=dt_utc
-            )
-            
-            # Speichere in DB
-            if asteroids_data:
-                # Verwende 0 als representative_id (da wir keine asteroid_id haben)
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                tb = time_bucket_utc(dt_utc)
-                store_asteroid_positions(
-                    0,  # representative_id
-                    loc_key,
-                    tb,
-                    lat_norm,
-                    lon_norm,
-                    elev_norm,
-                    asteroids_data
-                )
-                count = len(asteroids_data)
-            else:
-                count = 0
-        
-        elif kind == 'comets':
-            # Lade und berechne Kometen
-            from skyfield.api import Loader
-            from data_paths import DATA_DIR
-            loader = Loader(str(DATA_DIR))
-            ts = loader.timescale()
-            eph = loader('de421.bsp')  # Nur Dateiname, nicht vollständiger Pfad
-            
-            # Erstelle Observer Location Dict für comets
-            observer_loc = {
-                'latitude': lat_norm,
-                'longitude': lon_norm,
-                'elevation': elev_norm
-            }
-            
-            # Berechne
-            comets_data = comets.load_comets(
-                ts,
-                eph,
-                observer_loc,
-                max_comets=100,  # Limit für Precompute
-                current_dt=dt_utc
-            )
-            
-            # Speichere in DB
-            if comets_data:
-                # Verwende 0 als representative_id (da wir keine comet_id haben)
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                tb = time_bucket_utc(dt_utc)
-                store_comet_positions(
-                    0,  # representative_id
-                    loc_key,
-                    tb,
-                    lat_norm,
-                    lon_norm,
-                    elev_norm,
-                    comets_data
-                )
-                count = len(comets_data)
-            else:
-                count = 0
-        
-        elif kind == 'sunpath':
-            year = dt_utc.year
-            result = compute_sunpath_year(lat, lon, elevation, year)
+        try:
+            with computation_lock(computation_key, ttl_seconds=300):
+                logger.debug(f"[{WORKER_ID}] Acquired advisory lock for {computation_key}")
 
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            year_bucket = str(year)
-            store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
-            count = len(result.get('points', []))
+                if kind == 'asteroids':
+                    from skyfield.api import Loader
+                    from data_paths import DATA_DIR
+                    loader = Loader(str(DATA_DIR))
+                    ts = loader.timescale()
+                    eph = loader('de421.bsp')
 
-        else:
-            logger.error(f"Unknown kind: {kind}")
+                    observer_loc = {
+                        'latitude': lat_norm,
+                        'longitude': lon_norm,
+                        'elevation': elev_norm
+                    }
+
+                    max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
+                    asteroids_data = bright_asteroids.load_bright_asteroids(
+                        loader,
+                        ts,
+                        eph,
+                        observer_loc,
+                        max_magnitude=max_mag,
+                        current_dt=dt_utc
+                    )
+
+                    if asteroids_data:
+                        tb = time_bucket_utc(dt_utc)
+                        store_asteroid_positions(
+                            0,
+                            loc_key,
+                            tb,
+                            lat_norm,
+                            lon_norm,
+                            elev_norm,
+                            asteroids_data
+                        )
+                        count = len(asteroids_data)
+                    else:
+                        count = 0
+
+                elif kind == 'comets':
+                    from skyfield.api import Loader
+                    from data_paths import DATA_DIR
+                    loader = Loader(str(DATA_DIR))
+                    ts = loader.timescale()
+                    eph = loader('de421.bsp')
+
+                    observer_loc = {
+                        'latitude': lat_norm,
+                        'longitude': lon_norm,
+                        'elevation': elev_norm
+                    }
+
+                    comets_data = comets.load_comets(
+                        ts,
+                        eph,
+                        observer_loc,
+                        max_comets=100,
+                        current_dt=dt_utc
+                    )
+
+                    if comets_data:
+                        tb = time_bucket_utc(dt_utc)
+                        store_comet_positions(
+                            0,
+                            loc_key,
+                            tb,
+                            lat_norm,
+                            lon_norm,
+                            elev_norm,
+                            comets_data
+                        )
+                        count = len(comets_data)
+                    else:
+                        count = 0
+
+                elif kind == 'sunpath':
+                    year = dt_utc.year
+                    result = compute_sunpath_year(lat, lon, elevation, year)
+
+                    year_bucket = str(year)
+                    store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+                    count = len(result.get('points', []))
+
+                else:
+                    logger.error(f"Unknown kind: {kind}")
+                    return False
+
+        except Exception as e:
+            logger.error(f"[{WORKER_ID}] Failed to acquire advisory lock for {computation_key}: {e}")
             return False
         
         elapsed = time.time() - start_time
