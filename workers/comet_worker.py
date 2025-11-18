@@ -69,6 +69,7 @@ class CometWorker:
                 durable=True,
                 arguments={
                     'x-queue-type': 'quorum',
+                    'x-max-priority': 10,
                     'x-message-ttl': 3600000  # 1 Stunde
                 }
             )

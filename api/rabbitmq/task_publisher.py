@@ -61,13 +61,21 @@ class TaskPublisher:
                 _thread_local.channel.queue_declare(
                     queue='asteroid.compute',
                     durable=True,
-                    arguments={'x-max-priority': 10}
+                    arguments={
+                        'x-queue-type': 'quorum',
+                        'x-max-priority': 10,
+                        'x-message-ttl': 3600000
+                    }
                 )
                 
                 _thread_local.channel.queue_declare(
                     queue='comet.compute',
                     durable=True,
-                    arguments={'x-max-priority': 10}
+                    arguments={
+                        'x-queue-type': 'quorum',
+                        'x-max-priority': 10,
+                        'x-message-ttl': 3600000
+                    }
                 )
                 
                 _thread_local.channel.queue_declare(
