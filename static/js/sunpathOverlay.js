@@ -4,6 +4,52 @@ import { settingsManager } from './settings.js';
 
 const SUNPATH_CACHE = new Map();
 
+function pad2(value) {
+    return String(value).padStart(2, '0');
+}
+
+function parseIsoLocalTime(iso) {
+    if (typeof iso !== 'string') return null;
+    const tIndex = iso.indexOf('T');
+    if (tIndex === -1) return null;
+    const timeSection = iso.slice(tIndex + 1);
+    const match = timeSection.match(/^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?/);
+    if (!match) return null;
+
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    const second = match[3] ? Number(match[3]) : 0;
+    const fractional = match[4] ? Number(`0.${match[4]}`) : 0;
+    const totalSeconds = hour * 3600 + minute * 60 + second + fractional;
+
+    return {
+        hour,
+        minute,
+        second,
+        decimalHour: totalSeconds / 3600,
+        formatted: `${pad2(hour)}:${pad2(minute)}`
+    };
+}
+
+function formatIsoLocalTime(iso) {
+    const parts = parseIsoLocalTime(iso);
+    return parts ? parts.formatted : '—';
+}
+
+function formatIsoInterval(startIso, endIso) {
+    const start = parseIsoLocalTime(startIso);
+    const end = parseIsoLocalTime(endIso);
+    if (!start || !end) {
+        return '—';
+    }
+    return `${start.formatted}–${end.formatted}`;
+}
+
+function getDecimalHourFromIso(iso) {
+    const parts = parseIsoLocalTime(iso);
+    return parts ? parts.decimalHour : null;
+}
+
 function makeCacheKey(location, year) {
     if (!location) return '';
     const lat = typeof location.latitude === 'number' ? location.latitude : location.lat;
@@ -44,6 +90,7 @@ export class SunpathOverlay {
         this.visible = false;
         this.currentKey = null;
         this.tooltip = null;
+        this.locationTimezone = 'UTC';
     }
 
     ensureSvg() {
@@ -170,7 +217,9 @@ export class SunpathOverlay {
     async fetchData(location, year) {
         const key = makeCacheKey(location, year);
         if (key && SUNPATH_CACHE.has(key)) {
-            this.data = SUNPATH_CACHE.get(key);
+            const cached = SUNPATH_CACHE.get(key);
+            this.data = cached;
+            this.locationTimezone = (cached && cached.location && cached.location.timezone) || 'UTC';
             return;
         }
         try {
@@ -190,6 +239,7 @@ export class SunpathOverlay {
             }
             const json = await resp.json();
             this.data = json;
+             this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
             if (key) {
                 SUNPATH_CACHE.set(key, json);
             }
@@ -214,19 +264,8 @@ export class SunpathOverlay {
             }
         } catch (_) { /* noop */ }
 
-        const formatTime = (iso) => {
-            if (!iso) return '—';
-            try {
-                const d = new Date(iso);
-                if (isNaN(d.getTime())) return '—';
-                return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-            } catch (_) {
-                return '—';
-            }
-        };
-
-        const sunrise = formatTime(point.sunrise);
-        const sunset = formatTime(point.sunset);
+        const sunrise = formatIsoLocalTime(point.sunrise);
+        const sunset = formatIsoLocalTime(point.sunset);
         let dayLen = '—';
         if (typeof point.day_length_hours === 'number') {
             const totalMinutes = Math.round(point.day_length_hours * 60);
@@ -240,23 +279,9 @@ export class SunpathOverlay {
         const labelSunset = t('set_time');
         const labelLength = t('day_length') || 'Tageslänge';
 
-        const formatInterval = (startIso, endIso) => {
-            if (!startIso || !endIso) return '—';
-            try {
-                const s = new Date(startIso);
-                const e = new Date(endIso);
-                if (isNaN(s.getTime()) || isNaN(e.getTime())) return '—';
-                const sStr = s.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-                const eStr = e.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-                return `${sStr}–${eStr}`;
-            } catch (_) {
-                return '—';
-            }
-        };
-
-        const astro = formatInterval(point.astronomical_twilight_start, point.astronomical_twilight_end);
-        const naut = formatInterval(point.nautical_twilight_start, point.nautical_twilight_end);
-        const civil = formatInterval(point.civil_twilight_start, point.civil_twilight_end);
+        const astro = formatIsoInterval(point.astronomical_twilight_start, point.astronomical_twilight_end);
+        const naut = formatIsoInterval(point.nautical_twilight_start, point.nautical_twilight_end);
+        const civil = formatIsoInterval(point.civil_twilight_start, point.civil_twilight_end);
 
         const labelAstro = t('astronomical_twilight');
         const labelNaut = t('nautical_twilight');
@@ -384,29 +409,25 @@ export class SunpathOverlay {
         svg.appendChild(twilightGroup);
 
         const addTwilightRect = (startIso, endIso, xLeft, width, cssClass) => {
-            if (!startIso || !endIso) return;
-            try {
-                const s = new Date(startIso);
-                const e = new Date(endIso);
-                if (isNaN(s.getTime()) || isNaN(e.getTime())) return;
-                const startH = s.getHours() + s.getMinutes() / 60 + s.getSeconds() / 3600;
-                const endH = e.getHours() + e.getMinutes() / 60 + e.getSeconds() / 3600;
-                const yStart = yForHour(startH);
-                const yEnd = yForHour(endH);
-                const y = Math.min(yStart, yEnd);
-                const h = Math.abs(yEnd - yStart);
-                if (h <= 0.5) return; // ignore extremely small bands
-
-                const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                r.setAttribute('x', String(xLeft));
-                r.setAttribute('y', String(y));
-                r.setAttribute('width', String(width));
-                r.setAttribute('height', String(h));
-                r.setAttribute('class', cssClass);
-                twilightGroup.appendChild(r);
-            } catch (_) {
-                // ignore broken twilight values silently
+            const startH = getDecimalHourFromIso(startIso);
+            const endH = getDecimalHourFromIso(endIso);
+            if (startH === null || endH === null) {
+                return;
             }
+
+            const yStart = yForHour(startH);
+            const yEnd = yForHour(endH);
+            const y = Math.min(yStart, yEnd);
+            const h = Math.abs(yEnd - yStart);
+            if (h <= 0.5) return; // ignore extremely small bands
+
+            const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            r.setAttribute('x', String(xLeft));
+            r.setAttribute('y', String(y));
+            r.setAttribute('width', String(width));
+            r.setAttribute('height', String(h));
+            r.setAttribute('class', cssClass);
+            twilightGroup.appendChild(r);
         };
 
         for (let i = 0; i < days; i++) {
