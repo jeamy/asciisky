@@ -1,9 +1,11 @@
 from typing import Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
-from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
+from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES
 from cache_utils import normalize_location, location_key
-from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
+from db_utils import get_sunpath_year as get_cached_sunpath_year
+from api.rabbitmq.task_publisher import get_task_publisher
 
 router = APIRouter()
 
@@ -43,13 +45,21 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         if cached is not None:
             return cached
 
-        result = compute_sunpath_year(lat, lon, elevation, target_year)
+        # Kein Cache-Eintrag: Sunpath-Berechnung asynchron über RabbitMQ anstoßen
         try:
-            store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+            publisher = get_task_publisher()
+            if publisher:
+                location = {
+                    "latitude": float(lat),
+                    "longitude": float(lon),
+                    "elevation": float(elevation),
+                }
+                publisher.publish_sunpath_task(location, target_year, priority=10)
         except Exception:
-            # Cache-Fehler sollen die API nicht brechen
+            # Fehler beim Enqueue sollen den Request nicht blockieren
             pass
-        return result
+
+        raise HTTPException(status_code=503, detail="Sunpath data not yet available; computation has been scheduled.")
     except HTTPException:
         raise
     except Exception as e:

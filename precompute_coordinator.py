@@ -29,7 +29,8 @@ import pika
 
 # Settings
 import settings
-from cache_utils import normalize_location
+from cache_utils import normalize_location, location_key, time_bucket_utc
+from db_utils import get_asteroid_positions, get_comet_positions, get_sunpath_year
 
 logging.basicConfig(
     level=logging.INFO,
@@ -195,9 +196,6 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
     Returns:
         Liste von Task-Dicts für RabbitMQ
     """
-    from cache_utils import normalize_location, location_key, time_bucket_utc
-    from db_utils import get_asteroid_positions, get_comet_positions
-    
     # Hole existierende Tasks aus der Queue (Duplikat-Schutz!)
     existing_tasks = get_existing_queue_tasks()
     
@@ -210,6 +208,14 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
     # Runde auf volle Stunde
     current_hour = now.replace(minute=0, second=0, microsecond=0)
     
+    # Welche Jahre decken wir mit dem Zeithorizont ab?
+    covered_years = {
+        (current_hour + timedelta(hours=hour_offset)).year
+        for hour_offset in range(hours_ahead)
+    }
+    if not covered_years:
+        covered_years = {current_hour.year}
+
     for location in locations:
         lat = location['latitude']
         lon = location['longitude']
@@ -219,7 +225,39 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
         # Normalisiere Location für Cache-Lookup
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        loc_key_dup = f"{lat_norm:.4f}_{lon_norm:.4f}_{elev_norm:.0f}"
         
+        # Erstelle Sunpath-Tasks pro Jahr
+        for target_year in sorted(covered_years):
+            sunpath_cached = False
+            try:
+                cached = get_sunpath_year(loc_key, str(target_year))
+                sunpath_cached = cached is not None
+            except Exception:
+                pass
+
+            if not sunpath_cached:
+                total_possible += 1
+                year_start = datetime(target_year, 1, 1, tzinfo=timezone.utc)
+                task_key = f"sunpath_{loc_key_dup}_{year_start.isoformat()}"
+
+                if task_key not in existing_tasks:
+                    tasks.append({
+                        'kind': 'sunpath',
+                        'location': {
+                            'latitude': lat,
+                            'longitude': lon,
+                            'elevation': elevation,
+                            'name': name
+                        },
+                        'time_bucket': year_start.isoformat(),
+                        'priority': 10
+                    })
+                else:
+                    skipped_queue += 1
+            else:
+                skipped += 1
+
         # Erstelle Tasks für jede Stunde
         for hour_offset in range(hours_ahead):
             target_time = current_hour + timedelta(hours=hour_offset)
@@ -228,8 +266,7 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
             # Priorität: Nächste 24h = HIGH (10), danach NORMAL (5)
             priority = 10 if hour_offset < 24 else 5
             
-            # Location Key für Duplikat-Check
-            loc_key_dup = f"{lat_norm:.4f}_{lon_norm:.4f}_{elev_norm:.0f}"
+            # Location Key für Duplikat-Check (bereits oben definiert)
             
             # Prüfe ob Asteroiden-Daten schon vorhanden
             asteroid_cached = False
@@ -293,7 +330,7 @@ def create_precompute_tasks(locations: List[Dict], hours_ahead: int = 720) -> Li
             else:
                 skipped += 1
     
-    total_possible = len(locations) * hours_ahead * 2
+    total_possible = (len(locations) * hours_ahead * 2) + (len(locations) * len(covered_years))
     logger.info(f"Created {len(tasks)} precompute tasks (skipped {skipped} already cached, {skipped_queue} already in queue, total {total_possible})")
     return tasks
 

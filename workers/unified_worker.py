@@ -37,10 +37,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import store_asteroid_positions, store_comet_positions, computation_lock, get_asteroid_dataframe, get_comet_dataframe
+from db_utils import (
+    store_asteroid_positions,
+    store_comet_positions,
+    store_sunpath_year,
+    computation_lock,
+    get_asteroid_dataframe,
+    get_comet_dataframe,
+)
 from api.on_demand_computation import OnDemandComputationService
 from api.astronomical_corrections import AstronomicalCorrector
 from config.interpolation_config import get_interpolation_config
+from api.computation import compute_sunpath_year
 
 # Worker Utils (same directory)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -398,7 +406,22 @@ class UnifiedWorker:
                         count = len(comets_data)
                     else:
                         count = 0
-                
+
+                elif kind == 'sunpath':
+                    # Precompute yearly sunpath curve for this location
+                    year = dt_utc.year
+                    result = compute_sunpath_year(lat, lon, elevation, year)
+
+                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
+                    year_bucket = str(year)
+                    try:
+                        store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+                    except Exception as e:
+                        logger.error(f"Failed to store sunpath year in DB: {e}")
+                        return False
+
+                    count = len(result.get('points', []))
+
                 else:
                     logger.error(f"Unknown kind: {kind}")
                     count = 0

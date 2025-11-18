@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Request, BackgroundTasks
 from datetime import datetime, timezone
 from api.models import LocationPayload
-from cache_utils import normalize_location, location_key
-from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
-from api.computation import compute_sunpath_year
+from api.rabbitmq.task_publisher import get_task_publisher
 
 router = APIRouter()
 
@@ -13,28 +11,30 @@ async def get_session_location(request: Request):
     return {"location": loc}
 
 
-def _precompute_sunpath_for_location(lat: float, lon: float, elevation: float) -> None:
-    """Background task: precompute and cache yearly sunpath for current year."""
+def _enqueue_sunpath_precompute(lat: float, lon: float, elevation: float) -> None:
+    """Background task: enqueue yearly sunpath computation via RabbitMQ.
+
+    Die eigentliche Berechnung findet im Unified Worker statt und wird in
+    PostgreSQL gecached. Dieser Task soll nur die Queue befüllen und darf
+    den Webserver nicht blockieren.
+    """
     try:
         now_utc = datetime.now(timezone.utc)
         year = now_utc.year
 
-        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-        loc_key = location_key(lat_norm, lon_norm, elev_norm)
-        year_bucket = str(year)
-
-        cached = get_cached_sunpath_year(loc_key, year_bucket)
-        if cached is not None:
+        publisher = get_task_publisher()
+        if not publisher:
             return
 
-        result = compute_sunpath_year(lat, lon, elevation, year)
-        try:
-            store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
-        except Exception:
-            # Cache-Fehler im Hintergrund ignorieren
-            pass
+        location = {
+            "latitude": float(lat),
+            "longitude": float(lon),
+            "elevation": float(elevation),
+        }
+
+        publisher.publish_sunpath_task(location, year, priority=10)
     except Exception:
-        # Hintergrundfehler nicht nach außen durchreichen
+        # Fehler beim Enqueue sollen die Session-Location nicht blockieren
         return
 
 
@@ -49,9 +49,9 @@ async def set_session_location(payload: LocationPayload, request: Request, backg
         loc["name"] = payload.name
     request.session["location"] = loc
 
-    # Precompute yearly sunpath for this location in the background
+    # Enqueue yearly sunpath computation for this location in the background
     background_tasks.add_task(
-        _precompute_sunpath_for_location,
+        _enqueue_sunpath_precompute,
         loc["latitude"],
         loc["longitude"],
         loc["elevation"],

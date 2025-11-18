@@ -175,6 +175,64 @@ class TaskPublisher:
                 _thread_local.connection = None
                 _thread_local.channel = None
             raise
+
+    def publish_sunpath_task(
+        self,
+        location: Dict[str, float],
+        year: int,
+        priority: int = 5
+    ) -> str:
+        """Publiziert einen Sunpath-Precompute-Task in die precompute.tasks-Queue.
+
+        Der UnifiedWorker verarbeitet diesen Task (kind='sunpath') und speichert
+        das Ergebnis als yearly sunpath in PostgreSQL.
+        """
+        from datetime import datetime, timezone
+
+        task_id = f"sunpath_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+        # Verwende Jahresanfang als Bucket-Zeit, damit pro Standort/Jahr genau
+        # ein deterministischer Task-Key entsteht
+        year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
+
+        task_data = {
+            'task_id': task_id,
+            'type': 'precompute',
+            'kind': 'sunpath',
+            'location': location,
+            'time_bucket': year_start.isoformat(),
+            'magnitude': None,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'priority': priority
+        }
+
+        try:
+            connection, channel = self._get_connection()
+
+            channel.basic_publish(
+                exchange='',
+                routing_key='precompute.tasks',
+                properties=pika.BasicProperties(
+                    delivery_mode=2,
+                    content_type='application/json',
+                    priority=priority
+                ),
+                body=json.dumps(task_data)
+            )
+
+            logger.debug(f"Published sunpath task {task_id} to precompute.tasks for year={year}")
+            return task_id
+
+        except Exception as e:
+            logger.error(f"Failed to publish sunpath task: {e}")
+            if hasattr(_thread_local, 'connection'):
+                try:
+                    _thread_local.connection.close()
+                except:
+                    pass
+                _thread_local.connection = None
+                _thread_local.channel = None
+            raise
     
     def publish_batch(self, tasks: list) -> list:
         """
