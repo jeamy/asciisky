@@ -482,7 +482,7 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 
 ## Attribution
 
-This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet and SWE-1. Babysitting by a human in a virtual environment.
+This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet, SWE-1 and google-labs-jules[bot]. Babysitting by a human in a virtual environment.
 
 
 ## Live Demo
