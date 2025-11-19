@@ -148,7 +148,7 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
     return result
 
-SUNPATH_VERSION = 3
+SUNPATH_VERSION = 4
 
 def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) -> dict:
     """Compute sunrise and sunset times for each day of a year at a given location.
@@ -314,13 +314,6 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             periods = twilight_periods.get(kind, [])
             if not periods:
                 return []
-
-            # In theory there should be at most two twilight intervals per day
-            # (morning and evening). Numerical edge cases or DST transitions
-            # can sometimes produce more fragmented segments; collapse them by
-            # keeping only the earliest and latest intervals.
-            if len(periods) > 2:
-                periods = [periods[0], periods[-1]]
 
             return [
                 {'start': start.isoformat(), 'end': end.isoformat()}
