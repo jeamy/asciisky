@@ -53,7 +53,7 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         sunpath_data = compute_sunpath_year(lat_norm, lon_norm, elev_norm, target_year)
 
         # Store in cache for future requests
-        store_sunpath_year(loc_key, year_bucket, sunpath_data)
+        store_sunpath_year(loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data)
 
         return sunpath_data
     except Exception as e:
