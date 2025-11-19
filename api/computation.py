@@ -217,9 +217,6 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             length_hours = None
 
         # Twilight phases (astronomical, nautical, civil)
-        astro_start = astro_end = None
-        naut_start = naut_end = None
-        civil_start = civil_end = None
         twilight_periods = {
             'astronomical': [],
             'nautical': [],
@@ -249,56 +246,62 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             day_start_local = lm
             day_end_local = lm + timedelta(days=1)
 
-            def update_range(kind: str, start_dt: datetime, end_dt: datetime):
-                nonlocal astro_start, astro_end, naut_start, naut_end, civil_start, civil_end
-                if kind == 'astronomical':
-                    if astro_start is None or start_dt < astro_start:
-                        astro_start = start_dt
-                    if astro_end is None or end_dt > astro_end:
-                        astro_end = end_dt
-                elif kind == 'nautical':
-                    if naut_start is None or start_dt < naut_start:
-                        naut_start = start_dt
-                    if naut_end is None or end_dt > naut_end:
-                        naut_end = end_dt
-                elif kind == 'civil':
-                    if civil_start is None or start_dt < civil_start:
-                        civil_start = start_dt
-                    if civil_end is None or end_dt > civil_end:
-                        civil_end = end_dt
-                periods = twilight_periods.get(kind)
-                if periods is not None:
-                    periods.append({
-                        'start': start_dt.isoformat(),
-                        'end': end_dt.isoformat(),
-                    })
-
+            # Collect all twilight segments for the current day
+            raw_periods = {'astronomical': [], 'nautical': [], 'civil': []}
             for seg_start_utc, seg_end_utc, state in segments:
-                # Convert to local time and clip to this local day
                 seg_start_local = seg_start_utc.astimezone(tz)
                 seg_end_local = seg_end_utc.astimezone(tz)
                 start_local_clipped = max(seg_start_local, day_start_local)
                 end_local_clipped = min(seg_end_local, day_end_local)
-                if end_local_clipped <= start_local_clipped:
+
+                if end_local_clipped > start_local_clipped:
+                    if state == 1: # astronomical
+                        raw_periods['astronomical'].append((start_local_clipped, end_local_clipped))
+                    elif state == 2: # nautical
+                        raw_periods['nautical'].append((start_local_clipped, end_local_clipped))
+                    elif state == 3: # civil
+                        raw_periods['civil'].append((start_local_clipped, end_local_clipped))
+
+            # Merge overlapping/adjacent segments for each twilight type
+            for kind in twilight_periods:
+                sorted_periods = sorted(raw_periods[kind])
+                if not sorted_periods:
                     continue
 
-                # State codes: 0=night, 1=astronomical, 2=nautical, 3=civil, 4=day
-                if state == 1:
-                    update_range('astronomical', start_local_clipped, end_local_clipped)
-                elif state == 2:
-                    update_range('nautical', start_local_clipped, end_local_clipped)
-                elif state == 3:
-                    update_range('civil', start_local_clipped, end_local_clipped)
+                merged = []
+                current_start, current_end = sorted_periods[0]
+
+                for next_start, next_end in sorted_periods[1:]:
+                    if next_start <= current_end:
+                        current_end = max(current_end, next_end)
+                    else:
+                        merged.append({'start': current_start.isoformat(), 'end': current_end.isoformat()})
+                        current_start, current_end = next_start, next_end
+
+                merged.append({'start': current_start.isoformat(), 'end': current_end.isoformat()})
+                twilight_periods[kind] = merged
+
+            # Extract overall start/end times from the merged periods
+            def get_overall_start_end(kind):
+                periods = twilight_periods[kind]
+                if not periods:
+                    return None, None
+
+                all_dts = []
+                for p in periods:
+                    all_dts.append(datetime.fromisoformat(p['start']))
+                    all_dts.append(datetime.fromisoformat(p['end']))
+
+                return min(all_dts).isoformat(), max(all_dts).isoformat()
+
+            astro_start, astro_end = get_overall_start_end('astronomical')
+            naut_start, naut_end = get_overall_start_end('nautical')
+            civil_start, civil_end = get_overall_start_end('civil')
+
         except Exception:
             # Twilight information is optional; ignore errors
-            astro_start = astro_end = None
-            naut_start = naut_end = None
-            civil_start = civil_end = None
-            twilight_periods = {
-                'astronomical': [],
-                'nautical': [],
-                'civil': [],
-            }
+            astro_start = astro_end = naut_start = naut_end = civil_start = civil_end = None
+            twilight_periods = {'astronomical': [], 'nautical': [], 'civil': []}
 
         points.append({
             "date": day_date.isoformat(),
