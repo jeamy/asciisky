@@ -228,6 +228,12 @@ export class SunpathOverlay {
                 await this.fetchData(loc, year);
                 this.currentKey = key;
             }
+            // Wenn keine gültigen Daten vorliegen, Overlay verborgen halten
+            if (!this.data || !Array.isArray(this.data.points) || this.data.points.length === 0) {
+                this.visible = false;
+                this.hide();
+                return;
+            }
             this.visible = willShow;
             if (this.visible) {
                 this.render();
@@ -252,52 +258,29 @@ export class SunpathOverlay {
             this.locationTimezone = (cached && cached.location && cached.location.timezone) || 'UTC';
             return;
         }
-        const lat = typeof location.latitude === 'number' ? location.latitude : location.lat;
-        const lon = typeof location.longitude === 'number' ? location.longitude : location.lon;
-        const elev = typeof location.elevation === 'number' ? location.elevation : (location.elevation || 0);
-        const params = new URLSearchParams({
-            lat: String(lat),
-            lon: String(lon),
-            elevation: String(elev || 0),
-            year: String(year)
-        });
-        let attempt = 0;
-        let delayMs = SUNPATH_FETCH_BASE_DELAY_MS;
-        while (attempt < SUNPATH_FETCH_MAX_RETRIES) {
-            attempt += 1;
-            try {
-                const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
-                if (resp.status === 503) {
-                    if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
-                        console.warn('Sunpath data still computing after max retries');
-                        this.data = null;
-                        return;
-                    }
-                    const sleepMs = Math.min(delayMs, SUNPATH_FETCH_MAX_DELAY_MS);
-                    await sleep(sleepMs);
-                    delayMs = Math.min(delayMs * 2, SUNPATH_FETCH_MAX_DELAY_MS);
-                    continue;
-                }
-                if (!resp.ok) {
-                    throw new Error(`HTTP ${resp.status}`);
-                }
-                const json = await resp.json();
-                this.data = json;
-                this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
-                if (key) {
-                    SUNPATH_CACHE.set(key, json);
-                }
-                return;
-            } catch (e) {
-                console.error('Failed to fetch sunpath data:', e);
-                if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
-                    this.data = null;
-                    return;
-                }
-                const sleepMs = Math.min(delayMs, SUNPATH_FETCH_MAX_DELAY_MS);
-                await sleep(sleepMs);
-                delayMs = Math.min(delayMs * 2, SUNPATH_FETCH_MAX_DELAY_MS);
+        try {
+            const lat = typeof location.latitude === 'number' ? location.latitude : location.lat;
+            const lon = typeof location.longitude === 'number' ? location.longitude : location.lon;
+            const elev = typeof location.elevation === 'number' ? location.elevation : (location.elevation || 0);
+            const params = new URLSearchParams({
+                lat: String(lat),
+                lon: String(lon),
+                elevation: String(elev || 0),
+                year: String(year)
+            });
+            const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
             }
+            const json = await resp.json();
+            this.data = json;
+            this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
+            if (key) {
+                SUNPATH_CACHE.set(key, json);
+            }
+        } catch (e) {
+            console.error('Failed to fetch sunpath data:', e);
+            this.data = null;
         }
     }
 
@@ -686,38 +669,13 @@ export class SunpathOverlay {
                 elevation: String(elev || 0),
                 year: String(year)
             });
-            let attempt = 0;
-            let delayMs = SUNPATH_FETCH_BASE_DELAY_MS;
-            while (attempt < SUNPATH_FETCH_MAX_RETRIES) {
-                attempt += 1;
-                try {
-                    const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
-                    if (resp.status === 503) {
-                        if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
-                            return;
-                        }
-                        const sleepMs = Math.min(delayMs, SUNPATH_FETCH_MAX_DELAY_MS);
-                        await sleep(sleepMs);
-                        delayMs = Math.min(delayMs * 2, SUNPATH_FETCH_MAX_DELAY_MS);
-                        continue;
-                    }
-                    if (!resp.ok) {
-                        throw new Error(`HTTP ${resp.status}`);
-                    }
-                    const json = await resp.json();
-                    if (key) {
-                        SUNPATH_CACHE.set(key, json);
-                    }
-                    return;
-                } catch (e) {
-                    if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
-                        console.error('Failed to preload sunpath data:', e);
-                        return;
-                    }
-                    const sleepMs = Math.min(delayMs, SUNPATH_FETCH_MAX_DELAY_MS);
-                    await sleep(sleepMs);
-                    delayMs = Math.min(delayMs * 2, SUNPATH_FETCH_MAX_DELAY_MS);
-                }
+            const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+            }
+            const json = await resp.json();
+            if (key) {
+                SUNPATH_CACHE.set(key, json);
             }
         } catch (e) {
             console.error('Failed to preload sunpath data:', e);

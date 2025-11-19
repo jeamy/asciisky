@@ -1,12 +1,12 @@
 from typing import Optional
 from datetime import datetime, timezone
+import asyncio
 
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
-from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES
+from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
 from cache_utils import normalize_location, location_key
 from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
-from api.rabbitmq.task_publisher import get_task_publisher
 
 router = APIRouter()
 
@@ -42,6 +42,7 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         year_bucket = str(target_year)
 
+        # Respect nocache flag for debugging, otherwise prefer cached data
         if "nocache" in request.query_params:
             cached = None
         else:
@@ -50,34 +51,22 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         if cached is not None:
             return cached
 
-        publisher = None
-        try:
-            publisher = get_task_publisher()
-        except Exception:
-            publisher = None
-
-        if publisher is not None:
-            location_payload = {
-                "latitude": lat,
-                "longitude": lon,
-                "elevation": elevation,
-                "name": "",
-            }
-            try:
-                if hasattr(request, "session"):
-                    session_loc = request.session.get("location", {})
-                    if isinstance(session_loc, dict):
-                        location_payload["name"] = session_loc.get("name", "") or ""
-                publisher.publish_sunpath_task(location_payload, target_year, priority=9)
-            except Exception:
-                pass
-
-        raise HTTPException(
-            status_code=503,
-            detail="Sunpath data is being computed. Please retry shortly.",
+        # Compute sunpath directly in a background thread to avoid blocking the event loop
+        sunpath_data = await asyncio.to_thread(
+            compute_sunpath_year,
+            lat_norm,
+            lon_norm,
+            elev_norm,
+            target_year,
         )
-    except HTTPException:
-        raise
+
+        try:
+            store_sunpath_year(loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data)
+        except Exception:
+            # Caching is best-effort; computation result is still returned
+            pass
+
+        return sunpath_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

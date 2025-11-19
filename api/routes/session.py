@@ -1,10 +1,39 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 from api.models import LocationPayload
-from api.rabbitmq.task_publisher import get_task_publisher
+from cache_utils import normalize_location, location_key
+from db_utils import store_sunpath_year
+from api.computation import compute_sunpath_year
 
 router = APIRouter()
+
+
+async def _precompute_sunpath_for_location(lat: float, lon: float, elevation: float) -> None:
+    """Precompute yearly sunpath for the current year and store it in PostgreSQL.
+
+    Runs compute_sunpath_year in a background thread and does not block the caller.
+    """
+    try:
+        target_year = datetime.now(timezone.utc).year
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        year_bucket = str(target_year)
+
+        sunpath_data = await asyncio.to_thread(
+            compute_sunpath_year,
+            lat_norm,
+            lon_norm,
+            elev_norm,
+            target_year,
+        )
+
+        store_sunpath_year(loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data)
+    except Exception:
+        # Precompute is best-effort and must never break the session endpoint
+        return
+
 
 @router.get("/session/location")
 async def get_session_location(request: Request):
@@ -26,22 +55,16 @@ async def set_session_location(payload: LocationPayload, request: Request):
     # Pre-compute sunpath data for the current year in the background
     # to ensure it's cached for the next page load.
     try:
-        publisher = get_task_publisher()
-        if publisher is not None:
-            current_year = datetime.now(timezone.utc).year
-            publisher.publish_sunpath_task(
-                {
-                    "latitude": loc["latitude"],
-                    "longitude": loc["longitude"],
-                    "elevation": loc["elevation"],
-                    "name": loc.get("name", ""),
-                },
-                current_year,
-                priority=9,
+        asyncio.create_task(
+            _precompute_sunpath_for_location(
+                loc["latitude"],
+                loc["longitude"],
+                loc["elevation"],
             )
+        )
     except Exception:
         # If pre-computation fails, do not block the request.
-        # The frontend will trigger it on demand if needed.
+        # The frontend will trigger computation on demand if needed.
         pass
 
     return {"ok": True, "location": loc}
