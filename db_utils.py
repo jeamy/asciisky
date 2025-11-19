@@ -15,6 +15,12 @@ from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 import threading
 
+try:
+    # Optional import; used only for cache versioning of sunpath data.
+    from api.computation import SUNPATH_VERSION as CURRENT_SUNPATH_VERSION
+except Exception:  # pragma: no cover - defensive fallback if computation import fails
+    CURRENT_SUNPATH_VERSION = None
+
 # Logger setup
 logger = logging.getLogger(__name__)
 
@@ -174,7 +180,12 @@ def store_sunpath_year(location_key: str, year_bucket: str,
                 computed_at, position_data
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (object_type, location_key, time_bucket)
-            DO NOTHING
+            DO UPDATE SET
+                observer_lat = EXCLUDED.observer_lat,
+                observer_lon = EXCLUDED.observer_lon,
+                observer_elevation = EXCLUDED.observer_elevation,
+                computed_at = EXCLUDED.computed_at,
+                position_data = EXCLUDED.position_data
         """, (
             'sunpath', 0, location_key, year_bucket,
             observer_lat, observer_lon, observer_elevation,
@@ -213,7 +224,20 @@ def get_sunpath_year(location_key: str, year_bucket: str,
             if age > max_age_seconds:
                 return None
 
-        return pickle.loads(bytes(row['position_data']))
+        data = pickle.loads(bytes(row['position_data']))
+
+        # Optional schema/version guard: invalidate old cached sunpath data when
+        # the computation logic changes and SUNPATH_VERSION is bumped.
+        if CURRENT_SUNPATH_VERSION is not None:
+            try:
+                version = data.get("version") if isinstance(data, dict) else None
+            except Exception:
+                version = None
+
+            if version is None or version < CURRENT_SUNPATH_VERSION:
+                return None
+
+        return data
     except Exception:
         conn.rollback()
         raise

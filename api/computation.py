@@ -148,6 +148,7 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
     return result
 
+SUNPATH_VERSION = 2
 
 def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) -> dict:
     """Compute sunrise and sunset times for each day of a year at a given location.
@@ -255,11 +256,11 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                 end_local_clipped = min(seg_end_local, day_end_local)
 
                 if end_local_clipped > start_local_clipped:
-                    if state == 1: # astronomical
+                    if state == 2: # astronomical
                         raw_periods['astronomical'].append((start_local_clipped, end_local_clipped))
-                    elif state == 2: # nautical
+                    elif state == 3: # nautical
                         raw_periods['nautical'].append((start_local_clipped, end_local_clipped))
-                    elif state == 3: # civil
+                    elif state == 4: # civil
                         raw_periods['civil'].append((start_local_clipped, end_local_clipped))
 
             # Merge overlapping/adjacent segments for each twilight type
@@ -275,10 +276,10 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                     if next_start <= current_end:
                         current_end = max(current_end, next_end)
                     else:
-                        merged.append({'start': current_start.isoformat(), 'end': current_end.isoformat()})
+                        merged.append((current_start, current_end))
                         current_start, current_end = next_start, next_end
 
-                merged.append({'start': current_start.isoformat(), 'end': current_end.isoformat()})
+                merged.append((current_start, current_end))
                 twilight_periods[kind] = merged
 
             # Extract overall start/end times from the merged periods
@@ -288,11 +289,11 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                     return None, None
 
                 all_dts = []
-                for p in periods:
-                    all_dts.append(datetime.fromisoformat(p['start']))
-                    all_dts.append(datetime.fromisoformat(p['end']))
+                for start_dt, end_dt in periods:
+                    all_dts.append(start_dt)
+                    all_dts.append(end_dt)
 
-                return min(all_dts).isoformat(), max(all_dts).isoformat()
+                return min(all_dts), max(all_dts)
 
             astro_start, astro_end = get_overall_start_end('astronomical')
             naut_start, naut_end = get_overall_start_end('nautical')
@@ -303,6 +304,15 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             astro_start = astro_end = naut_start = naut_end = civil_start = civil_end = None
             twilight_periods = {'astronomical': [], 'nautical': [], 'civil': []}
 
+        def serialize_periods(kind):
+            return [
+                {'start': start.isoformat(), 'end': end.isoformat()}
+                for start, end in twilight_periods.get(kind, [])
+            ]
+
+        def serialize_dt(dt):
+            return dt.isoformat() if dt else None
+
         points.append({
             "date": day_date.isoformat(),
             "sunrise": sunrise_dt.isoformat() if sunrise_dt else None,
@@ -310,15 +320,15 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             "sunrise_hours": to_hours(sunrise_dt),
             "sunset_hours": to_hours(sunset_dt),
             "day_length_hours": length_hours,
-            "astronomical_twilight_start": astro_start.isoformat() if astro_start else None,
-            "astronomical_twilight_end": astro_end.isoformat() if astro_end else None,
-            "nautical_twilight_start": naut_start.isoformat() if naut_start else None,
-            "nautical_twilight_end": naut_end.isoformat() if naut_end else None,
-            "civil_twilight_start": civil_start.isoformat() if civil_start else None,
-            "civil_twilight_end": civil_end.isoformat() if civil_end else None,
-            "astronomical_twilight_periods": twilight_periods['astronomical'],
-            "nautical_twilight_periods": twilight_periods['nautical'],
-            "civil_twilight_periods": twilight_periods['civil'],
+            "astronomical_twilight_start": serialize_dt(astro_start),
+            "astronomical_twilight_end": serialize_dt(astro_end),
+            "nautical_twilight_start": serialize_dt(naut_start),
+            "nautical_twilight_end": serialize_dt(naut_end),
+            "civil_twilight_start": serialize_dt(civil_start),
+            "civil_twilight_end": serialize_dt(civil_end),
+            "astronomical_twilight_periods": serialize_periods('astronomical'),
+            "nautical_twilight_periods": serialize_periods('nautical'),
+            "civil_twilight_periods": serialize_periods('civil'),
         })
 
         current = current + timedelta(days=1)
@@ -326,6 +336,7 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
     tz_name = getattr(tz, "zone", None) or str(tz)
 
     return {
+        "version": SUNPATH_VERSION,
         "year": year,
         "location": {
             "latitude": lat,
