@@ -49,7 +49,15 @@ function formatIsoInterval(startIso, endIso) {
     if (!start || !end) {
         return '—';
     }
-    return `${start.formatted}–${end.formatted}`;
+    // Handle intervals that run up to local midnight of the next day.
+    // In the serialized data these end times appear as 00:00 of the
+    // following calendar day, which would look odd as "22:50–00:00".
+    // For display purposes, treat such cases as "24:00".
+    let endLabel = end.formatted;
+    if (end.decimalHour === 0 && start.decimalHour > 0) {
+        endLabel = '24:00';
+    }
+    return `${start.formatted}–${endLabel}`;
 }
 
 function formatIsoIntervals(periods, fallbackStart, fallbackEnd) {
@@ -458,10 +466,19 @@ export class SunpathOverlay {
         const addTwilightRects = (periods, fallbackStart, fallbackEnd, xLeft, width, cssClass) => {
             const ranges = normalizeTwilightPeriods(periods, fallbackStart, fallbackEnd);
             ranges.forEach((period) => {
-                const startH = getDecimalHourFromIso(period.start);
-                const endH = getDecimalHourFromIso(period.end);
+                let startH = getDecimalHourFromIso(period.start);
+                let endH = getDecimalHourFromIso(period.end);
                 if (startH === null || endH === null) {
                     return;
+                }
+
+                // Intervals that end at local midnight of the *next* day are
+                // serialized as 00:00 for that end time. Interpreting this
+                // literally would draw a rectangle from late evening down to
+                // 0:00 across almost the entire 0–24h range. For visualization
+                // we instead treat such cases as running up to 24:00.
+                if (endH === 0 && startH > 0) {
+                    endH = 24;
                 }
 
                 const yStart = yForHour(startH);
