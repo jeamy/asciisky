@@ -1,7 +1,8 @@
-import asyncio
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request
 from api.models import LocationPayload
-from api.routes.celestial import get_sunpath_year
+from api.rabbitmq.task_publisher import get_task_publisher
 
 router = APIRouter()
 
@@ -25,16 +26,19 @@ async def set_session_location(payload: LocationPayload, request: Request):
     # Pre-compute sunpath data for the current year in the background
     # to ensure it's cached for the next page load.
     try:
-        # Create a sub-request or call the function directly.
-        # Running it as a background task ensures the session is updated immediately.
-        asyncio.create_task(
-            get_sunpath_year(
-                request=request,
-                lat=loc["latitude"],
-                lon=loc["longitude"],
-                elevation=loc["elevation"],
+        publisher = get_task_publisher()
+        if publisher is not None:
+            current_year = datetime.now(timezone.utc).year
+            publisher.publish_sunpath_task(
+                {
+                    "latitude": loc["latitude"],
+                    "longitude": loc["longitude"],
+                    "elevation": loc["elevation"],
+                    "name": loc.get("name", ""),
+                },
+                current_year,
+                priority=9,
             )
-        )
     except Exception:
         # If pre-computation fails, do not block the request.
         # The frontend will trigger it on demand if needed.
