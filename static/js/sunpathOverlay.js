@@ -68,7 +68,29 @@ function formatIsoIntervals(periods, fallbackStart, fallbackEnd) {
     if (!usePeriods.length) {
         return '—';
     }
-    const parts = usePeriods.map((period) => formatIsoInterval(period.start, period.end)).filter((p) => p !== '—');
+
+    // For high latitudes it is common that the same twilight type appears
+    // shortly after midnight and again late in the evening (e.g. 00:00–00:41
+    // and 22:49–24:00). For display purposes it is more intuitive to treat
+    // this as a single interval spanning midnight (22:49–00:41).
+    let displayPeriods = usePeriods;
+    if (usePeriods.length === 2) {
+        const s0 = parseIsoLocalTime(usePeriods[0].start);
+        const e0 = parseIsoLocalTime(usePeriods[0].end);
+        const s1 = parseIsoLocalTime(usePeriods[1].start);
+        const e1 = parseIsoLocalTime(usePeriods[1].end);
+        if (s0 && e0 && s1 && e1) {
+            const early = s0.decimalHour <= 3 && e0.decimalHour <= 3;
+            const late = s1.decimalHour >= 21 && e1.decimalHour >= 21;
+            if (early && late) {
+                displayPeriods = [{ start: usePeriods[1].start, end: usePeriods[0].end }];
+            }
+        }
+    }
+
+    const parts = displayPeriods
+        .map((period) => formatIsoInterval(period.start, period.end))
+        .filter((p) => p !== '—');
     return parts.length ? parts.join(', ') : '—';
 }
 
@@ -343,15 +365,9 @@ export class SunpathOverlay {
         const labelCivil = t('civil_twilight');
 
         let html = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
-        if (astro !== '—') {
-            html += `<br>${labelAstro}: ${astro}`;
-        }
-        if (naut !== '—') {
-            html += `<br>${labelNaut}: ${naut}`;
-        }
-        if (civil !== '—') {
-            html += `<br>${labelCivil}: ${civil}`;
-        }
+        html += `<br>${labelAstro}: ${astro}`;
+        html += `<br>${labelNaut}: ${naut}`;
+        html += `<br>${labelCivil}: ${civil}`;
 
         tooltip.innerHTML = html;
 
