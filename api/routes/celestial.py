@@ -2,9 +2,9 @@ from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
-from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES
+from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
 from cache_utils import normalize_location, location_key
-from db_utils import get_sunpath_year as get_cached_sunpath_year
+from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
 from api.rabbitmq.task_publisher import get_task_publisher
 
 router = APIRouter()
@@ -41,27 +41,21 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         year_bucket = str(target_year)
 
-        cached = get_cached_sunpath_year(loc_key, year_bucket)
-        if cached is not None:
-            return cached
-
-        # Kein Cache-Eintrag: Sunpath-Berechnung asynchron über RabbitMQ anstoßen
-        try:
-            publisher = get_task_publisher()
-            if publisher:
-                location = {
-                    "latitude": float(lat),
-                    "longitude": float(lon),
-                    "elevation": float(elevation),
-                }
-                publisher.publish_sunpath_task(location, target_year, priority=10)
-        except Exception:
-            # Fehler beim Enqueue sollen den Request nicht blockieren
+        # Force re-computation if nocache=1 is present
+        if "nocache" in request.query_params:
             pass
+        else:
+            cached = get_cached_sunpath_year(loc_key, year_bucket)
+            if cached is not None:
+                return cached
 
-        raise HTTPException(status_code=503, detail="Sunpath data not yet available; computation has been scheduled.")
-    except HTTPException:
-        raise
+        # Data is not in cache or nocache=1, compute it now
+        sunpath_data = compute_sunpath_year(lat_norm, lon_norm, elev_norm, target_year)
+
+        # Store in cache for future requests
+        store_sunpath_year(loc_key, year_bucket, sunpath_data)
+
+        return sunpath_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

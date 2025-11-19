@@ -260,30 +260,13 @@ export class SunpathOverlay {
                 lat: String(lat),
                 lon: String(lon),
                 elevation: String(elev || 0),
-                year: String(year),
-                nocache: '1'
+                year: String(year)
             });
-            const attemptFetch = async (attempt = 1) => {
-                const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
-                if (resp.status === 503) {
-                    if (attempt >= SUNPATH_FETCH_MAX_RETRIES) {
-                        throw new Error('Sunpath data not ready yet (max retries exceeded)');
-                    }
-                    const delay = Math.min(
-                        SUNPATH_FETCH_MAX_DELAY_MS,
-                        Math.round(SUNPATH_FETCH_BASE_DELAY_MS * Math.pow(1.5, attempt - 1))
-                    );
-                    console.info(`Sunpath data pending (503). Retrying in ${delay} ms (attempt ${attempt + 1}).`);
-                    await sleep(delay);
-                    return attemptFetch(attempt + 1);
-                }
-                if (!resp.ok) {
-                    throw new Error(`HTTP ${resp.status}`);
-                }
-                return resp.json();
-            };
-
-            const json = await attemptFetch();
+            const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+            }
+            const json = await resp.json();
             this.data = json;
             this.locationTimezone = (json && json.location && json.location.timezone) || 'UTC';
             if (key) {
@@ -678,8 +661,7 @@ export class SunpathOverlay {
                 lat: String(lat),
                 lon: String(lon),
                 elevation: String(elev || 0),
-                year: String(year),
-                nocache: '1'
+                year: String(year)
             });
             const resp = await fetch(`${API_ENDPOINTS.SUNPATH}?${params.toString()}`);
             if (!resp.ok) {
