@@ -148,7 +148,7 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
     return result
 
-SUNPATH_VERSION = 2
+SUNPATH_VERSION = 3
 
 def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) -> dict:
     """Compute sunrise and sunset times for each day of a year at a given location.
@@ -248,6 +248,12 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             day_end_local = lm + timedelta(days=1)
 
             # Collect all twilight segments for the current day
+            # dark_twilight_day states:
+            #   0 = dark night
+            #   1 = astronomical twilight
+            #   2 = nautical twilight
+            #   3 = civil twilight
+            #   4 = day
             raw_periods = {'astronomical': [], 'nautical': [], 'civil': []}
             for seg_start_utc, seg_end_utc, state in segments:
                 seg_start_local = seg_start_utc.astimezone(tz)
@@ -256,11 +262,11 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                 end_local_clipped = min(seg_end_local, day_end_local)
 
                 if end_local_clipped > start_local_clipped:
-                    if state == 2: # astronomical
+                    if state == 1:  # astronomical
                         raw_periods['astronomical'].append((start_local_clipped, end_local_clipped))
-                    elif state == 3: # nautical
+                    elif state == 2:  # nautical
                         raw_periods['nautical'].append((start_local_clipped, end_local_clipped))
-                    elif state == 4: # civil
+                    elif state == 3:  # civil
                         raw_periods['civil'].append((start_local_clipped, end_local_clipped))
 
             # Merge overlapping/adjacent segments for each twilight type
