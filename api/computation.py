@@ -311,9 +311,20 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             twilight_periods = {'astronomical': [], 'nautical': [], 'civil': []}
 
         def serialize_periods(kind):
+            periods = twilight_periods.get(kind, [])
+            if not periods:
+                return []
+
+            # In theory there should be at most two twilight intervals per day
+            # (morning and evening). Numerical edge cases or DST transitions
+            # can sometimes produce more fragmented segments; collapse them by
+            # keeping only the earliest and latest intervals.
+            if len(periods) > 2:
+                periods = [periods[0], periods[-1]]
+
             return [
                 {'start': start.isoformat(), 'end': end.isoformat()}
-                for start, end in twilight_periods.get(kind, [])
+                for start, end in periods
             ]
 
         def serialize_dt(dt):
