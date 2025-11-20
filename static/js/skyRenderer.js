@@ -1300,7 +1300,6 @@ export class SkyRenderer {
     refreshDialogIfVisible() {
         try {
             if (!this.selectedObject) {
-                console.log('[refreshDialog] No selected object');
                 return;
             }
             const dialog = document.getElementById('object-dialog');
@@ -1310,11 +1309,8 @@ export class SkyRenderer {
             }
             const content = dialog.querySelector('#dialog-content') || dialog.querySelector('.object-data');
             if (!content) {
-                console.log('[refreshDialog] No content element found');
                 return;
             }
-            
-            console.log('[refreshDialog] Refreshing dialog for:', this.selectedObject.name);
             
             // Find fresh data - search by name in all bodies
             let fresh = null;
@@ -1334,11 +1330,8 @@ export class SkyRenderer {
             }
             
             if (fresh) {
-                console.log('[refreshDialog] Found fresh data:', fresh);
                 this.selectedObject = fresh;
-            } else {
-                console.log('[refreshDialog] No fresh data found for:', this.selectedObject.name);
-            }
+            } 
             const info = this.buildObjectInfoLines(this.selectedObject);
             content.innerHTML = info.join('\n');
             this.render();

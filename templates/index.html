@@ -513,6 +513,16 @@
             } catch (error) {
                 console.error('Error saving location to server:', error);
             }
+
+            try {
+                if (sunpathOverlay && typeof SunpathOverlay.preloadForCurrentLocation === 'function') {
+                    sunpathOverlay.data = null;
+                    sunpathOverlay.currentKey = null;
+                    SunpathOverlay.preloadForCurrentLocation();
+                }
+            } catch (e) {
+                console.error('Failed to preload sunpath data after location change:', e);
+            }
         }
         
         // Funktion zum Speichern des Standorts im localStorage

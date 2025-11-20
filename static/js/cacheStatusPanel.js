@@ -262,7 +262,6 @@ export function initCacheStatusPanel(elementId = 'cache-status-panel') {
 export async function updateCacheStatusForLocation(lat, lon, elevation, locationName) {
   // Legacy function - disabled after RabbitMQ migration
   // Cache status is no longer exposed via API
-  console.log('[Cache Status] Legacy endpoint disabled - RabbitMQ handles caching automatically');
   return;
 }
 
