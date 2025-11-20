@@ -90,7 +90,6 @@ def get_location_params(request: Request, lat: float = None, lon: float = None, 
     resolved_lat = lat if lat is not None else session_loc.get("latitude", location_settings["latitude"])
     resolved_lon = lon if lon is not None else session_loc.get("longitude", location_settings["longitude"])  
     resolved_elevation = elevation if elevation is not None else session_loc.get("elevation", location_settings["elevation"])
-    logger.info("Resolved location: lat=%.6f lon=%.6f elev=%.1f", resolved_lat, resolved_lon, resolved_elevation)
     return float(resolved_lat), float(resolved_lon), float(resolved_elevation)
 
 def get_cache_data(cache_file: str, cache_ttl: int, use_postgres: bool = True, loc_key: str = None, time_bucket: str = None, postgres_getter=None):
