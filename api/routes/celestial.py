@@ -20,8 +20,8 @@ async def get_celestial_objects(request: Request, lat: float = None, lon: float 
         dt_utc = parse_time_param(time)
         
         # Always compute fresh - no caching for celestial objects
+        logger.info("Celestial request: lat=%.6f lon=%.6f elev=%.1f time=%s", lat, lon, elevation, dt_utc)
         snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
-        
         # No background tasks needed - celestial is always computed fresh
         return snapshot
     except Exception as e:
