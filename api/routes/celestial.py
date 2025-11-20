@@ -11,7 +11,6 @@ from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 @router.get("/celestial")
 async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
@@ -38,12 +37,18 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
     """
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
+        logger.info("Sunpath request: lat=%.6f lon=%.6f elev=%.1f", lat, lon, elevation)
         dt_utc = parse_time_param(time)
+        logger.info("Sunpath request: time=%s", dt_utc)
         target_year = year or dt_utc.year
+        logger.info("Sunpath request: year=%s", target_year)
 
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        logger.info("Sunpath request: lat=%.6f lon=%.6f elev=%.1f (norm=%.4f,%.4f,%d)", lat, lon, elevation, lat_norm, lon_norm, elev_norm)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        logger.info("Sunpath request: loc_key=%s", loc_key)
         year_bucket = str(target_year)
+        logger.info("Sunpath request: year_bucket=%s", year_bucket)
 
         nocache = "nocache" in request.query_params
         logger.info(
