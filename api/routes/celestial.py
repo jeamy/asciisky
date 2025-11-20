@@ -1,6 +1,7 @@
 from typing import Optional
 from datetime import datetime, timezone
 import asyncio
+import logging
 
 from fastapi import APIRouter, Request, HTTPException
 from api.helpers import parse_time_param, get_location_params
@@ -9,6 +10,7 @@ from cache_utils import normalize_location, location_key
 from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/celestial")
 async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
@@ -42,14 +44,33 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         year_bucket = str(target_year)
 
+        nocache = "nocache" in request.query_params
+        logger.info(
+            "Sunpath request: lat=%.6f lon=%.6f elev=%.1f (norm=%.4f,%.4f,%d) year=%s loc_key=%s nocache=%s",
+            lat,
+            lon,
+            elevation,
+            lat_norm,
+            lon_norm,
+            elev_norm,
+            year_bucket,
+            loc_key,
+            nocache,
+        )
+
         # Respect nocache flag for debugging, otherwise prefer cached data
-        if "nocache" in request.query_params:
+        if nocache:
             cached = None
         else:
             cached = get_cached_sunpath_year(loc_key, year_bucket)
 
         if cached is not None:
+            logger.info("Sunpath cache HIT for loc_key=%s year=%s", loc_key, year_bucket)
             return cached
+
+        logger.info("Sunpath cache MISS for loc_key=%s year=%s - starting computation", loc_key, year_bucket)
+
+        start_ts = datetime.now(timezone.utc)
 
         # Compute sunpath directly in a background thread to avoid blocking the event loop
         sunpath_data = await asyncio.to_thread(
@@ -60,6 +81,20 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
             target_year,
         )
 
+        end_ts = datetime.now(timezone.utc)
+        duration = (end_ts - start_ts).total_seconds()
+        try:
+            points_len = len(sunpath_data.get("points", [])) if isinstance(sunpath_data, dict) else None
+        except Exception:
+            points_len = None
+        logger.info(
+            "Sunpath computation DONE for loc_key=%s year=%s in %.2fs (points=%s)",
+            loc_key,
+            year_bucket,
+            duration,
+            points_len,
+        )
+
         try:
             store_sunpath_year(loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data)
         except Exception:
@@ -68,6 +103,7 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
 
         return sunpath_data
     except Exception as e:
+        logger.exception("Error while handling sunpath request: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
