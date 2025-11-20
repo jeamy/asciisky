@@ -11,6 +11,7 @@ from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 @router.get("/celestial")
 async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
