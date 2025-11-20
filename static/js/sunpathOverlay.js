@@ -251,7 +251,7 @@ export class SunpathOverlay {
         const key = makeCacheKey(loc, year);
         const willShow = !this.visible;
         if (willShow) {
-            showLoadingIndicator('loading');
+            showLoadingIndicator('loading_sunpath');
         }
         try {
             if (!this.data || this.currentKey !== key) {

@@ -4,6 +4,8 @@ export const i18n = {
     'de': {
         // Allgemeine Texte
         'loading': 'Lade Himmelsdaten...',
+        // Spezieller Hinweis für die Jahreskurve Sonnenauf-/untergang
+        'loading_sunpath': 'Berechne Sonnenauf- und -untergangsdaten für dieses Jahr … Dies kann beim ersten Aufruf für einen neuen Standort etwas länger dauern (bis zu etwa drei Minuten).',
         'loading_asteroids': 'Lade Kleinplaneten-Daten...',
         'error_loading': 'Fehler beim Laden der Himmelsdaten. Bitte Seite neu laden.',
         'click_info': 'Klicke auf ein Objekt für Details',
@@ -248,6 +250,8 @@ export const i18n = {
     'en': {
         // General texts
         'loading': 'Loading celestial data...',
+        // Dedicated hint for yearly sunrise/sunset computation (sunpath overlay)
+        'loading_sunpath': 'Computing yearly sunrise and sunset data for this location… On first use for a new location this may take a while (up to about three minutes).',
         'loading_asteroids': 'Loading minor planet data...',
         'error_loading': 'Error loading sky data. Please refresh the page.',
         'click_info': 'Click on any object for details',
