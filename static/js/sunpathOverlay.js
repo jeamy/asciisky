@@ -375,9 +375,23 @@ export class SunpathOverlay {
         const pageY = evt.pageY || (evt.clientY + window.scrollY);
         const offsetX = 12;
         const offsetY = 12;
-        tooltip.style.left = `${pageX + offsetX}px`;
-        tooltip.style.top = `${pageY + offsetY}px`;
+
         tooltip.style.display = 'block';
+        const viewportWidth = window.innerWidth || (document.documentElement ? document.documentElement.clientWidth : 0) || 0;
+        const rect = tooltip.getBoundingClientRect();
+        const centerX = viewportWidth / 2;
+
+        let left;
+        if (viewportWidth && pageX >= centerX) {
+            left = pageX - offsetX - rect.width;
+        } else {
+            left = pageX + offsetX;
+        }
+
+        let top = pageY + offsetY;
+
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
     }
 
     render() {
@@ -404,7 +418,7 @@ export class SunpathOverlay {
         );
 
         const width = Math.max(300, Math.round((viewportWidth || 800) * 0.8));
-        const height = Math.max(200, Math.round((viewportHeight || 600) * 0.45));
+        const height = Math.max(200, Math.round((viewportHeight || 600) * 0.55));
 
         svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
         svg.setAttribute('width', String(width));

@@ -624,6 +624,31 @@
                 } catch (_) { /* noop */ }
             }
         });
+
+        document.addEventListener('click', (e) => {
+            if (!sunpathOverlay || !sunpathOverlay.visible) {
+                return;
+            }
+            try {
+                const overlayRoot = sunpathOverlay.root;
+                const tooltipEl = sunpathOverlay.tooltip;
+                const sunpathBtn = document.getElementById('sunpath-toggle');
+                const target = e.target;
+                if (overlayRoot && overlayRoot.contains(target)) {
+                    return;
+                }
+                if (tooltipEl && tooltipEl.contains && tooltipEl.contains(target)) {
+                    return;
+                }
+                if (sunpathBtn && sunpathBtn.contains(target)) {
+                    return;
+                }
+                sunpathOverlay.hide();
+                if (sunpathBtn) {
+                    sunpathBtn.classList.remove('active');
+                }
+            } catch (_) { /* noop */ }
+        });
     </script>
 </body>
 </html>
