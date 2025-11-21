@@ -2,7 +2,7 @@
     max-width: 300px;
     min-width: 250px;
     background: var(--panel-bg, #111);
-    border: 1px solid var(--border-color, #333);
+    border: var(--dialog-border-width, 2px) solid var(--dialog-border-color, #00ff00);
     border-radius: 6px;
     color: var(--primary-color, #00ff00);
     padding: 12px;
@@ -10,7 +10,7 @@
     font-size: 0.8rem;
     line-height: 1.4;
     position: fixed; /* Use fixed positioning */
-    box-shadow: 0 0 15px rgba(0, 255, 0, 0.4);
+    box-shadow: var(--dialog-box-shadow, 0 0 20px rgba(0, 255, 0, 0.3));
     /* Desktop positioning by default */
     top: 20px;
     right: auto;
@@ -99,7 +99,7 @@
 
 .location-dialog {
     background: var(--panel-bg, #111);
-    border: 1px solid var(--border-color, #333);
+    border: var(--dialog-border-width, 2px) solid var(--dialog-border-color, #00ff00);
     border-radius: 6px;
     color: var(--primary-color, #00ff00);
     padding: 15px;
@@ -111,7 +111,7 @@
     font-family: 'Courier New', monospace;
     font-size: 0.8rem;
     line-height: 1.4;
-    box-shadow: 0 0 20px rgba(0, 255, 0, 0.6), 0 0 40px rgba(0, 255, 0, 0.3);
+    box-shadow: var(--dialog-box-shadow, 0 0 20px rgba(0, 255, 0, 0.3));
     position: relative;
 }
 
@@ -131,7 +131,7 @@
 
 .help-dialog {
     background: var(--panel-bg, #111);
-    border: 1px solid var(--border-color, #333);
+    border: var(--dialog-border-width, 2px) solid var(--dialog-border-color, #00ff00);
     border-radius: 6px;
     color: var(--primary-color, #00ff00);
     padding: 15px;
@@ -216,7 +216,7 @@
         padding: 15px;
         font-size: 1rem;
         z-index: 2000;
-        box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+        box-shadow: var(--dialog-box-shadow, 0 0 20px rgba(0, 255, 0, 0.3));
     }
     
     .object-list-item {

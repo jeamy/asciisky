@@ -4,6 +4,28 @@
     --panel-bg: #111;
     --border-color: #333;
     --text-dim: #666;
+
+    --color-ana-1: oklch(69.3% 0.152 180);
+    --color-ana-1-contrast: #000;
+    --color-ana-2: oklch(49.3% 0.11 150);
+    --color-ana-2-contrast: #fff;
+    --color-ana-3: oklch(59.3% 0.123 160);
+    --color-ana-3-contrast: #000;
+    --color-ana-4: oklch(80% 0.14237 167.878);
+    --color-ana-4-contrast: #000;
+    --color-ana-5: oklch(94.3% 0.096 195);
+    --color-ana-5-contrast: #000;
+    --color-ana-6: oklch(95% 0.082 210);
+    --color-ana-6-contrast: #000;
+
+    --ui-bg: var(--color-ana-2);
+    --ui-bg-hover: var(--color-ana-1);
+    --ui-bg-active: var(--color-ana-4);
+    --ui-border: var(--color-ana-3);
+
+    --dialog-border-width: 2px;
+    --dialog-border-color: #00ff00;
+    --dialog-box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
 }
 
 /* Zoom-Button in der Himmelsansicht */
@@ -12,8 +34,8 @@
     top: 10px;
     right: 10px;
     z-index: 50;
-    background: var(--panel-bg);
-    border: 1px solid var(--border-color);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     border-radius: 4px;
     padding: 6px 10px;
@@ -25,7 +47,7 @@
 }
 
 .sky-container .zoom-button:hover {
-    background: #222;
+    background: var(--ui-bg-hover);
 }
 
 .sky-text {
@@ -53,8 +75,8 @@
 
 .magnitude-filter input {
     width: 60px;
-    background: var(--panel-bg);
-    border: 1px solid var(--border-color);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     padding: 5px;
     border-radius: 3px;
@@ -97,9 +119,11 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden; /* keep physical size; no scrollbars when resolution increases */
+    overflow: hidden;
+    /* keep physical size; no scrollbars when resolution increases */
     cursor: crosshair;
-    position: relative; /* Für die relative Positionierung des Dialogs */
+    position: relative;
+    /* Für die relative Positionierung des Dialogs */
 }
 
 #object-dialog {
@@ -132,8 +156,8 @@ h1 {
 }
 
 .object-btn {
-    background: var(--panel-bg);
-    border: 1px solid var(--border-color);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     padding: 8px 12px;
     border-radius: 4px;
@@ -144,11 +168,11 @@ h1 {
 }
 
 .object-btn:hover {
-    background: #222;
+    background: var(--ui-bg-hover);
 }
 
 .object-btn.active {
-    background: #004400;
+    background: var(--ui-bg-active);
     border-color: var(--primary-color);
 }
 
@@ -167,8 +191,8 @@ h1 {
 }
 
 .control-btn {
-    background: var(--panel-bg);
-    border: 1px solid var(--border-color);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     padding: 8px 12px;
     border-radius: 4px;
@@ -181,12 +205,12 @@ h1 {
 }
 
 .control-btn:hover {
-    background: #222;
+    background: var(--ui-bg-hover);
 }
 
 .lang-btn {
-    background: var(--panel-bg);
-    border: 1px solid var(--border-color);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     padding: 8px 12px;
     border-radius: 4px;
@@ -198,41 +222,41 @@ h1 {
 }
 
 .lang-btn:hover {
-    background: #222;
+    background: var(--ui-bg-hover);
 }
 
 .lang-btn.active {
-    background: #004400;
+    background: var(--ui-bg-active);
     border-color: var(--primary-color);
 }
 
 .status-bar {
     display: flex;
     justify-content: space-between;
-    color: var(--text-dim);
+    color: color-mix(in oklch, var(--text-dim) 70%, var(--color-ana-5) 30%);
     font-size: 0.9em;
     margin-top: 10px;
 }
 
 #object-dialog {
     position: absolute;
-    background: var(--panel-bg);
-    border: 1px solid var(--primary-color);
+    background: color-mix(in oklch, var(--panel-bg) 70%, var(--ui-bg) 30%);
+    border: var(--dialog-border-width) solid var(--dialog-border-color);
     padding: 15px 20px;
     color: var(--primary-color);
     font-family: monospace;
     white-space: pre;
     z-index: 1000;
     min-width: 200px;
-    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    box-shadow: var(--dialog-box-shadow);
 }
 
 #object-dialog button {
     position: absolute;
     top: -5px;
     right: 5px;
-    background: rgba(0, 20, 0, 0.5);
-    border: none;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
     color: var(--primary-color);
     cursor: pointer;
     font-weight: bold;
@@ -242,16 +266,21 @@ h1 {
     border-radius: 4px;
 }
 
+#object-dialog button:hover {
+    background: var(--ui-bg-hover);
+}
+
 @media (max-width: 768px) {
     body {
         padding: 10px;
     }
 
     header {
-        margin-top: 50px; /* Add space above header for controls */
+        margin-top: 50px;
+        /* Add space above header for controls */
         padding-top: 10px;
     }
-    
+
     .header-controls {
         top: 10px;
         right: 10px;
@@ -267,7 +296,7 @@ h1 {
         padding: 10px;
         margin-top: 10px;
     }
-    
+
     .object-btn,
     .control-btn,
     .lang-btn {
@@ -276,27 +305,27 @@ h1 {
         min-height: 44px;
         min-width: 44px;
     }
-    
+
     .filter-controls {
         gap: 20px;
     }
-    
+
     .magnitude-filter {
         gap: 12px;
     }
-    
+
     .magnitude-filter input {
         width: 70px;
         padding: 10px;
         font-size: 1.1rem;
     }
-    
+
     #object-dialog button {
         padding: 10px;
         min-height: 44px;
         min-width: 44px;
     }
-    
+
     .object-list {
         gap: 15px;
     }

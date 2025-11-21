@@ -9,9 +9,17 @@
   z-index: 10000;
 
   background: var(--panel-bg, #111);
-  border: 1px solid var(--border-color, #333);
   border-radius: 6px;
-  box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+}
+
+#sunpath-overlay.sunpath-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  border: var(--dialog-border-width, 2px) solid var(--dialog-border-color, #00ff00);
+  box-shadow: var(--dialog-box-shadow, 0 0 20px rgba(0, 255, 0, 0.3));
+  pointer-events: none;
 }
 
 .sunpath-bg {
@@ -56,7 +64,7 @@
 }
 
 .sunpath-twilight-astronomical {
-  fill: rgba(0, 64, 128, 0.35);
+  fill: rgba(1, 54, 107, 0.35);
   stroke: none;
   pointer-events: none;
 }
@@ -94,12 +102,12 @@
   position: absolute;
   background: var(--panel-bg, #111);
   color: var(--primary-color, #00ff00);
-  border: 1px solid var(--border-color, #333);
+  border: var(--dialog-border-width, 2px) solid var(--dialog-border-color, #00ff00);
   padding: 4px 8px;
   font-size: 0.75rem;
   font-family: 'Courier New', monospace;
   border-radius: 4px;
-  box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+  box-shadow: var(--dialog-box-shadow, 0 0 20px rgba(0, 255, 0, 0.3));
   pointer-events: none;
   z-index: 10001;
   white-space: nowrap;

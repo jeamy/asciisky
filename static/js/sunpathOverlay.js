@@ -390,6 +390,34 @@ export class SunpathOverlay {
 
         let top = pageY + offsetY;
 
+        // Clamp tooltip inside the sunpath overlay so it does not cover
+        // the outer green border on the right side.
+        try {
+            const root = this.root || document.getElementById('sunpath-overlay');
+            if (root) {
+                const overlayRect = root.getBoundingClientRect();
+                const margin = 8; // small inner margin to keep distance from the frame
+
+                if (overlayRect && rect.width && rect.height) {
+                    const minLeft = overlayRect.left + margin;
+                    const maxLeft = overlayRect.right - rect.width - margin;
+                    if (Number.isFinite(minLeft) && Number.isFinite(maxLeft)) {
+                        if (left < minLeft) left = minLeft;
+                        if (left > maxLeft) left = maxLeft;
+                    }
+
+                    const minTop = overlayRect.top + margin;
+                    const maxTop = overlayRect.bottom - rect.height - margin;
+                    if (Number.isFinite(minTop) && Number.isFinite(maxTop)) {
+                        if (top < minTop) top = minTop;
+                        if (top > maxTop) top = maxTop;
+                    }
+                }
+            }
+        } catch (_) {
+            // Fallback: ignore clamping errors, use default position
+        }
+
         tooltip.style.left = `${left}px`;
         tooltip.style.top = `${top}px`;
     }
