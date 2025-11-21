@@ -39,7 +39,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - PostgreSQL database backend for efficient data storage and retrieval
-- RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md) and [Worker Setup](doc/WORKER_SETUP.md)
+- RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
 - **Hybrid Deduplication (Phase 3)**: Deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
   - Prevents duplicate computations across all workers
   - Scales horizontally across unlimited worker hosts
