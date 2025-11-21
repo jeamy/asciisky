@@ -53,6 +53,12 @@ A web application that displays the current positions of celestial bodies (Sun, 
 - Automatic nightly updates of asteroid and comet orbital data (configurable; default 4:00 AM)
 - DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
 
+### Screenshots
+
+![ASCII Sky – Main view](doc/ASCII-0.png)
+
+![ASCII Sky – Sunpath overlay](doc/ASCII-1.png)
+
 ## Prerequisites
 
 - Docker and Docker Compose
