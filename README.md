@@ -83,9 +83,6 @@ The Hybrid setup automatically:
 - ✅ Launches unified workers (with per-message dedup IDs + Advisory Locks)
 - ✅ Runs the hybrid deduplication smoke tests
 
-> **Legacy note:** Der frühere `setup-dev.sh` wurde vollständig durch `./scripts/hybrid-setup.sh local` ersetzt. Es gibt kein separates "Legacy"-Setup mehr.
-
-
 **Data Safety:** By default, all data (database, cache, etc.) is preserved when restarting. Only use `./scripts/hybrid-setup.sh local --clean` if you want to delete everything.
 
 **Access Points:**
