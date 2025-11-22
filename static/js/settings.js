@@ -350,7 +350,6 @@ export class SettingsManager {
             const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true&nocache=1`);
             
             if (response.ok) {
-                console.log('Location successfully synced with server');
                 this.serverSynced = true;
                 return true;
             } else {
