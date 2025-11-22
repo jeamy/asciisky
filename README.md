@@ -76,12 +76,12 @@ A web application that displays the current positions of celestial bodies (Sun, 
 4. Open your browser and navigate to `http://localhost:8000`
 
 The Hybrid setup automatically:
-- ✅ Configures PostgreSQL Advisory Locks for deduplication
-- ✅ Starts all core services (FastAPI, PostgreSQL, RabbitMQ, workers)
-- ✅ Builds Docker images with the latest code
-- ✅ Initializes the database and downloads asteroid/comet data
-- ✅ Launches unified workers (with per-message dedup IDs + Advisory Locks)
-- ✅ Runs the hybrid deduplication smoke tests
+- Configures PostgreSQL Advisory Locks for deduplication
+- Starts all core services (FastAPI, PostgreSQL, RabbitMQ, workers)
+- Builds Docker images with the latest code
+- Initializes the database and downloads asteroid/comet data
+- Launches unified workers (with per-message dedup IDs + Advisory Locks)
+- Runs the hybrid deduplication smoke tests
 
 **Data Safety:** By default, all data (database, cache, etc.) is preserved when restarting. Only use `./scripts/hybrid-setup.sh local --clean` if you want to delete everything.
 
@@ -119,10 +119,10 @@ This deploys with **PostgreSQL Advisory Locks** (Phase 3):
 - **Worker Server C** ($RABBITMQ_C): Unified Workers with PostgreSQL Advisory Locks
 
 **PostgreSQL Deduplication Features:**
-- ✅ PostgreSQL Advisory Locks prevent duplicate tasks (100% protection)
-- ✅ Standard RabbitMQ queues for task distribution
-- ✅ Automatic scaling across unlimited worker hosts
-- ✅ Performance: -80% memory, +35% throughput
+- PostgreSQL Advisory Locks prevent duplicate tasks (100% protection)
+- Standard RabbitMQ queues for task distribution
+- Automatic scaling across unlimited worker hosts
+- Performance: -80% memory, +35% throughput
 
 See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions and `docs/hybrid-deduplication.md` for deduplication details.
 
@@ -161,11 +161,11 @@ The application runs multiple services. In local development these are defined i
 - **`worker_monitor`** – Real-time performance dashboard for workers (port configurable via `MONITOR_PORT`)
 
 **Performance Benefits (Unified Worker Architecture):**
-- 🚀 **-80% Memory Usage** – Unified Workers share Skyfield resources
-- ⚡ **+35% Throughput** – Hybrid deduplication eliminates duplicate work
-- 🔄 **Unlimited Scaling** – Horizontal scaling across multiple worker hosts
-- 🛡️ **Hybrid Deduplication** – RabbitMQ + PostgreSQL Advisory Locks for duplicate protection
-- 🚀 **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
+- **-80% Memory Usage** – Unified Workers share Skyfield resources
+- **+35% Throughput** – Hybrid deduplication eliminates duplicate work
+- **Unlimited Scaling** – Horizontal scaling across multiple worker hosts
+- **Hybrid Deduplication** – RabbitMQ + PostgreSQL Advisory Locks for duplicate protection
+- **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
 
 All services restart automatically unless stopped.
 
@@ -303,19 +303,36 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 
 ## API Endpoints
 
-All endpoints are referenced in the frontend via `static/js/constants.js`.
+All frontend calls use centralized API endpoint constants in `static/js/constants.js`.
 
-- `GET /api/planets` — positions for Sun, Moon, and planets (direct computation, no cache)
-- `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes and event times
+- `GET /api/celestial` — real-time snapshot for Sun, Moon, and planets (no cache)
+- `GET /api/celestial/{body_id}` — real-time data for a single celestial body
+- `GET /api/celestial/sunpath` — yearly sunrise/sunset curve for the current or given location
+- `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes, distances and rise/set/transit times
+- `GET /api/asteroids` — backward-compatible alias for `/api/bright_asteroids`
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
-- `GET /api/filters` — get/set user magnitude filters (applied at API layer)
+- `GET /api/zodiac` — zodiac and selected constellations for a location and time
+- `GET /api/session/location` — get current session location (if set)
+- `POST /api/session/location` — set session location; triggers background sunpath precompute
+- `GET /api/config` — exposure of magnitude limits and constellation defaults to the frontend
+- `GET /api/filters` — get current user magnitude filters (applied at API layer, caches stay unfiltered)
+- `POST /api/filters` — update user magnitude filters
+- `GET /api/user/settings` — get per-user settings (location, display, filters, theme, language, options)
+- `PUT /api/user/settings` — upsert per-user settings
+- `POST /api/auth/register` — register a new user (first user becomes admin)
+- `POST /api/auth/login` — log in with username or email + password
+- `POST /api/auth/logout` — clear current session
+- `GET /api/auth/me` — return authentication status and basic user info
+- `GET /api/admin/users` — list users (admin-only)
+- `PATCH /api/admin/users/{user_id}` — update user (admin-only)
+- `DELETE /api/admin/users/{user_id}` — delete user (admin-only)
 
 ### Simulated Time (optional)
 
-All endpoints above accept an optional `time` query parameter to simulate calculations at a specific UTC instant. The value must be ISO 8601 and may end with `Z` or include a timezone offset. The backend normalizes it to UTC.
+The sky-data endpoints (`/api/celestial`, `/api/bright_asteroids`, `/api/comets`, `/api/zodiac`) accept an optional `time` query parameter to simulate calculations at a specific UTC instant. The value must be ISO 8601 and may end with `Z` or include a timezone offset. The backend normalizes it to UTC.
 
 - Examples:
-  - `/api/planets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
+  - `/api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
   - `/api/bright_asteroids?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
   - `/api/comets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z`
 
@@ -428,10 +445,10 @@ Notes:
 ```
 
 **Key Benefits:**
-- 🛡️ **100% Deduplication** - No duplicate computations
-- 🔄 **Unlimited Scaling** - Horizontal across multiple hosts  
-- 🚀 **-80% Memory** - Unified Workers share resources
-- ⚡ **+35% Throughput** - Hybrid eliminates duplicate work
+- **100% Deduplication** - No duplicate computations
+- **Unlimited Scaling** - Horizontal across multiple hosts  
+- **-80% Memory** - Unified Workers share resources
+- **+35% Throughput** - Hybrid eliminates duplicate work
 
 **Monitoring:**
 - RabbitMQ UI: http://localhost:15672
@@ -440,7 +457,7 @@ Notes:
 
 **Documentation:** See `docs/hybrid-deduplication.md` for complete implementation details.
 
-## ⚡ Performance Optimizations
+## Performance Optimizations
 
 ### Vectorized Computations
 ASCII Sky uses NumPy vectorization for maximum performance:
