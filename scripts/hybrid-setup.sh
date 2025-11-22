@@ -432,21 +432,7 @@ run_tests() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     
-    print_info "Building Docker image..."
-    docker compose -f docker-compose.production.yml build || {
-        print_error "Build failed on localhost"
-        exit 1
-    }
-    
-    print_info "Starting main server services..."
-    docker compose -f docker-compose.production.yml up -d \
-        --scale unified_worker=${UNIFIED_WORKERS:-2} \
-        --scale worker_monitor=${WORKER_MONITOR:-1} || {
-        print_error "Startup failed on localhost"
-        exit 1
-    }
-    
-    print_status "Main server started"
+    print_info "Using existing production Docker environment (test mode does not build or start containers)..."
     
     # Wait for services to be ready
     print_info "Waiting for PostgreSQL to be ready..."
@@ -477,7 +463,7 @@ run_tests() {
     if [ "$SETUP_WORKER_B" == "true" ] && [ -n "$RABBITMQ_B" ]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🖥️  Setting up: Worker Server B"
+        echo "🖥️  Verifying: Worker Server B (test mode - no start)"
         echo "   Host: $RABBITMQ_B"
         echo "   Compose: docker-compose.workers.yml"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -486,93 +472,17 @@ run_tests() {
         # Check SSH connection
         print_info "Testing SSH connection to $RABBITMQ_B..."
         if ! ssh "$RABBITMQ_B" "echo 'SSH OK'" 2>/dev/null; then
-            print_warning "Cannot connect to Worker B ($RABBITMQ_B) - skipping"
+            print_error "Cannot connect to Worker B ($RABBITMQ_B). Please ensure production/local setup has been run."
+            exit 1
+        fi
+
+        # Verify unified_worker containers are running
+        print_info "Checking unified_worker service on Worker B (must already be running)..."
+        if ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml ps unified_worker | grep -q 'Up'"; then
+            print_status "Worker B unified_worker is running"
         else
-            print_info "Setting up Worker B..."
-            
-            # Git pull/update (with unified_worker verification like production)
-            if ssh "$RABBITMQ_B" "[ -d ~/asciisky/.git ]"; then
-                print_info "Repository exists, pulling latest changes..."
-                ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || {
-                    print_error "Git pull failed on $RABBITMQ_B"
-                    exit 1
-                }
-                
-                # Verify we have the latest unified worker file
-                print_info "Verifying docker-compose.workers.yml has unified_worker service..."
-                if ssh "$RABBITMQ_B" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                    print_status "unified_worker service found in compose file"
-                else
-                    print_warning "unified_worker service not found. Forcing fresh clone..."
-                    ssh "$RABBITMQ_B" "rm -rf ~/asciisky" || {
-                        print_error "Failed to remove old repository"
-                        exit 1
-                    }
-                    ssh "$RABBITMQ_B" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
-                        print_error "Git clone failed on $RABBITMQ_B"
-                        exit 1
-                    }
-                    
-                    # Verify again after fresh clone
-                    if ssh "$RABBITMQ_B" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                        print_status "unified_worker service found in fresh clone"
-                    else
-                        print_error "unified_worker service still not found after fresh clone on $RABBITMQ_B"
-                        exit 1
-                    fi
-                fi
-            else
-                print_info "Cloning repository from GitHub..."
-                ssh "$RABBITMQ_B" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
-                    print_error "Git clone failed on $RABBITMQ_B"
-                    exit 1
-                }
-                
-                # Verify the cloned repository has the unified worker
-                print_info "Verifying cloned repository has unified_worker service..."
-                if ssh "$RABBITMQ_B" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                    print_status "unified_worker service found in cloned repository"
-                else
-                    print_error "unified_worker service not found in cloned repository on $RABBITMQ_B"
-                    exit 1
-                fi
-            fi
-            
-            # Copy .env (with worker-specific fallback like production setup)
-            if [ -f ".env.b" ]; then
-                print_info "Copying worker-specific .env.b → .env..."
-                scp ".env.b" "$RABBITMQ_B:~/asciisky/.env" || {
-                    print_error "Failed to copy .env.b to $RABBITMQ_B"
-                    exit 1
-                }
-                print_status "Using .env.b for Worker B"
-            else
-                if [ -f ".env" ]; then
-                    print_warning ".env.b not found, using default .env"
-                    scp .env "$RABBITMQ_B:~/asciisky/.env" || {
-                        print_error "Failed to copy .env to $RABBITMQ_B"
-                        exit 1
-                    }
-                else
-                    print_error "Neither .env.b nor .env found!"
-                    exit 1
-                fi
-            fi
-            
-            # Build and start
-            ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || {
-                print_error "Build failed on $RABBITMQ_B"
-                exit 1
-            }
-            
-            ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d \
-                --scale unified_worker=\${UNIFIED_WORKERS:-8} \
-                --scale worker_monitor=\${WORKER_MONITOR:-1}" || {
-                print_error "Startup failed on $RABBITMQ_B"
-                exit 1
-            }
-            
-            print_status "Worker B started"
+            print_error "Worker B unified_worker is not running. Start it via production/local setup before running tests."
+            exit 1
         fi
     fi
     
@@ -584,7 +494,7 @@ run_tests() {
     if [ "$SETUP_WORKER_C" == "true" ] && [ -n "$RABBITMQ_C" ]; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🖥️  Setting up: Worker Server C"
+        echo "🖥️  Verifying: Worker Server C (test mode - no start)"
         echo "   Host: $RABBITMQ_C"
         echo "   Compose: docker-compose.workers.yml"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -593,93 +503,17 @@ run_tests() {
         # Check SSH connection
         print_info "Testing SSH connection to $RABBITMQ_C..."
         if ! ssh "$RABBITMQ_C" "echo 'SSH OK'" 2>/dev/null; then
-            print_warning "Cannot connect to Worker C ($RABBITMQ_C) - skipping"
+            print_error "Cannot connect to Worker C ($RABBITMQ_C). Please ensure production/local setup has been run."
+            exit 1
+        fi
+
+        # Verify unified_worker containers are running
+        print_info "Checking unified_worker service on Worker C (must already be running)..."
+        if ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml ps unified_worker | grep -q 'Up'"; then
+            print_status "Worker C unified_worker is running"
         else
-            print_info "Setting up Worker C..."
-            
-            # Git pull/update (with unified_worker verification like production)
-            if ssh "$RABBITMQ_C" "[ -d ~/asciisky/.git ]"; then
-                print_info "Repository exists, pulling latest changes..."
-                ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || {
-                    print_error "Git pull failed on $RABBITMQ_C"
-                    exit 1
-                }
-                
-                # Verify we have the latest unified worker file
-                print_info "Verifying docker-compose.workers.yml has unified_worker service..."
-                if ssh "$RABBITMQ_C" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                    print_status "unified_worker service found in compose file"
-                else
-                    print_warning "unified_worker service not found. Forcing fresh clone..."
-                    ssh "$RABBITMQ_C" "rm -rf ~/asciisky" || {
-                        print_error "Failed to remove old repository"
-                        exit 1
-                    }
-                    ssh "$RABBITMQ_C" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
-                        print_error "Git clone failed on $RABBITMQ_C"
-                        exit 1
-                    }
-                    
-                    # Verify again after fresh clone
-                    if ssh "$RABBITMQ_C" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                        print_status "unified_worker service found in fresh clone"
-                    else
-                        print_error "unified_worker service still not found after fresh clone on $RABBITMQ_C"
-                        exit 1
-                    fi
-                fi
-            else
-                print_info "Cloning repository from GitHub..."
-                ssh "$RABBITMQ_C" "cd ~ && git clone https://github.com/jeamy/asciisky.git" || {
-                    print_error "Git clone failed on $RABBITMQ_C"
-                    exit 1
-                }
-                
-                # Verify the cloned repository has the unified worker
-                print_info "Verifying cloned repository has unified_worker service..."
-                if ssh "$RABBITMQ_C" "cd ~/asciisky && grep -q 'unified_worker:' docker-compose.workers.yml"; then
-                    print_status "unified_worker service found in cloned repository"
-                else
-                    print_error "unified_worker service not found in cloned repository on $RABBITMQ_C"
-                    exit 1
-                fi
-            fi
-            
-            # Copy .env (with worker-specific fallback like production setup)
-            if [ -f ".env.c" ]; then
-                print_info "Copying worker-specific .env.c → .env..."
-                scp ".env.c" "$RABBITMQ_C:~/asciisky/.env" || {
-                    print_error "Failed to copy .env.c to $RABBITMQ_C"
-                    exit 1
-                }
-                print_status "Using .env.c for Worker C"
-            else
-                if [ -f ".env" ]; then
-                    print_warning ".env.c not found, using default .env"
-                    scp .env "$RABBITMQ_C:~/asciisky/.env" || {
-                        print_error "Failed to copy .env to $RABBITMQ_C"
-                        exit 1
-                    }
-                else
-                    print_error "Neither .env.c nor .env found!"
-                    exit 1
-                fi
-            fi
-            
-            # Build and start
-            ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || {
-                print_error "Build failed on $RABBITMQ_C"
-                exit 1
-            }
-            
-            ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d \
-                --scale unified_worker=\${UNIFIED_WORKERS:-4} \
-                --scale worker_monitor=\${WORKER_MONITOR:-1}" || {
-                print_error "Startup failed on $RABBITMQ_C"
-                exit 1
-            }
-            
-            print_status "Worker C started"
+            print_error "Worker C unified_worker is not running. Start it via production/local setup before running tests."
+            exit 1
         fi
     fi
     
