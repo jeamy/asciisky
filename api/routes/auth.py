@@ -146,13 +146,19 @@ async def register(payload: RegisterPayload, request: Request):
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="User with same email or username already exists")
 
+        # First user becomes admin automatically, others are normal users
+        cursor.execute("SELECT COUNT(*) AS count FROM users")
+        count_row = cursor.fetchone()
+        existing_count = count_row["count"] if count_row is not None else 0
+        is_admin_flag = existing_count == 0
+
         cursor.execute(
             """
             INSERT INTO users (email, username, password_hash, is_active, is_admin, created_at, updated_at)
-            VALUES (%s, %s, %s, TRUE, FALSE, %s, %s)
+            VALUES (%s, %s, %s, TRUE, %s, %s, %s)
             RETURNING id, email, username, is_active, is_admin
             """,
-            (email, username, password_hash, datetime.utcnow(), datetime.utcnow()),
+            (email, username, password_hash, is_admin_flag, datetime.utcnow(), datetime.utcnow()),
         )
         row = cursor.fetchone()
 

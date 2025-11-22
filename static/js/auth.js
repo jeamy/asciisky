@@ -31,6 +31,10 @@ function updateAuthButton() {
     }
 }
 
+function isCurrentUserAdmin() {
+    return !!(currentUser && currentUser.is_admin);
+}
+
 async function refreshAuthState() {
     try {
         const resp = await fetch(`${API_ENDPOINTS.AUTH_ME}?nocache=1`, {
@@ -129,17 +133,18 @@ async function performLogin() {
 }
 
 async function performRegister() {
-    const emailInput = document.getElementById('auth-register-email');
     const userInput = document.getElementById('auth-register-username');
     const pwInput = document.getElementById('auth-register-password');
-    if (!emailInput || !userInput || !pwInput) return;
-    const email = emailInput.value.trim();
+    if (!userInput || !pwInput) return;
     const username = userInput.value.trim();
     const password = pwInput.value;
-    if (!email || !username || !password) {
-        showError('Bitte E-Mail, Benutzername und Passwort eingeben.');
+    if (!username || !password) {
+        showError('Bitte Benutzername und Passwort eingeben.');
         return;
     }
+    // Generiere eine gültige, eindeutige Dummy-E-Mail-Adresse, da das Backend ein E-Mail-Feld erwartet
+    const randomPart = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const email = `user+${randomPart}@example.com`;
     showError('');
     try {
         const resp = await fetch(API_ENDPOINTS.AUTH_REGISTER, {
@@ -158,8 +163,15 @@ async function performRegister() {
             updateAuthButton();
             closeAuthDialog();
             try {
-                if (settingsManager && typeof settingsManager.loadUserSettingsFromServer === 'function') {
-                    await settingsManager.loadUserSettingsFromServer();
+                if (settingsManager) {
+                    try {
+                        if (typeof data.user.id === 'number') {
+                            settingsManager.authenticatedUserId = data.user.id;
+                        }
+                    } catch (_) { /* noop */ }
+                    if (typeof settingsManager.saveUserSettingsToServer === 'function') {
+                        await settingsManager.saveUserSettingsToServer();
+                    }
                 }
             } catch (e) {
                 console.error('Error refreshing settings after registration:', e);
@@ -188,9 +200,10 @@ function openAuthDialog() {
             <div class="location-dialog auth-dialog">
                 <button class="dialog-close" type="button">×</button>
                 <h3 class="auth-dialog-title">Account</h3>
-                <p>Angemeldet als <strong>${currentUser.username}</strong> (${currentUser.email})</p>
+                <p>Angemeldet als <strong>${currentUser.username}</strong></p>
                 <div id="auth-error" class="auth-error"></div>
                 <button id="auth-logout-btn" type="button" class="sim-time-btn auth-logout-btn">Logout</button>
+                ${isCurrentUserAdmin() ? '<a id="admin-open-btn" href="/admin" class="sim-time-btn auth-primary-btn">Benutzerverwaltung</a>' : ''}
             </div>
         `;
     } else {
@@ -205,7 +218,7 @@ function openAuthDialog() {
                 <div id="auth-error" class="auth-error"></div>
                 <div id="auth-login-panel" class="auth-panel active">
                     <label class="auth-field-label">
-                        Benutzername oder E-Mail<br>
+                        Benutzername<br>
                         <input id="auth-login-identifier" type="text" class="auth-field-input">
                     </label>
                     <label class="auth-field-label">
@@ -215,10 +228,6 @@ function openAuthDialog() {
                     <button id="auth-login-submit" type="button" class="sim-time-btn auth-primary-btn">Login</button>
                 </div>
                 <div id="auth-register-panel" class="auth-panel hidden">
-                    <label class="auth-field-label">
-                        E-Mail<br>
-                        <input id="auth-register-email" type="email" class="auth-field-input">
-                    </label>
                     <label class="auth-field-label">
                         Benutzername<br>
                         <input id="auth-register-username" type="text" class="auth-field-input">
