@@ -77,7 +77,7 @@
 }
 
 .time-apply-btn {
-    border-color: rgba(0, 255, 0, 0.5);
+    border-color: rgba(var(--primary-rgb, 0, 255, 0), 0.5);
 }
 
 .dialog-close {
@@ -99,7 +99,7 @@
 }
 
 .dialog-close:hover {
-    background-color: rgba(0, 255, 0, 0.1);
+    background-color: rgba(var(--primary-rgb, 0, 255, 0), 0.1);
 }
 
 /* Mobile optimizations */

@@ -19,6 +19,12 @@
 <body>
 <header>
     <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
+    <div class="theme-controls" aria-label="Color themes">
+        <button id="theme-red" class="theme-btn" title="Red theme">R</button>
+        <button id="theme-green" class="theme-btn active" title="Green theme">G</button>
+        <button id="theme-blue" class="theme-btn" title="Blue theme">B</button>
+        <button id="theme-amber" class="theme-btn" title="Amber theme">A</button>
+    </div>
     <div class="header-controls">
         <button id="help-btn" class="control-btn" title="Hilfe">?</button>
         <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
@@ -131,6 +137,7 @@
         setTimeout(() => {
             setupObjectList();
             setupLanguageButtons();
+            setupThemeButtons();
             setupHelpButton();
             setupLocationButton();
             setupSimTimeControls();
@@ -207,6 +214,50 @@
             
             // Initialen Zustand setzen
             updateLanguageButtons();
+        }
+
+        function setupThemeButtons() {
+            const body = document.body;
+            const btnRed = document.getElementById('theme-red');
+            const btnGreen = document.getElementById('theme-green');
+            const btnBlue = document.getElementById('theme-blue');
+            const btnAmber = document.getElementById('theme-amber');
+
+            if (!btnRed || !btnGreen || !btnBlue || !btnAmber) return;
+
+            const THEME_KEY = 'asciisky_theme';
+
+            const applyTheme = (theme) => {
+                body.classList.remove('theme-red', 'theme-blue', 'theme-amber');
+                // Green is default: no extra class; others use body.theme-*
+                if (theme === 'red') body.classList.add('theme-red');
+                else if (theme === 'blue') body.classList.add('theme-blue');
+                else if (theme === 'amber') body.classList.add('theme-amber');
+
+                btnRed.classList.toggle('active', theme === 'red');
+                btnGreen.classList.toggle('active', theme === 'green');
+                btnBlue.classList.toggle('active', theme === 'blue');
+                btnAmber.classList.toggle('active', theme === 'amber');
+
+                try {
+                    localStorage.setItem(THEME_KEY, theme);
+                } catch (_) { /* noop */ }
+            };
+
+            let initial = 'green';
+            try {
+                const saved = localStorage.getItem(THEME_KEY);
+                if (saved === 'red' || saved === 'blue' || saved === 'amber' || saved === 'green') {
+                    initial = saved;
+                }
+            } catch (_) { /* noop */ }
+
+            applyTheme(initial);
+
+            btnRed.addEventListener('click', () => applyTheme('red'));
+            btnGreen.addEventListener('click', () => applyTheme('green'));
+            btnBlue.addEventListener('click', () => applyTheme('blue'));
+            btnAmber.addEventListener('click', () => applyTheme('amber'));
         }
         
         // Aktualisiert die Sprachbuttons basierend auf der aktuellen Sprache
