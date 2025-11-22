@@ -4,6 +4,7 @@ import { API_ENDPOINTS, ASTRO_CONSTANTS } from './constants.js';
 
 export class SettingsManager {
     constructor() {
+        this.authenticatedUserId = null;
         this.settings = this.loadSettings();
         this.serverSynced = false;
     }
@@ -46,6 +47,13 @@ export class SettingsManager {
         } catch (error) {
             console.error('Error saving settings:', error);
         }
+
+        if (this.authenticatedUserId) {
+            // Fire-and-forget Sync in die Datenbank; Fehler sollen die UI nicht blockieren
+            this.saveUserSettingsToServer().catch(err => {
+                console.error('Error saving user settings to server:', err);
+            });
+        }
     }
 
     // Diese Methoden wurden entfernt, da die Magnitude-Filter nicht mehr benötigt werden
@@ -73,6 +81,50 @@ export class SettingsManager {
     // Horizontale Verschiebung abrufen
     getHorizontalShift() {
         return this.settings.display?.horizontalShift || 0;
+    }
+
+    // --- Theme & Sprache ---
+
+    getTheme() {
+        try {
+            const theme = this.settings?.theme;
+            if (theme === 'red' || theme === 'blue' || theme === 'amber' || theme === 'green') {
+                return theme;
+            }
+        } catch (_) { /* noop */ }
+        return 'green';
+    }
+
+    setTheme(theme) {
+        const allowed = ['green', 'blue', 'red', 'amber'];
+        if (!allowed.includes(theme)) {
+            return this.getTheme();
+        }
+        if (!this.settings) this.settings = {};
+        this.settings.theme = theme;
+        this.saveSettings();
+        return theme;
+    }
+
+    getLanguage() {
+        try {
+            const lang = this.settings?.language;
+            if (lang === 'de' || lang === 'en') {
+                return lang;
+            }
+        } catch (_) { /* noop */ }
+        return 'de';
+    }
+
+    setLanguage(lang) {
+        const allowed = ['de', 'en'];
+        if (!allowed.includes(lang)) {
+            return this.getLanguage();
+        }
+        if (!this.settings) this.settings = {};
+        this.settings.language = lang;
+        this.saveSettings();
+        return lang;
     }
     
     // --- Simulierte Zeit ---
@@ -118,6 +170,94 @@ export class SettingsManager {
             console.error('Error computing simulated time ISO:', e);
             return null;
         }
+    }
+
+    // Versucht, user-spezifische Einstellungen aus der Datenbank zu laden
+    async loadUserSettingsFromServer() {
+        // 1) Prüfen, ob ein authentifizierter Benutzer per Session vorhanden ist
+        try {
+            const meResp = await fetch(`${API_ENDPOINTS.AUTH_ME}?nocache=1`, {
+                credentials: 'same-origin'
+            });
+            if (!meResp.ok) {
+                this.authenticatedUserId = null;
+                return;
+            }
+            const meData = await meResp.json();
+            if (!meData || !meData.authenticated || !meData.user || typeof meData.user.id !== 'number') {
+                this.authenticatedUserId = null;
+                return;
+            }
+            this.authenticatedUserId = meData.user.id;
+        } catch (err) {
+            console.error('Error checking auth state for user settings:', err);
+            this.authenticatedUserId = null;
+            return;
+        }
+
+        if (!this.authenticatedUserId) return;
+
+        // 2) Settings für den eingeloggten Benutzer laden (Session-basiert, ohne user_id-Query)
+        try {
+            const url = `${API_ENDPOINTS.USER_SETTINGS_GET}?nocache=1`;
+            const resp = await fetch(url, { credentials: 'same-origin' });
+            if (!resp.ok) {
+                if (resp.status === 401 || resp.status === 403) {
+                    this.authenticatedUserId = null;
+                }
+                return;
+            }
+            const serverSettings = await resp.json();
+            if (!serverSettings || typeof serverSettings !== 'object') return;
+
+            this.settings = this.mergeSettings(this.settings || {}, serverSettings);
+            // Persistiere gemergte Settings lokal für Offline-Verwendung
+            try {
+                localStorage.setItem('asciisky_settings', JSON.stringify(this.settings));
+            } catch (_) { /* noop */ }
+        } catch (err) {
+            console.error('Error loading user settings from server:', err);
+        }
+    }
+
+    // Speichert aktuelle Einstellungen in der Datenbank (falls ein authentifizierter Benutzer bekannt ist)
+    async saveUserSettingsToServer() {
+        if (!this.authenticatedUserId) return;
+        try {
+            const url = `${API_ENDPOINTS.USER_SETTINGS_SET}?nocache=1`;
+            const resp = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(this.settings || {})
+            });
+            if (!resp.ok) {
+                if (resp.status === 401 || resp.status === 403) {
+                    this.authenticatedUserId = null;
+                }
+                console.error('Error saving user settings to server: HTTP', resp.status);
+            }
+        } catch (err) {
+            console.error('Error saving user settings to server:', err);
+        }
+    }
+
+    // Hilfsfunktion zum Mergen von Settings-Objekten (flach + einfache verschachtelte Objekte)
+    mergeSettings(base, override) {
+        const result = { ...(base || {}) };
+        if (!override || typeof override !== 'object') return result;
+
+        for (const [key, value] of Object.entries(override)) {
+            if (
+                value && typeof value === 'object' && !Array.isArray(value) &&
+                result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])
+            ) {
+                result[key] = { ...result[key], ...value };
+            } else {
+                result[key] = value;
+            }
+        }
+        return result;
     }
 
     // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
@@ -210,7 +350,6 @@ export class SettingsManager {
             const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true&nocache=1`);
             
             if (response.ok) {
-                console.log('Location successfully synced with server');
                 this.serverSynced = true;
                 return true;
             } else {
@@ -230,11 +369,24 @@ export class SettingsManager {
         
         // Entferne veraltete Werte aus den Einstellungen
         this.cleanupSettings();
+
+        // Falls eine userId bekannt ist: Settings aus der Datenbank laden und mit lokalen mergen
+        await this.loadUserSettingsFromServer();
         
-        // Session-Standort bevorzugen (falls vorhanden)
-        await this.fetchSessionLocation();
+        if (!this.authenticatedUserId) {
+            // Session-Standort bevorzugen (falls vorhanden) nur für nicht eingeloggte Nutzer
+            await this.fetchSessionLocation();
+        } else {
+            // Für eingeloggte Nutzer: DB-Standort als Quelle verwenden und Session damit befüllen
+            try {
+                const loc = this.getLocation();
+                await this.saveSessionLocation(loc);
+            } catch (e) {
+                console.error('Error initializing session location for authenticated user:', e);
+            }
+        }
         
-        // Persistente Nutzereinstellungen mit aktuellem (ggf. Session-)Standort abgleichen
+        // Persistente Nutzereinstellungen mit aktuellem Standort abgleichen
         await this.syncSettingsToServer();
         
         return this.settings;

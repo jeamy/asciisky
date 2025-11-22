@@ -199,6 +199,77 @@
     background-color: rgba(0, 255, 0, 0.1);
 }
 
+.auth-dialog {
+    max-width: 400px;
+}
+
+.auth-dialog .auth-dialog-title {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.auth-dialog .auth-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.auth-dialog .auth-tab-btn {
+    flex: 1;
+}
+
+.auth-dialog .auth-field-label {
+    display: block;
+    margin-bottom: 6px;
+}
+
+.auth-dialog .auth-field-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.auth-dialog .auth-error {
+    color: #f88;
+    margin-bottom: 8px;
+    min-height: 1.2em;
+}
+
+.auth-dialog .auth-primary-btn,
+.auth-dialog .auth-logout-btn {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.auth-dialog .auth-panel {
+    margin-top: 4px;
+}
+
+.auth-dialog .auth-panel.hidden {
+    display: none;
+}
+
+.auth-dialog .auth-panel.active {
+    display: block;
+}
+
+.admin-dialog {
+    max-width: 600px;
+}
+
+.admin-users-list {
+    margin-top: 10px;
+}
+
+.admin-users-ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.admin-user-item {
+    margin: 4px 0;
+}
+
 /* Mobile optimizations */
 /* Remove this section as we're using the base styles for desktop */
 

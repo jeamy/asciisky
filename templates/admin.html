@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ASCII Sky - Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/dialogStyles.css">
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+<header>
+    <h1 id="admin-title">👤 Benutzerverwaltung</h1>
+</header>
+<main>
+    <p><a href="/">Zurück zur Hauptseite</a></p>
+    <div id="admin-error" class="auth-error"></div>
+    <table class="admin-users-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Benutzername</th>
+                <th>E-Mail</th>
+                <th>Rolle</th>
+                <th>Status</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody id="admin-users-body"></tbody>
+    </table>
+</main>
+<script type="module" src="/static/js/adminUsers.js"></script>
+</body>
+</html>

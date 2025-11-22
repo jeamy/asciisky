@@ -405,6 +405,47 @@ def get_database_stats() -> dict:
     finally:
         conn.close()
 
+# ===== User Settings Functions =====
+
+def get_user_settings(user_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieve JSONB user settings for a given user_id."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT settings FROM user_settings WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        settings_obj = row.get("settings")
+        if isinstance(settings_obj, dict):
+            return settings_obj
+        try:
+            return json.loads(settings_obj)
+        except Exception:
+            return None
+    finally:
+        conn.close()
+
+
+def save_user_settings(user_id: int, settings: Dict[str, Any]) -> None:
+    """Upsert JSONB user settings for a given user_id."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO user_settings (user_id, settings, last_updated)
+            VALUES (%s, %s::jsonb, %s)
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                settings = EXCLUDED.settings,
+                last_updated = EXCLUDED.last_updated
+            """,
+            (user_id, json.dumps(settings), datetime.now(timezone.utc)),
+        )
+
 # ===== Computation Lock Functions =====
 
 def is_computation_in_progress(computation_key: str) -> bool:

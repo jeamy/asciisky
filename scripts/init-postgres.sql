@@ -82,6 +82,26 @@ CREATE TABLE IF NOT EXISTS data_updates (
 CREATE INDEX IF NOT EXISTS idx_updates_type ON data_updates(update_type);
 CREATE INDEX IF NOT EXISTS idx_updates_updated ON data_updates(updated_at);
 
+-- ===== User and Settings Tables =====
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings JSONB NOT NULL,
+    last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_updated ON user_settings(last_updated);
+
 -- Cleanup old entries periodically
 CREATE OR REPLACE FUNCTION cleanup_old_positions()
 RETURNS void AS $$

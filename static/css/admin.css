@@ -1,0 +1,36 @@
+body {
+    max-width: 1000px;
+}
+
+.admin-users-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+    border: 1px solid var(--ui-border);
+    padding: 6px 8px;
+    text-align: left;
+}
+
+.admin-users-table th {
+    background: var(--ui-bg);
+}
+
+.admin-action-btn {
+    margin-right: 4px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    color: var(--primary-color);
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8rem;
+}
+
+.admin-action-btn:hover {
+    background: var(--ui-bg-hover);
+}
