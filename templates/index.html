@@ -28,6 +28,7 @@
     <div class="header-controls">
         <button id="help-btn" class="control-btn" title="Hilfe">?</button>
         <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
+        <button id="auth-btn" class="control-btn" title="Login / Registrieren">👤</button>
         <div class="language-selector">
             <button id="lang-de" class="lang-btn active">DE</button>
             <button id="lang-en" class="lang-btn">EN</button>
@@ -81,6 +82,7 @@
     import { LocationDialog } from './static/js/locationDialog.js';
     import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
+    import { initAuthUI } from './static/js/auth.js';
     import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     import { initVisibleObjectsList, updateVisibleObjectsList } from './static/js/visibleObjectsList.js';
     import { MagnitudeFilterDialog } from './static/js/magnitudeFilterDialog.js';
@@ -106,6 +108,19 @@
     document.addEventListener('DOMContentLoaded', async () => {
         // 1) Einstellungen initialisieren und Session-Standort bevorzugen
         await settingsManager.initialize();
+
+        // Gespeicherte Sprache anwenden (falls vorhanden)
+        try {
+            if (settingsManager && typeof settingsManager.getLanguage === 'function') {
+                const lang = settingsManager.getLanguage();
+                if (lang) {
+                    setLanguage(lang);
+                }
+            }
+        } catch (_) { /* noop */ }
+
+        // 1b) Auth-Status initialisieren (Login/Registrierung/Logout)
+        try { await initAuthUI(); } catch (_) { /* noop */ }
 
         // 2) Renderer initialisieren (nutzt jetzt den Session-Standort)
         renderer = initializeSkyTracker();
@@ -199,6 +214,7 @@
             const btnEN = document.getElementById('lang-en');
             
             btnDE.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setLanguage === 'function') { settingsManager.setLanguage('de'); } } catch (_) { /* noop */ }
                 setLanguage('de');
                 updateLanguageButtons();
                 updateUITexts();
@@ -206,6 +222,7 @@
             });
             
             btnEN.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setLanguage === 'function') { settingsManager.setLanguage('en'); } } catch (_) { /* noop */ }
                 setLanguage('en');
                 updateLanguageButtons();
                 updateUITexts();
@@ -225,8 +242,6 @@
 
             if (!btnRed || !btnGreen || !btnBlue || !btnAmber) return;
 
-            const THEME_KEY = 'asciisky_theme';
-
             const applyTheme = (theme) => {
                 body.classList.remove('theme-red', 'theme-blue', 'theme-amber');
                 // Green is default: no extra class; others use body.theme-*
@@ -238,26 +253,36 @@
                 btnGreen.classList.toggle('active', theme === 'green');
                 btnBlue.classList.toggle('active', theme === 'blue');
                 btnAmber.classList.toggle('active', theme === 'amber');
-
-                try {
-                    localStorage.setItem(THEME_KEY, theme);
-                } catch (_) { /* noop */ }
             };
 
             let initial = 'green';
             try {
-                const saved = localStorage.getItem(THEME_KEY);
-                if (saved === 'red' || saved === 'blue' || saved === 'amber' || saved === 'green') {
-                    initial = saved;
+                if (settingsManager && typeof settingsManager.getTheme === 'function') {
+                    const saved = settingsManager.getTheme();
+                    if (saved === 'red' || saved === 'blue' || saved === 'amber' || saved === 'green') {
+                        initial = saved;
+                    }
                 }
             } catch (_) { /* noop */ }
 
             applyTheme(initial);
 
-            btnRed.addEventListener('click', () => applyTheme('red'));
-            btnGreen.addEventListener('click', () => applyTheme('green'));
-            btnBlue.addEventListener('click', () => applyTheme('blue'));
-            btnAmber.addEventListener('click', () => applyTheme('amber'));
+            btnRed.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('red'); } } catch (_) { /* noop */ }
+                applyTheme('red');
+            });
+            btnGreen.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('green'); } } catch (_) { /* noop */ }
+                applyTheme('green');
+            });
+            btnBlue.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('blue'); } } catch (_) { /* noop */ }
+                applyTheme('blue');
+            });
+            btnAmber.addEventListener('click', () => {
+                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('amber'); } } catch (_) { /* noop */ }
+                applyTheme('amber');
+            });
         }
         
         // Aktualisiert die Sprachbuttons basierend auf der aktuellen Sprache

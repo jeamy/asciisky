@@ -15,7 +15,13 @@ export const API_ENDPOINTS = {
     SESSION_LOCATION_POST: '/api/session/location',
     CONFIG: '/api/config',
     FILTERS_GET: '/api/filters',
-    FILTERS_SET: '/api/filters'
+    FILTERS_SET: '/api/filters',
+    USER_SETTINGS_GET: '/api/user/settings',
+    USER_SETTINGS_SET: '/api/user/settings',
+    AUTH_REGISTER: '/api/auth/register',
+    AUTH_LOGIN: '/api/auth/login',
+    AUTH_LOGOUT: '/api/auth/logout',
+    AUTH_ME: '/api/auth/me'
 };
 
 // Astronomical Constants
