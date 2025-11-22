@@ -22,15 +22,15 @@
 }
 
 .magnitude-filter-content h3 {
-    color: #00ff00;
+    color: var(--primary-color, #00ff00);
     margin: 0 0 15px 0;
     font-size: 1.2rem;
     text-align: center;
 }
 
 .filter-info {
-    background-color: rgba(0, 255, 0, 0.1);
-    border: 1px solid rgba(0, 255, 0, 0.3);
+    background-color: rgba(var(--primary-rgb, 0, 255, 0), 0.1);
+    border: 1px solid rgba(var(--primary-rgb, 0, 255, 0), 0.3);
     border-radius: 4px;
     padding: 10px;
     margin-bottom: 20px;
@@ -45,7 +45,7 @@
 
 .filter-group label {
     display: block;
-    color: #00ff00;
+    color: var(--primary-color, #00ff00);
     margin-bottom: 8px;
     font-size: 0.95rem;
 }
@@ -65,10 +65,10 @@
     -webkit-appearance: none;
     width: 18px;
     height: 18px;
-    background: #00ff00;
+    background: var(--primary-color, #00ff00);
     border-radius: 50%;
     cursor: pointer;
-    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--primary-rgb, 0, 255, 0), 0.5);
 }
 
 .filter-group input[type="range"]::-moz-range-thumb {
@@ -78,7 +78,7 @@
     border-radius: 50%;
     cursor: pointer;
     border: none;
-    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--primary-rgb, 0, 255, 0), 0.5);
 }
 
 .filter-buttons {
@@ -90,9 +90,9 @@
 
 .filter-btn {
     padding: 8px 20px;
-    border: 1px solid #00ff00;
+    border: 1px solid var(--primary-color, #00ff00);
     background-color: #1a1a1a;
-    color: #00ff00;
+    color: var(--primary-color, #00ff00);
     border-radius: 4px;
     cursor: pointer;
     font-size: 0.95rem;
@@ -100,7 +100,7 @@
 }
 
 .filter-btn:hover {
-    background-color: #00ff00;
+    background-color: var(--primary-color, #00ff00);
     color: #000;
 }
 

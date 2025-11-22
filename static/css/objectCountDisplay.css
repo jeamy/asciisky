@@ -3,7 +3,7 @@
     position: absolute;
     top: 6px;
     left: 20px;
-    color: #00ff00;
+    color: var(--primary-color);
     font-family: 'Courier New', monospace;
     font-size: 12px;
     padding: 0px 10px;
@@ -14,7 +14,7 @@
 }
 
 .count-item {
-    color: #00ff00;
+    color: var(--primary-color);
     line-height: 0.5rem;
 }
 

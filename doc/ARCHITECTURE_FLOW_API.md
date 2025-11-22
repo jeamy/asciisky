@@ -2,11 +2,12 @@
 
 ## Overview
  
-ASCII Sky currently exposes three groups of API endpoints with different computation strategies:
+ASCII Sky currently exposes four groups of API endpoints with different computation strategies:
 
 1. **Asteroids** (`/api/bright_asteroids`, alias `/api/asteroids`) — cache‑first via PostgreSQL; RabbitMQ workers and precompute fill the cache.
 2. **Comets** (`/api/comets`) — same architecture as asteroids.
 3. **Celestial objects** (`/api/celestial`, `/api/celestial/{body_id}`) — direct real‑time computation (no workers, no cache).
+4. **Sunpath overlay** (`/api/celestial/sunpath`) — yearly sunrise/sunset and twilight curves per location and year, cached in PostgreSQL; computation runs in a background thread without RabbitMQ.
 
 ---
 
@@ -249,6 +250,14 @@ Planets (und andere helle Himmelskörper) werden heute über die
 |---------------------|---------------------------|----------------------------------------|
 | Celestial endpoints | `api/routes/celestial.py` | `get_celestial_objects`, `get_celestial_object` |
 | Core computation    | `api/computation.py`      | `compute_celestial_snapshot`, `CELESTIAL_BODIES` |
+
+### Sunpath Overlay
+
+| Component         | File                      | Function(s)                                      |
+|-------------------|---------------------------|--------------------------------------------------|
+| Sunpath endpoint  | `api/routes/celestial.py` | `get_sunpath_year`                               |
+| Core computation  | `api/computation.py`      | `compute_sunpath_year`, `SUNPATH_VERSION`        |
+| Cache backend     | `db_utils.py`             | `store_sunpath_year`, `get_sunpath_year`         |
 
 ---
 

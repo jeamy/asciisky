@@ -1,5 +1,6 @@
 :root {
     --primary-color: #00ff00;
+    --primary-rgb: 0, 255, 0;
     --background-color: #0a0a0a;
     --panel-bg: #111;
     --border-color: #333;
@@ -26,6 +27,41 @@
     --dialog-border-width: 2px;
     --dialog-border-color: #00ff00;
     --dialog-box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+}
+
+/* Theme variants: default is green via :root; others override on body */
+
+body.theme-blue {
+    --primary-color: #4fd5ff;
+    --primary-rgb: 79, 213, 255;
+    --ui-bg: oklch(48% 0.12 245);
+    --ui-bg-hover: oklch(64% 0.16 245);
+    --ui-bg-active: oklch(55% 0.15 245);
+    --ui-border: oklch(70% 0.16 245);
+    --dialog-border-color: #4fd5ff;
+    --dialog-box-shadow: 0 0 20px rgba(79, 213, 255, 0.35);
+}
+
+body.theme-red {
+    --primary-color: #ff4b4b;
+    --primary-rgb: 255, 75, 75;
+    --ui-bg: oklch(48% 0.16 25);
+    --ui-bg-hover: oklch(64% 0.18 25);
+    --ui-bg-active: oklch(55% 0.17 25);
+    --ui-border: oklch(70% 0.18 25);
+    --dialog-border-color: #ff4b4b;
+    --dialog-box-shadow: 0 0 20px rgba(255, 75, 75, 0.35);
+}
+
+body.theme-amber {
+    --primary-color: #ffc857;
+    --primary-rgb: 255, 200, 87;
+    --ui-bg: oklch(50% 0.10 80);
+    --ui-bg-hover: oklch(66% 0.13 80);
+    --ui-bg-active: oklch(74% 0.13 80);
+    --ui-border: oklch(72% 0.13 80);
+    --dialog-border-color: #ffc857;
+    --dialog-box-shadow: 0 0 20px rgba(255, 200, 87, 0.35);
 }
 
 /* Zoom-Button in der Himmelsansicht */
@@ -185,6 +221,38 @@ h1 {
     gap: 10px;
 }
 
+.theme-controls {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.theme-btn {
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    color: var(--primary-color);
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+    font-size: 0.9rem;
+    min-height: 30px;
+    min-width: 30px;
+}
+
+.theme-btn:hover {
+    background: var(--ui-bg-hover);
+}
+
+.theme-btn.active {
+    background: var(--ui-bg-active);
+    border-color: var(--primary-color);
+}
+
 .language-selector {
     display: flex;
     gap: 5px;
@@ -284,6 +352,11 @@ h1 {
     .header-controls {
         top: 10px;
         right: 10px;
+    }
+
+    .theme-controls {
+        top: 10px;
+        left: 10px;
     }
 
     .controls {

@@ -82,7 +82,7 @@
 }
 
 .sunpath-hover-line {
-  stroke: rgba(0, 255, 0, 0.8);
+  stroke: rgba(var(--primary-rgb, 0, 255, 0), 0.8);
   stroke-width: 1;
   pointer-events: none;
 }

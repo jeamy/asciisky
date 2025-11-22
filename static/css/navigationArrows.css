@@ -12,9 +12,9 @@
 
 .nav-arrow {
     font-size: 1.2rem;
-    background-color: rgba(0, 20, 0, 0.5); /* Leicht sichtbarer Hintergrund */
+    background-color: rgba(0, 0, 0, 0.5); /* Neutrale dunkle Basis, Farbe kommt vom Theme */
     border: none;
-    color: rgba(0, 255, 0, 0.85);
+    color: rgba(var(--primary-rgb, 0, 255, 0), 0.85);
     border-radius: 50%;
     width: 44px; /* Standard minimum touch target size */
     height: 44px;
@@ -38,9 +38,9 @@
     right: 10px; /* Am rechten Rand, leicht eingerückt */
 }
 
-.nav-arrow:hover { color: rgba(0, 255, 0, 1); }
+.nav-arrow:hover { color: rgba(var(--primary-rgb, 0, 255, 0), 1); }
 
-.nav-arrow:active { color: rgba(0, 255, 0, 0.9); }
+.nav-arrow:active { color: rgba(var(--primary-rgb, 0, 255, 0), 0.9); }
 
 @media (max-width: 768px) {
     .nav-arrow {
