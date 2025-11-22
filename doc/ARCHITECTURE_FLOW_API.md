@@ -90,6 +90,11 @@ In addition to on-demand workers there is a precompute pipeline:
 
 - `precompute_coordinator.create_precompute_tasks`:
   - Iterates over configured locations and a time window (e.g. 30 days).
+    The target locations are collected by `get_target_locations()` from several sources:
+    - The last global location from `user_settings.json` via `settings.get_location()`.
+    - Static locations from `precompute_locations.json` (if the file is mounted into the coordinator container).
+    - All distinct user locations stored in the database `user_settings` JSONB table via `db_utils.get_all_user_locations()`.
+    - Optional extra locations from the environment variable `ASCII_SKY_PRECOMPUTE_LOCATIONS` (JSON array of locations).
   - For each location + hour:
     - Checks `cached_positions` via `get_asteroid_positions` / `get_comet_positions`.
     - Skips buckets that are already cached or already queued.

@@ -446,6 +446,44 @@ def save_user_settings(user_id: int, settings: Dict[str, Any]) -> None:
             (user_id, json.dumps(settings), datetime.now(timezone.utc)),
         )
 
+
+def get_all_user_locations() -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                (settings->'location'->>'latitude')::double precision AS latitude,
+                (settings->'location'->>'longitude')::double precision AS longitude,
+                (settings->'location'->>'elevation')::double precision AS elevation,
+                settings->'location'->>'name' AS name
+            FROM user_settings
+            WHERE settings ? 'location'
+            """
+        )
+
+        locations: List[Dict[str, Any]] = []
+        for row in cursor.fetchall():
+            lat = row.get("latitude")
+            lon = row.get("longitude")
+            if lat is None or lon is None:
+                continue
+            elevation = row.get("elevation") if row.get("elevation") is not None else 0.0
+            name = row.get("name") or "User Location"
+            locations.append(
+                {
+                    "latitude": float(lat),
+                    "longitude": float(lon),
+                    "elevation": float(elevation),
+                    "name": name,
+                }
+            )
+
+        return locations
+    finally:
+        conn.close()
+
 # ===== Computation Lock Functions =====
 
 def is_computation_in_progress(computation_key: str) -> bool:

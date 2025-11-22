@@ -30,7 +30,7 @@ import pika
 # Settings
 import settings
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import get_asteroid_positions, get_comet_positions, get_sunpath_year
+from db_utils import get_asteroid_positions, get_comet_positions, get_sunpath_year, get_all_user_locations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,6 +94,15 @@ def get_target_locations() -> List[Dict[str, Any]]:
                 logger.info(f"Added {len(file_locs)} locations from precompute_locations.json")
     except Exception as e:
         logger.warning(f"Could not load precompute_locations.json: {e}")
+    
+    # 2b. User-Locations aus der Datenbank (user_settings)
+    try:
+        db_locations = get_all_user_locations()
+        if db_locations:
+            locations.extend(db_locations)
+            logger.info(f"Added {len(db_locations)} locations from user_settings in database")
+    except Exception as e:
+        logger.warning(f"Could not load user locations from database: {e}")
     
     # 3. Environment Variable
     try:

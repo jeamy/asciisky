@@ -85,6 +85,10 @@ Ziel ist, dass die App **ohne Login voll nutzbar bleibt**, aber mit Login person
 
 Die Verwendung eines einzelnen JSONB-Feldes `settings` macht das Mapping zu/von `SettingsManager.settings` trivial und erlaubt einfache Erweiterungen ohne weitere DB-Migrationen.
 
+Zusätzlich dient die Tabelle `user_settings` als Datenquelle für den Precompute-Coordinator
+(`precompute_coordinator.py`): alle gespeicherten Benutzer-Standorte werden dort ausgelesen
+und für Hintergrund-Vorberechnungen (Caching der Positionen und Sonnenbahn) verwendet.
+
 ---
 
 ## 5. Phase 3 – Authentifizierung & Registrierung (Backend-API)

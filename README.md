@@ -364,6 +364,10 @@ Notes:
 - `WORKER_MONITOR` - Worker monitoring dashboard instances (default: 1)
 - `PRECOMPUTE_WORKERS` - Legacy: Mapped to UNIFIED_WORKERS if not set (default: 4)
 
+### Precompute Configuration
+- `ASCII_SKY_PRECOMPUTE_HOURS` – Number of hours into the future that the precompute coordinator generates tasks for (default: 720 = 30 days)
+- `ASCII_SKY_PRECOMPUTE_LOCATIONS` – Optional JSON array of locations (`latitude`, `longitude`, `elevation`, `name`) used by the precompute coordinator in addition to the last global location, static `precompute_locations.json`, and all user locations from the database.
+
 ### Hybrid Deduplication Configuration
 - `ENABLE_HYBRID_DEDUPLICATION` - Enable Hybrid Deduplication (default: true)
 - `ASCII_SKY_DEDUPLICATION_TTL` - RabbitMQ message TTL in seconds (default: 300)
@@ -492,6 +496,14 @@ This project was built with assistance from Windsurf (agentic AI coding assistan
 
 You can try ASCII Sky online at: https://asciisky.eibrain.org/
 When switching to a new location for the first time, calculations may take longer because asteroid and comet sky data for that location must be computed and cached first.
+
+Registration & Accounts
+The login and registration feature is a convenience option for this demo. The app can be used fully without logging in.
+
+When you register, the following data is stored: username, password hash (no plain-text password) and optional user settings such as location, display settings (e.g. horizontal shift), simulated time, brightness filters, color theme and language. Without logging in, these settings are only stored locally in your browser (localStorage), not on the server.
+
+Important: There is no password reset and no support for account recovery. If you forget your password, the account cannot be restored – simply create a new account instead.
+
 
 ## License
 
