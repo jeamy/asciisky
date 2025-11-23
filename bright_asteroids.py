@@ -446,6 +446,18 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         return []
 
 
+def _timescale_from_datetimes(ts, times_dt):
+    if hasattr(ts, "from_datetimes"):
+        return ts.from_datetimes(times_dt)
+    years = [dt.year for dt in times_dt]
+    months = [dt.month for dt in times_dt]
+    days = [dt.day for dt in times_dt]
+    hours = [dt.hour for dt in times_dt]
+    minutes = [dt.minute for dt in times_dt]
+    seconds = [dt.second + dt.microsecond / 1e6 for dt in times_dt]
+    return ts.utc(years, months, days, hours, minutes, seconds)
+
+
 def _compute_asteroids_vectorized(
     df_filtered,
     ts,
@@ -566,7 +578,7 @@ def _compute_asteroids_vectorized(
     
     # Create time array
     times_dt = [start_dt + timedelta(minutes=i*minutes_step) for i in range(steps + 1)]
-    t_grid = ts.from_datetime(times_dt)
+    t_grid = _timescale_from_datetimes(ts, times_dt)
     
     # Compute positions for all top asteroids at all times
     # We need to compute observer.at(t_grid).observe(target) for each target

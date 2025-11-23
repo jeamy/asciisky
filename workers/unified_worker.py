@@ -149,9 +149,19 @@ class SharedSkyfieldResources:
             
             # Pre-load asteroid/comet dataframes mit Error Handling
             try:
-                self.asteroid_df = bright_asteroids.load_asteroid_dataframe()
-                self.comet_df = comets.load_comet_dataframe()
-                logger.info(f"Pre-loaded {len(self.asteroid_df)} asteroids, {len(self.comet_df)} comets")
+                import pickle
+                from db_utils import get_asteroid_dataframe, get_comet_dataframe
+                
+                asteroid_pickle = get_asteroid_dataframe()
+                comet_pickle = get_comet_dataframe()
+                
+                self.asteroid_df = pickle.loads(asteroid_pickle) if asteroid_pickle else None
+                self.comet_df = pickle.loads(comet_pickle) if comet_pickle else None
+                
+                if self.asteroid_df is not None and self.comet_df is not None:
+                    logger.info(f"Pre-loaded {len(self.asteroid_df)} asteroids, {len(self.comet_df)} comets")
+                else:
+                    logger.warning("Could not pre-load dataframes from database")
             except Exception as e:
                 logger.warning(f"Could not pre-load dataframes: {e}")
                 self.asteroid_df = None
@@ -429,7 +439,7 @@ class UnifiedWorker:
                     count = 0
                     
         except Exception as e:
-            logger.error(f"Failed to acquire Advisory Lock for {computation_key}: {e}")
+            logger.error(f"Failed to acquire Advisory Lock for {computation_key}: {e}", exc_info=True)
             return False
         
         logger.info(f"✅ Precompute {kind} completed: {count} objects")

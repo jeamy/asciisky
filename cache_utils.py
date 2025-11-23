@@ -43,6 +43,13 @@ def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_B
     """
     if dt is None:
         dt = datetime.now(timezone.utc)
+
+    if isinstance(dt, (list, tuple)):
+        dt = dt[0] if dt else datetime.now(timezone.utc)
+
+    if not isinstance(dt, datetime):
+        raise TypeError(f"time_bucket_utc expected datetime or sequence of datetimes, got {type(dt).__name__}")
+
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     bucket_hour = (dt.hour // bucket_hours) * bucket_hours

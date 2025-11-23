@@ -515,6 +515,18 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
     )
 
 
+def _timescale_from_datetimes(ts, times_dt):
+    if hasattr(ts, "from_datetimes"):
+        return ts.from_datetimes(times_dt)
+    years = [dt.year for dt in times_dt]
+    months = [dt.month for dt in times_dt]
+    days = [dt.day for dt in times_dt]
+    hours = [dt.hour for dt in times_dt]
+    minutes = [dt.minute for dt in times_dt]
+    seconds = [dt.second + dt.microsecond / 1e6 for dt in times_dt]
+    return ts.utc(years, months, days, hours, minutes, seconds)
+
+
 def _compute_comets_vectorized(
     df_pref: pd.DataFrame,
     ts,
@@ -765,7 +777,7 @@ def _compute_comets_vectorized(
         
         # Create time array
         times_dt = [start_dt + timedelta(minutes=i*minutes_step) for i in range(steps + 1)]
-        t_grid = ts.from_datetime(times_dt)
+        t_grid = _timescale_from_datetimes(ts, times_dt)
         
         # Pre-calculate horizon for rise/set (standard refraction -0.5667 deg)
         horizon = -0.5667
@@ -780,47 +792,48 @@ def _compute_comets_vectorized(
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
                 
-                # Compute altitude over the grid
-                # Note: observer.at(t_grid) is efficient
-                grid_obs = observer.at(t_grid).observe(target)
-                grid_alt, grid_az, _ = grid_obs.apparent().altaz()
-                alt_deg = grid_alt.degrees
-                
-                # Find rise/set (zero crossings of alt - horizon)
-                alt_shifted = alt_deg - horizon
-                sign_change = (alt_shifted[:-1] * alt_shifted[1:]) < 0
-                indices = np.where(sign_change)[0]
-                
-                rise_time = None
-                set_time = None
-                
-                # Process crossings to find first rise and set
-                for i in indices:
-                    # Linear interpolation
-                    y0 = alt_shifted[i]
-                    y1 = alt_shifted[i+1]
-                    fraction = -y0 / (y1 - y0)
-                    event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
-                    
-                    # Rise: y0 < 0 (below horizon) -> y1 > 0 (above)
-                    if y0 < 0 and rise_time is None:
-                        rise_time = event_dt
-                    # Set: y0 > 0 (above) -> y1 < 0 (below)
-                    elif y0 > 0 and set_time is None:
-                        set_time = event_dt
-                        
-                    if rise_time and set_time:
-                        break
-                
-                # Transit (Max altitude)
-                # Find index of max altitude
-                max_idx = np.argmax(alt_deg)
-                transit_time = times_dt[max_idx]
-            except Exception as e:
-                logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                # Event calculation with inner try-except
                 rise_time = None
                 set_time = None
                 transit_time = None
+                
+                try:
+                    # Compute altitude over the grid
+                    grid_obs = observer.at(t_grid).observe(target)
+                    grid_alt, grid_az, _ = grid_obs.apparent().altaz()
+                    alt_deg = grid_alt.degrees
+                    
+                    # Find rise/set (zero crossings of alt - horizon)
+                    alt_shifted = alt_deg - horizon
+                    sign_change = (alt_shifted[:-1] * alt_shifted[1:]) < 0
+                    indices = np.where(sign_change)[0]
+                    
+                    # Process crossings to find first rise and set
+                    for i in indices:
+                        # Linear interpolation
+                        y0 = alt_shifted[i]
+                        y1 = alt_shifted[i+1]
+                        fraction = -y0 / (y1 - y0)
+                        event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
+                        
+                        # Rise: y0 < 0 (below horizon) -> y1 > 0 (above)
+                        if y0 < 0 and rise_time is None:
+                            rise_time = event_dt
+                        # Set: y0 > 0 (above) -> y1 < 0 (below)
+                        elif y0 > 0 and set_time is None:
+                            set_time = event_dt
+                            
+                        if rise_time and set_time:
+                            break
+                    
+                    # Transit (Max altitude)
+                    max_idx = np.argmax(alt_deg)
+                    transit_time = times_dt[max_idx]
+                except Exception as e:
+                    logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                    rise_time = None
+                    set_time = None
+                    transit_time = None
 
                 # Name or designation
                 if 'name' in row2 and pd.notna(row2['name']) and str(row2['name']).strip():
@@ -828,25 +841,25 @@ def _compute_comets_vectorized(
                 else:
                     name = designation
 
-                comet_list.append(
-                    {
-                        'name': name,
-                        'designation': designation,
-                        'symbol': '☄️',
-                        'type': 'comet',
-                        'ra': ra.hours * 15.0,
-                        'dec': dec.degrees,
-                        'altitude': alt.degrees,
-                        'azimuth': az.degrees,
-                        'distance': round(distance.au, 3),
-                        'magnitude': round(apparent_mag, 1),
-                        'rise_time': format_time(rise_time, tz),
-                        'set_time': format_time(set_time, tz),
-                        'transit_time': format_time(transit_time, tz),
-                    }
-                )
+                # Absolute magnitude
+                abs_mag = float(row2.get('M1', np.nan)) if pd.notna(row2.get('M1')) else None
+
+                comet_list.append({
+                    'name': name,
+                    'designation': designation,
+                    'ra_degrees': float(ra.degrees),
+                    'dec_degrees': float(dec.degrees),
+                    'distance_au': float(distance.au),
+                    'altitude_degrees': float(alt.degrees),
+                    'azimuth_degrees': float(az.degrees),
+                    'apparent_magnitude': apparent_mag,
+                    'absolute_magnitude': abs_mag,
+                    'rise_time': rise_time.isoformat() if rise_time else None,
+                    'set_time': set_time.isoformat() if set_time else None,
+                    'transit_time': transit_time.isoformat() if transit_time else None,
+                })
             except Exception as e:
-                logger.debug(f"Error in final processing for comet {designation}: {e}")
+                logger.debug(f"Error processing comet {designation if 'designation' in locals() else 'unknown'}: {e}")
                 continue
 
     # Save final list to cache for faster subsequent loads (same semantics as before)
