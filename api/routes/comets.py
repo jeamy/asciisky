@@ -165,8 +165,21 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:
-            filters = settings.get_magnitude_filters()
-            max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
+            # Check if user is logged in
+            user_id = request.session.get('user_id')
+            
+            if user_id:
+                # Load from database
+                from api.routes.filters import get_user_filters_from_db
+                filters = get_user_filters_from_db(user_id)
+                if filters:
+                    max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
+                else:
+                    max_magnitude = comets.MAX_APPARENT_MAGNITUDE
+            else:
+                # Load from file
+                filters = settings.get_magnitude_filters()
+                max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}

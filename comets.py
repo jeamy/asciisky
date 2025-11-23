@@ -841,22 +841,28 @@ def _compute_comets_vectorized(
                 else:
                     name = designation
 
-                # Absolute magnitude
-                abs_mag = float(row2.get('M1', np.nan)) if pd.notna(row2.get('M1')) else None
+                # Format times for output
+                def format_time(dt, tz):
+                    if dt is None:
+                        return None
+                    if hasattr(dt, 'astimezone'):
+                        return dt.astimezone(tz).strftime('%H:%M')
+                    return None
 
                 comet_list.append({
                     'name': name,
                     'designation': designation,
-                    'ra_degrees': float(ra.degrees),
-                    'dec_degrees': float(dec.degrees),
-                    'distance_au': float(distance.au),
-                    'altitude_degrees': float(alt.degrees),
-                    'azimuth_degrees': float(az.degrees),
-                    'apparent_magnitude': apparent_mag,
-                    'absolute_magnitude': abs_mag,
-                    'rise_time': rise_time.isoformat() if rise_time else None,
-                    'set_time': set_time.isoformat() if set_time else None,
-                    'transit_time': transit_time.isoformat() if transit_time else None,
+                    'symbol': '☄️',
+                    'type': 'comet',
+                    'ra': float(ra.hours * 15.0),  # Convert hours to degrees
+                    'dec': float(dec.degrees),
+                    'altitude': float(alt.degrees),
+                    'azimuth': float(az.degrees),
+                    'distance': round(float(distance.au), 3),
+                    'magnitude': round(apparent_mag, 1),
+                    'rise_time': format_time(rise_time, tz),
+                    'set_time': format_time(set_time, tz),
+                    'transit_time': format_time(transit_time, tz),
                 })
             except Exception as e:
                 logger.debug(f"Error processing comet {designation if 'designation' in locals() else 'unknown'}: {e}")

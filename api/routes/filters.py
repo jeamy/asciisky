@@ -1,19 +1,87 @@
 """
 API routes for magnitude filter settings
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 import settings
 import os
 import shutil
 from pathlib import Path
+from datetime import datetime
+import json
 
 router = APIRouter()
 
 class MagnitudeFilters(BaseModel):
     asteroidMaxMagnitude: Optional[float] = None
     cometMaxMagnitude: Optional[float] = None
+
+def get_user_filters_from_db(user_id: int) -> Optional[dict]:
+    """Load magnitude filters from database for a specific user"""
+    try:
+        from db_utils import get_db_connection
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT settings FROM user_settings WHERE user_id = %s",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+            if row and row['settings']:
+                user_settings = row['settings']
+                return user_settings.get('filters')
+            return None
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error loading user filters from DB: {e}")
+        return None
+
+def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
+    """Save magnitude filters to database for a specific user"""
+    try:
+        from db_utils import get_db_connection
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Get existing settings or create new
+            cursor.execute(
+                "SELECT settings FROM user_settings WHERE user_id = %s",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                # Update existing
+                user_settings = row['settings']
+                user_settings['filters'] = filters
+                user_settings['last_updated'] = datetime.utcnow().isoformat()
+                
+                cursor.execute(
+                    "UPDATE user_settings SET settings = %s, last_updated = %s WHERE user_id = %s",
+                    (json.dumps(user_settings), datetime.utcnow(), user_id)
+                )
+            else:
+                # Insert new
+                user_settings = {
+                    'filters': filters,
+                    'last_updated': datetime.utcnow().isoformat()
+                }
+                cursor.execute(
+                    "INSERT INTO user_settings (user_id, settings, last_updated) VALUES (%s, %s, %s)",
+                    (user_id, json.dumps(user_settings), datetime.utcnow())
+                )
+            
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error saving user filters to DB: {e}")
+        return False
 
 def invalidate_cache():
     """Invalidate asteroid and comet caches when filters change"""
@@ -57,33 +125,72 @@ def invalidate_cache():
         print(f"Error invalidating cache: {e}")
 
 @router.get("/filters")
-async def get_filters():
+async def get_filters(request: Request):
     """Get current magnitude filter settings"""
     try:
+        # Check if user is logged in
+        user_id = request.session.get('user_id')
+        
+        if user_id:
+            # Load from database
+            filters = get_user_filters_from_db(user_id)
+            if filters:
+                return {
+                    "success": True,
+                    "filters": filters,
+                    "source": "database"
+                }
+        
+        # Fallback to file-based settings
         filters = settings.get_magnitude_filters()
         return {
             "success": True,
-            "filters": filters
+            "filters": filters,
+            "source": "file"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/filters")
-async def set_filters(filters: MagnitudeFilters):
+async def set_filters(filters: MagnitudeFilters, request: Request):
     """Set magnitude filter settings and invalidate cache"""
     try:
-        # Get old filters BEFORE updating to check if they changed
-        old_filters = settings.get_magnitude_filters()
+        # Check if user is logged in
+        user_id = request.session.get('user_id')
+        
+        if user_id:
+            # Get old filters from database
+            old_filters = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
+        else:
+            # Get old filters from file
+            old_filters = settings.get_magnitude_filters()
+        
         old_asteroid = old_filters.get("asteroidMaxMagnitude")
         old_comet = old_filters.get("cometMaxMagnitude")
         
-        # Update filters
-        updated_filters = settings.set_magnitude_filters(
-            asteroid_max=filters.asteroidMaxMagnitude,
-            comet_max=filters.cometMaxMagnitude
-        )
+        # Build updated filters
+        updated_filters = old_filters.copy()
+        if filters.asteroidMaxMagnitude is not None:
+            updated_filters["asteroidMaxMagnitude"] = float(filters.asteroidMaxMagnitude)
+        if filters.cometMaxMagnitude is not None:
+            updated_filters["cometMaxMagnitude"] = float(filters.cometMaxMagnitude)
         
-        # Check if filters actually changed (compare with OLD values, not current)
+        # Save to appropriate storage
+        if user_id:
+            # Save to database
+            success = save_user_filters_to_db(user_id, updated_filters)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to save filters to database")
+            storage = "database"
+        else:
+            # Save to file
+            settings.set_magnitude_filters(
+                asteroid_max=filters.asteroidMaxMagnitude,
+                comet_max=filters.cometMaxMagnitude
+            )
+            storage = "file"
+        
+        # Check if filters actually changed
         filters_changed = (
             (filters.asteroidMaxMagnitude is not None and 
              old_asteroid != filters.asteroidMaxMagnitude) or
@@ -91,20 +198,17 @@ async def set_filters(filters: MagnitudeFilters):
              old_comet != filters.cometMaxMagnitude)
         )
         
-        # NOTE: Cache invalidation is NOT needed anymore!
-        # Reason: Workers cache with max_magnitude=20.0 (all objects)
-        # Filtering happens at API level based on user_settings.json
-        # Only invalidate if user DECREASES filter (to remove objects from view)
-        # But even then, no recalculation needed - just filter differently
-        
         if filters_changed:
-            print(f"Filters changed from {old_filters} to {updated_filters}")
+            print(f"Filters changed from {old_filters} to {updated_filters} (storage: {storage})")
             print(f"No cache invalidation needed - filtering happens at API level")
         
         return {
             "success": True,
             "filters": updated_filters,
-            "cache_invalidated": False  # No cache invalidation needed - filtering at API level
+            "cache_invalidated": False,  # No cache invalidation needed - filtering at API level
+            "storage": storage
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

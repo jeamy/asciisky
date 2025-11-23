@@ -1,5 +1,5 @@
 {
-  "last_updated": "2025-11-21T22:34:06.156135",
+  "last_updated": "2025-11-23T18:47:40.231264",
   "location": {
     "latitude": 46.7631988,
     "longitude": 14.8416774,
@@ -7,7 +7,7 @@
     "name": "St.\u202fAndr\u00e4 im Lavanttal"
   },
   "filters": {
-    "asteroidMaxMagnitude": 10.5,
-    "cometMaxMagnitude": 12.5
+    "asteroidMaxMagnitude": 10.0,
+    "cometMaxMagnitude": 12.0
   }
 }
