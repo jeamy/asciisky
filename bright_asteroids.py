@@ -220,7 +220,7 @@ def should_update_mpcorb_file():
     # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
     return file_age > 86400
 
-def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt: Optional[datetime] = None):
+def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE, use_cache=True, current_dt: Optional[datetime] = None, dataframe=None):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     """
@@ -248,13 +248,18 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
     import pickle
     
     try:
-        df_pickle = get_asteroid_dataframe()
-        if not df_pickle:
-            print("ERROR: No asteroids in PostgreSQL database! Run data_updater first.")
-            return []
-        
-        df = pickle.loads(df_pickle)
-        print(f"Loaded {len(df)} asteroids from PostgreSQL database")
+        # Use provided dataframe if available (Worker Optimization)
+        if dataframe is not None:
+            df = dataframe
+            # print(f"Using pre-loaded dataframe with {len(df)} asteroids")
+        else:
+            df_pickle = get_asteroid_dataframe()
+            if not df_pickle:
+                print("ERROR: No asteroids in PostgreSQL database! Run data_updater first.")
+                return []
+            
+            df = pickle.loads(df_pickle)
+            print(f"Loaded {len(df)} asteroids from PostgreSQL database")
         
         # Step 1: Filter by absolute magnitude
         df_filtered = df[df['magnitude_H'] <= MAX_ABSOLUTE_MAGNITUDE].copy()
@@ -544,6 +549,35 @@ def _compute_asteroids_vectorized(
     asteroid_list = []
     events_computed = 0
 
+    # --- Vectorized Event Finding (Grid Search) ---
+    # Create a time grid for the next 48 hours (5 minute steps)
+    # This replaces the slow iterative find_discrete for each asteroid
+    
+    # Start/end window anchored at simulated day's UTC midnight
+    start_time_ts = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+    end_time_ts = ts.utc(start_time_ts.utc_datetime() + timedelta(days=2))
+    
+    start_dt = start_time_ts.utc_datetime()
+    end_dt = end_time_ts.utc_datetime()
+    
+    minutes_step = 5
+    total_minutes = int((end_dt - start_dt).total_seconds() / 60)
+    steps = total_minutes // minutes_step
+    
+    # Create time array
+    times_dt = [start_dt + timedelta(minutes=i*minutes_step) for i in range(steps + 1)]
+    t_grid = ts.from_datetime(times_dt)
+    
+    # Compute positions for all top asteroids at all times
+    # We need to compute observer.at(t_grid).observe(target) for each target
+    # Since we have N targets and M times, we loop over targets but vector over time
+    # This is still much faster than find_discrete which iterates internally
+    
+    asteroid_list = []
+    
+    # Pre-calculate horizon for rise/set (standard refraction -0.5667 deg)
+    horizon = -0.5667
+    
     for idx, row in top_df.iterrows():
         try:
             pos = index_map.get(idx)
@@ -551,89 +585,56 @@ def _compute_asteroids_vectorized(
                 continue
 
             target = targets[pos]
+            
+            # 1. Current position (single time point)
             astrometric = observer.at(t).observe(target)
             apparent = astrometric.apparent()
             ra, dec, distance = apparent.radec()
             alt, az, _ = apparent.altaz()
-
-            # Event times limited to reduce CPU
-            rise_time, set_time, transit_time = None, None, None
-            if events_computed < ASTEROIDS_EVENTS_MAX:
-                # Start/end window anchored at simulated day's UTC midnight
-                start_time = ts.utc(
-                    t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0)
-                )
-                end_time = ts.utc(start_time.utc_datetime() + timedelta(days=2))
-
-                # Rise/Set times
-                rise_set_func = almanac.risings_and_settings(eph, target, topos)
-                times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
-
-                for ti, event in zip(times, events):
-                    if event == 1 and rise_time is None:
-                        rise_time = ti.utc_datetime()
-                    elif event == 0 and set_time is None:
-                        set_time = ti.utc_datetime()
-
-                # Bestimme die nächste Nacht (Rise->Set) nach dt_utc als Fenster für die obere Kulmination
-                night_start_utc, night_end_utc = None, None
-                last_rise_utc = None
-                for ti_rs, ev_rs in zip(times, events):
-                    ev_dt_utc = ti_rs.utc_datetime().replace(tzinfo=timezone.utc)
-                    if ev_rs == 1:  # rise
-                        last_rise_utc = ev_dt_utc
-                    elif ev_rs == 0 and last_rise_utc is not None:  # set paired with last rise
-                        # wähle das erste Rise->Set Paar, dessen Set in der Zukunft liegt
-                        if ev_dt_utc >= (
-                            dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc)
-                        ):
-                            night_start_utc, night_end_utc = last_rise_utc, ev_dt_utc
-                            break
-                if night_start_utc is None or night_end_utc is None:
-                    # Fallback: benutze die zuerst gefundenen rise/set Zeiten, wenn vorhanden
-                    night_start_utc, night_end_utc = rise_time, set_time
-
-                f = almanac.meridian_transits(eph, target, topos)
-                t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                # Wähle die nächste obere Kulmination innerhalb des Nachtfensters (UTC-basiert)
-                chosen_time_utc = None
-                if len(t_times):
-                    now_utc = dt_utc if dt_utc.tzinfo is not None else dt_utc.replace(
-                        tzinfo=timezone.utc
-                    )
-                    candidates = []
-                    for ti, ev in zip(t_times, t_events):
-                        utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                        # Altitude am Transit-Zeitpunkt bestimmen (höher = obere Kulmination)
-                        try:
-                            alt_deg = (
-                                observer.at(ti)
-                                .observe(target)
-                                .apparent()
-                                .altaz()[0]
-                                .degrees
-                            )
-                        except Exception:
-                            alt_deg = float("-inf")
-                        candidates.append((utc_dt, alt_deg, int(ev)))
-                    # Filtere auf das Nachtfenster (falls vorhanden)
-                    if night_start_utc is not None and night_end_utc is not None:
-                        pool = [
-                            c
-                            for c in candidates
-                            if c[0] >= night_start_utc and c[0] <= night_end_utc
-                        ]
-                    else:
-                        # Bevorzuge zukünftige Ereignisse
-                        pool = [c for c in candidates if c[0] >= now_utc]
-                        if not pool:
-                            pool = candidates
-                    if pool:
-                        pool.sort(key=lambda x: (-x[1], x[0]))
-                        chosen_time_utc = pool[0][0]
-                transit_time = chosen_time_utc
-                events_computed += 1
-
+            
+            # 2. Event finding (Vectorized over time)
+            # Compute altitude over the grid
+            # Note: observer.at(t_grid) is efficient
+            grid_obs = observer.at(t_grid).observe(target)
+            grid_alt, grid_az, _ = grid_obs.apparent().altaz()
+            alt_deg = grid_alt.degrees
+            
+            # Find rise/set (zero crossings of alt - horizon)
+            alt_shifted = alt_deg - horizon
+            sign_change = (alt_shifted[:-1] * alt_shifted[1:]) < 0
+            indices = np.where(sign_change)[0]
+            
+            rise_time = None
+            set_time = None
+            
+            # Process crossings to find first rise and set
+            for i in indices:
+                # Linear interpolation
+                y0 = alt_shifted[i]
+                y1 = alt_shifted[i+1]
+                fraction = -y0 / (y1 - y0)
+                event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
+                
+                # Rise: y0 < 0 (below horizon) -> y1 > 0 (above)
+                if y0 < 0 and rise_time is None:
+                    rise_time = event_dt
+                # Set: y0 > 0 (above) -> y1 < 0 (below)
+                elif y0 > 0 and set_time is None:
+                    set_time = event_dt
+                    
+                if rise_time and set_time:
+                    break
+            
+            # Transit (Max altitude)
+            # Find index of max altitude
+            # We want the max altitude that occurs *at night* ideally, but for now just global max in window
+            # Or better: max altitude near the middle of the window?
+            # Let's stick to finding the highest point in the grid
+            max_idx = np.argmax(alt_deg)
+            transit_time = times_dt[max_idx]
+            
+            # Refine transit time? 5 min resolution is probably enough for display
+            
             asteroid_list.append(
                 {
                     "name": row["designation"],
