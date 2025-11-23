@@ -378,7 +378,8 @@ class UnifiedWorker:
                     asteroids_data = bright_asteroids.load_bright_asteroids(
                         self.loader, self.ts, self.eph, observer_loc,
                         max_magnitude=max_mag,
-                        current_dt=dt_utc
+                        current_dt=dt_utc,
+                        dataframe=self.asteroid_df  # Pass pre-loaded dataframe
                     )
                     
                     if asteroids_data:
@@ -396,7 +397,8 @@ class UnifiedWorker:
                     comets_data = comets.load_comets(
                         self.ts, self.eph, observer_loc,
                         max_comets=max_comets,
-                        current_dt=dt_utc
+                        current_dt=dt_utc,
+                        dataframe=self.comet_df  # Pass pre-loaded dataframe
                     )
                     
                     if comets_data:

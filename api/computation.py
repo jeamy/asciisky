@@ -185,30 +185,64 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
     current = datetime(year, 1, 1)
     last = datetime(year + 1, 1, 1)
 
+    # Pre-calculate all events for the year to avoid repeated Skyfield calls
+    # Add a buffer to ensure we cover all local times for the requested year
+    start_utc_search = datetime(year, 1, 1, tzinfo=timezone.utc) - timedelta(days=2)
+    end_utc_search = datetime(year + 1, 1, 1, tzinfo=timezone.utc) + timedelta(days=2)
+    t_start = ts.from_datetime(start_utc_search)
+    t_end = ts.from_datetime(end_utc_search)
+
+    # 1. Sunrise and Sunset
+    sun_times, sun_events = almanac.find_discrete(t_start, t_end, f)
+    
+    sun_events_by_date = {}
+    for ti, ev in zip(sun_times, sun_events):
+        dt_local = ti.utc_datetime().astimezone(tz)
+        d = dt_local.date()
+        if d not in sun_events_by_date:
+            sun_events_by_date[d] = {'sunrise': None, 'sunset': None}
+        
+        # ev=1 is rise, ev=0 is set
+        if ev == 1 and sun_events_by_date[d]['sunrise'] is None:
+            sun_events_by_date[d]['sunrise'] = dt_local
+        elif ev == 0 and sun_events_by_date[d]['sunset'] is None:
+            sun_events_by_date[d]['sunset'] = dt_local
+
+    # 2. Twilight
+    # Calculate all twilight transitions for the year
+    try:
+        tw_times, tw_states = almanac.find_discrete(t_start, t_end, twilight_f)
+        initial_state = int(twilight_f(t_start))
+        
+        # Build a flat list of all segments: (start_utc, end_utc, state)
+        all_segments = []
+        last_time_utc = start_utc_search
+        last_state = initial_state
+        
+        for ti, st in zip(tw_times, tw_states):
+            ti_utc = ti.utc_datetime()
+            all_segments.append((last_time_utc, ti_utc, last_state))
+            last_time_utc = ti_utc
+            last_state = int(st)
+        all_segments.append((last_time_utc, end_utc_search, last_state))
+        
+        has_twilight = True
+    except Exception:
+        has_twilight = False
+        all_segments = []
+
+    # Iterate through each day of the year
+    segment_idx = 0
+    num_segments = len(all_segments)
+    
     while current < last:
         lm = local_midnight(current)
         day_date = lm.date()
-
-        # Use a 2-day window around this midnight to catch rise/set of that local day
-        start_utc = lm.astimezone(timezone.utc)
-        t0 = ts.from_datetime(start_utc)
-        t1 = ts.from_datetime(start_utc + timedelta(days=2))
-
-        sunrise_dt = None
-        sunset_dt = None
-        try:
-            times, events = almanac.find_discrete(t0, t1, f)
-            for ti, ev in zip(times, events):
-                dt_local = ti.utc_datetime().astimezone(tz)
-                if dt_local.date() != day_date:
-                    continue
-                if ev == 1 and sunrise_dt is None:
-                    sunrise_dt = dt_local
-                elif ev == 0 and sunset_dt is None:
-                    sunset_dt = dt_local
-        except Exception:
-            sunrise_dt = None
-            sunset_dt = None
+        
+        # Sunrise/Sunset
+        day_events = sun_events_by_date.get(day_date, {})
+        sunrise_dt = day_events.get('sunrise')
+        sunset_dt = day_events.get('sunset')
 
         if sunrise_dt and sunset_dt:
             length_hours = (sunset_dt - sunrise_dt).total_seconds() / 3600.0
@@ -217,46 +251,45 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         else:
             length_hours = None
 
-        # Twilight phases (astronomical, nautical, civil)
+        # Twilight
         twilight_periods = {
             'astronomical': [],
             'nautical': [],
             'civil': [],
         }
+        
+        astro_start = astro_end = naut_start = naut_end = civil_start = civil_end = None
 
-        try:
-            # Build segments of twilight states over [t0, t1]
-            state0 = int(twilight_f(t0))
-            tw_times, tw_states = almanac.find_discrete(t0, t1, twilight_f)
-
-            segments = []
-            last_time = t0
-            last_state = state0
-            for ti, st in zip(tw_times, tw_states):
-                seg_start_utc = last_time.utc_datetime()
-                seg_end_utc = ti.utc_datetime()
-                segments.append((seg_start_utc, seg_end_utc, int(last_state)))
-                last_time = ti
-                last_state = int(st)
-
-            # Final segment to t1
-            seg_start_utc = last_time.utc_datetime()
-            seg_end_utc = t1.utc_datetime()
-            segments.append((seg_start_utc, seg_end_utc, int(last_state)))
-
+        if has_twilight:
             day_start_local = lm
             day_end_local = lm + timedelta(days=1)
-
-            # Collect all twilight segments for the current day
-            # dark_twilight_day states:
-            #   0 = dark night
-            #   1 = astronomical twilight
-            #   2 = nautical twilight
-            #   3 = civil twilight
-            #   4 = day
+            
+            # Find segments that overlap with this day
+            # Since we iterate days sequentially, we can advance segment_idx
+            # But we must be careful not to advance past segments that might overlap the NEXT day 
+            # (though segments are contiguous, so a segment overlapping end of today overlaps start of tomorrow)
+            # Actually, we just need to find the first segment that ends after day_start_local
+            
+            # Advance index to the first relevant segment
+            # We compare segment end time (converted to local) with day_start_local
+            while segment_idx < num_segments:
+                seg_end_utc = all_segments[segment_idx][1]
+                if seg_end_utc.astimezone(tz) > day_start_local:
+                    break
+                segment_idx += 1
+            
+            # Collect segments for this day
+            # We scan forward from segment_idx until we find a segment that starts after day_end_local
+            temp_idx = segment_idx
             raw_periods = {'astronomical': [], 'nautical': [], 'civil': []}
-            for seg_start_utc, seg_end_utc, state in segments:
+            
+            while temp_idx < num_segments:
+                seg_start_utc, seg_end_utc, state = all_segments[temp_idx]
                 seg_start_local = seg_start_utc.astimezone(tz)
+                
+                if seg_start_local >= day_end_local:
+                    break
+                
                 seg_end_local = seg_end_utc.astimezone(tz)
                 start_local_clipped = max(seg_start_local, day_start_local)
                 end_local_clipped = min(seg_end_local, day_end_local)
@@ -268,6 +301,8 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
                         raw_periods['nautical'].append((start_local_clipped, end_local_clipped))
                     elif state == 3:  # civil
                         raw_periods['civil'].append((start_local_clipped, end_local_clipped))
+                
+                temp_idx += 1
 
             # Merge overlapping/adjacent segments for each twilight type
             for kind in twilight_periods:
@@ -304,11 +339,6 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             astro_start, astro_end = get_overall_start_end('astronomical')
             naut_start, naut_end = get_overall_start_end('nautical')
             civil_start, civil_end = get_overall_start_end('civil')
-
-        except Exception:
-            # Twilight information is optional; ignore errors
-            astro_start = astro_end = naut_start = naut_end = civil_start = civil_end = None
-            twilight_periods = {'astronomical': [], 'nautical': [], 'civil': []}
 
         def serialize_periods(kind):
             periods = twilight_periods.get(kind, [])

@@ -420,7 +420,7 @@ def _make_comet_orbit_cached(key: tuple):
     return mpc.comet_orbit(row, _ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
 
 
-def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: Optional[datetime] = None) -> List[dict]:
+def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: Optional[datetime] = None, dataframe=None) -> List[dict]:
     """
     Compute comet positions and times for the given observer location.
     Uses photometric filters similar to bright_asteroids: prefilter by M1<=MAX_ABSOLUTE_MAGNITUDE and
@@ -463,14 +463,19 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
     # Load comet dataframe - PostgreSQL ONLY
     df = None
     try:
-        df_pickle = get_comet_dataframe()
-        if df_pickle:
-            df = pickle.loads(df_pickle)
-        if df is not None and not df.empty:
-            print(f"Loaded {len(df)} comets from PostgreSQL database")
+        # Use provided dataframe if available (Worker Optimization)
+        if dataframe is not None:
+            df = dataframe
+            # logger.debug(f"Using pre-loaded dataframe with {len(df)} comets")
         else:
-            print("ERROR: No comets in PostgreSQL database! Run data_updater first.")
-            return []
+            df_pickle = get_comet_dataframe()
+            if df_pickle:
+                df = pickle.loads(df_pickle)
+            if df is not None and not df.empty:
+                print(f"Loaded {len(df)} comets from PostgreSQL database")
+            else:
+                print("ERROR: No comets in PostgreSQL database! Run data_updater first.")
+                return []
     except Exception as e:
         print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
         print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
@@ -745,6 +750,26 @@ def _compute_comets_vectorized(
         order = np.argsort(apparent_magnitudes[bright_idx])
         selected_idx = bright_idx[order][:max_comets]
 
+        # --- Vectorized Event Finding Setup (Grid Search) ---
+        # Create a time grid for the next 48 hours (5 minute steps)
+        # Start/end window anchored at simulated day's UTC midnight
+        start_time_ts = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
+        end_time_ts = ts.utc(start_time_ts.utc_datetime() + timedelta(days=2))
+        
+        start_dt = start_time_ts.utc_datetime()
+        end_dt = end_time_ts.utc_datetime()
+        
+        minutes_step = 5
+        total_minutes = int((end_dt - start_dt).total_seconds() / 60)
+        steps = total_minutes // minutes_step
+        
+        # Create time array
+        times_dt = [start_dt + timedelta(minutes=i*minutes_step) for i in range(steps + 1)]
+        t_grid = ts.from_datetime(times_dt)
+        
+        # Pre-calculate horizon for rise/set (standard refraction -0.5667 deg)
+        horizon = -0.5667
+
         for pos in selected_idx:
             try:
                 designation, row2, target, astrometric = processed_rows[pos]
@@ -754,56 +779,43 @@ def _compute_comets_vectorized(
                 apparent = astrometric.apparent()
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
-
-                # Rise/Set/Transit over next 24h - same logic as original implementation
-                rise_time, set_time, transit_time = None, None, None
-                try:
-                    # Use local midnight as reference point, not UTC midnight
-                    local_dt = dt_utc.astimezone(tz)
-                    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    # Convert back to UTC for Skyfield
-                    utc_midnight = local_midnight.astimezone(timezone.utc)
-                    start_time = ts.from_datetime(utc_midnight)
-                    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
-
-                    rise_set_func = almanac.risings_and_settings(eph, target, location)
-                    times, events = almanac.find_discrete(start_time, end_time, rise_set_func)
-
-                    # Find rise/set events for the current local day
-                    today_local = local_dt.date()
-                    for ti, event in zip(times, events):
-                        event_local = ti.utc_datetime().replace(tzinfo=timezone.utc).astimezone(tz)
-                        if event_local.date() == today_local:
-                            if event == 1 and rise_time is None:
-                                rise_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                            elif event == 0 and set_time is None:
-                                set_time = ti.utc_datetime().replace(tzinfo=timezone.utc)
-
-                    # Transit time (choose highest altitude for local day)
-                    f = almanac.meridian_transits(eph, target, location)
-                    t_times, t_events = almanac.find_discrete(start_time, end_time, f)
-                    chosen_local_dt = None
-                    if len(t_times):
-                        candidates = []
-                        for ti, ev in zip(t_times, t_events):
-                            utc_dt = ti.utc_datetime().replace(tzinfo=timezone.utc)
-                            event_local = utc_dt.astimezone(tz)
-                            if event_local.date() == today_local:
-                                try:
-                                    alt_deg = (
-                                        observer.at(ti)
-                                        .observe(target)
-                                        .apparent()
-                                        .altaz()[0]
-                                        .degrees
-                                    )
-                                except Exception:
-                                    alt_deg = float('-inf')
-                                candidates.append((utc_dt, alt_deg, int(ev)))
-                        if candidates:
-                            candidates.sort(key=lambda x: (-x[1], x[0]))
-                            chosen_local_dt = candidates[0][0]
-                    transit_time = chosen_local_dt
+                
+                # Compute altitude over the grid
+                # Note: observer.at(t_grid) is efficient
+                grid_obs = observer.at(t_grid).observe(target)
+                grid_alt, grid_az, _ = grid_obs.apparent().altaz()
+                alt_deg = grid_alt.degrees
+                
+                # Find rise/set (zero crossings of alt - horizon)
+                alt_shifted = alt_deg - horizon
+                sign_change = (alt_shifted[:-1] * alt_shifted[1:]) < 0
+                indices = np.where(sign_change)[0]
+                
+                rise_time = None
+                set_time = None
+                
+                # Process crossings to find first rise and set
+                for i in indices:
+                    # Linear interpolation
+                    y0 = alt_shifted[i]
+                    y1 = alt_shifted[i+1]
+                    fraction = -y0 / (y1 - y0)
+                    event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
+                    
+                    # Rise: y0 < 0 (below horizon) -> y1 > 0 (above)
+                    if y0 < 0 and rise_time is None:
+                        rise_time = event_dt
+                    # Set: y0 > 0 (above) -> y1 < 0 (below)
+                    elif y0 > 0 and set_time is None:
+                        set_time = event_dt
+                        
+                    if rise_time and set_time:
+                        break
+                
+                # Transit (Max altitude)
+                # Find index of max altitude
+                max_idx = np.argmax(alt_deg)
+                transit_time = times_dt[max_idx]
                 except Exception as e:
                     logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
                     rise_time = None
