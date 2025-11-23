@@ -266,12 +266,19 @@ function openAuthDialog() {
     const panelLogin = document.getElementById('auth-login-panel');
     const panelRegister = document.getElementById('auth-register-panel');
 
+    if (tabLogin && tabRegister) {
+        tabLogin.classList.add('active');
+        tabRegister.classList.remove('active');
+    }
+
     if (tabLogin && tabRegister && panelLogin && panelRegister) {
         tabLogin.addEventListener('click', () => {
             panelLogin.classList.add('active');
             panelLogin.classList.remove('hidden');
             panelRegister.classList.remove('active');
             panelRegister.classList.add('hidden');
+            tabLogin.classList.add('active');
+            tabRegister.classList.remove('active');
             showError('');
         });
         tabRegister.addEventListener('click', () => {
@@ -279,6 +286,8 @@ function openAuthDialog() {
             panelLogin.classList.add('hidden');
             panelRegister.classList.add('active');
             panelRegister.classList.remove('hidden');
+            tabRegister.classList.add('active');
+            tabLogin.classList.remove('active');
             showError('');
         });
     }

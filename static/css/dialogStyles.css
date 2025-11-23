@@ -218,6 +218,12 @@
     flex: 1;
 }
 
+.auth-dialog .auth-tab-btn.active {
+    background-color: var(--primary-color, #00ff00);
+    color: #000;
+    border-color: var(--primary-color, #00ff00);
+}
+
 .auth-dialog .auth-field-label {
     display: block;
     margin-bottom: 6px;
