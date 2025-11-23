@@ -59,6 +59,73 @@ else:
 
 # Removed: get_rabbitmq_connection() - now using worker_utils.setup_rabbitmq_connection()
 
+import threading
+
+class SharedSkyfieldResources:
+    """Shared Skyfield Resources für alle Worker-Instanzen"""
+    
+    _instance = None
+    _initialized = False
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            with self._lock:
+                if not self._initialized:
+                    self._initialize_resources()
+                    SharedSkyfieldResources._initialized = True
+    
+    def _initialize_resources(self):
+        """Initialisiere Skyfield Resources einmalig mit Memory-Optimierung"""
+        try:
+            from data_paths import DATA_DIR
+            from skyfield.api import Loader
+            
+            logger.info("Initializing shared Skyfield resources...")
+            start_time = time.time()
+            
+            # Memory-optimierte Loader Konfiguration
+            self.loader = Loader(str(DATA_DIR))
+            self.loader.verbose = False  # Reduziere Logging Overhead
+            
+            # Timescale mit optimierter Konfiguration
+            self.ts = self.loader.timescale()
+            
+            # Ephemeriden mit Caching
+            self.eph = self.loader('de421.bsp')
+            
+            load_time = time.time() - start_time
+            logger.info(f"Skyfield resources loaded in {load_time:.2f}s")
+            
+            # Pre-load asteroid/comet dataframes mit Error Handling
+            try:
+                self.asteroid_df = bright_asteroids.load_asteroid_dataframe()
+                self.comet_df = comets.load_comet_dataframe()
+                logger.info(f"Pre-loaded {len(self.asteroid_df)} asteroids, {len(self.comet_df)} comets")
+            except Exception as e:
+                logger.warning(f"Could not pre-load dataframes: {e}")
+                self.asteroid_df = None
+                self.comet_df = None
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize shared resources: {e}")
+            raise
+    
+    def get_resources(self):
+        """Gibt die shared Resources zurück"""
+        return self.loader, self.ts, self.eph, self.asteroid_df, self.comet_df
+
+# Global resources instance
+shared_resources = None
+
+
 
 def process_task(task: Dict[str, Any]) -> bool:
     """
@@ -111,11 +178,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                 logger.debug(f"[{WORKER_ID}] Acquired advisory lock for {computation_key}")
 
                 if kind == 'asteroids':
-                    from skyfield.api import Loader
-                    from data_paths import DATA_DIR
-                    loader = Loader(str(DATA_DIR))
-                    ts = loader.timescale()
-                    eph = loader('de421.bsp')
+                    # Use shared resources
+                    loader, ts, eph, asteroid_df, _ = shared_resources.get_resources()
 
                     observer_loc = {
                         'latitude': lat_norm,
@@ -130,7 +194,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                         eph,
                         observer_loc,
                         max_magnitude=max_mag,
-                        current_dt=dt_utc
+                        current_dt=dt_utc,
+                        dataframe=asteroid_df  # Pass pre-loaded dataframe
                     )
 
                     if asteroids_data:
@@ -149,11 +214,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                         count = 0
 
                 elif kind == 'comets':
-                    from skyfield.api import Loader
-                    from data_paths import DATA_DIR
-                    loader = Loader(str(DATA_DIR))
-                    ts = loader.timescale()
-                    eph = loader('de421.bsp')
+                    # Use shared resources
+                    loader, ts, eph, _, comet_df = shared_resources.get_resources()
 
                     observer_loc = {
                         'latitude': lat_norm,
@@ -166,7 +228,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                         eph,
                         observer_loc,
                         max_comets=100,
-                        current_dt=dt_utc
+                        current_dt=dt_utc,
+                        dataframe=comet_df  # Pass pre-loaded dataframe
                     )
 
                     if comets_data:
@@ -243,6 +306,10 @@ def main():
     logger.info(f"Configuration:")
     logger.info(f"  - Worker ID: {WORKER_ID}")
     logger.info(f"  - Prefetch Count: {prefetch_count}")
+    
+    # Initialize Shared Resources
+    global shared_resources
+    shared_resources = SharedSkyfieldResources()
     
     rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
     

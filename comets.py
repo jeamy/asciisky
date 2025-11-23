@@ -816,11 +816,11 @@ def _compute_comets_vectorized(
                 # Find index of max altitude
                 max_idx = np.argmax(alt_deg)
                 transit_time = times_dt[max_idx]
-                except Exception as e:
-                    logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
-                    rise_time = None
-                    set_time = None
-                    transit_time = None
+            except Exception as e:
+                logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                rise_time = None
+                set_time = None
+                transit_time = None
 
                 # Name or designation
                 if 'name' in row2 and pd.notna(row2['name']) and str(row2['name']).strip():

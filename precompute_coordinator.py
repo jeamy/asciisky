@@ -492,7 +492,7 @@ def main():
             # Fall C: Queue noch voll -> Warten
             else:
                 logger.info("Queue busy - waiting...")
-                time.sleep(10)  # Kurzes Polling
+                time.sleep(300)  # 5 Minuten Polling
                 continue
                 
             if should_produce:
