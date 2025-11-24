@@ -39,7 +39,7 @@ export class MagnitudeFilterDialog {
                 <h3>${t('magnitude_filters') || 'Helligkeitsfilter'}</h3>
                 
                 <div class="filter-info">
-                    ${t('magnitude_filter_info') || 'Hinweis: Bei Änderung der Filter werden die Daten neu berechnet. Dies kann einige Sekunden dauern. Die Objekte werden automatisch angezeigt, sobald sie verfügbar sind.'}
+                    ${t('magnitude_filter_info') || 'Hinweis: Bei Änderung der Filter werden die Daten neu berechnet (einige Minuten). Die Objekte werden automatisch angezeigt, sobald sie verfügbar sind.'}
                 </div>
                 
                 <div class="filter-group">
@@ -148,7 +148,7 @@ export class MagnitudeFilterDialog {
                         console.log('Cache wurde invalidiert, neue Berechnung wird gestartet...');
                         // Optional: Zeige Benutzer-Hinweis
                         const msg = t('cache_invalidated_message') || 
-                                   'Filter geändert. Daten werden neu berechnet, dies kann einige Sekunden dauern...';
+                                   'Filter geändert. Daten werden neu berechnet, dies kann einige Minuten dauern...';
                         // Zeige kurze Info-Nachricht (optional)
                         if (window.showTemporaryMessage) {
                             window.showTemporaryMessage(msg, 5000);

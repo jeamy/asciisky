@@ -17,68 +17,43 @@ class MagnitudeFilters(BaseModel):
     asteroidMaxMagnitude: Optional[float] = None
     cometMaxMagnitude: Optional[float] = None
 
+
 def get_user_filters_from_db(user_id: int) -> Optional[dict]:
     """Load magnitude filters from database for a specific user"""
     try:
-        from db_utils import get_db_connection
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT settings FROM user_settings WHERE user_id = %s",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-            if row and row['settings']:
-                user_settings = row['settings']
-                return user_settings.get('filters')
+        from db_utils import get_user_settings as db_get_user_settings
+
+        settings_obj = db_get_user_settings(int(user_id))
+        if not settings_obj:
             return None
-        finally:
-            conn.close()
+
+        filters = settings_obj.get("filters")
+        if isinstance(filters, dict):
+            return filters
+        return None
     except Exception as e:
         print(f"Error loading user filters from DB: {e}")
         return None
 
+
 def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
     """Save magnitude filters to database for a specific user"""
     try:
-        from db_utils import get_db_connection
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
-            
-            # Get existing settings or create new
-            cursor.execute(
-                "SELECT settings FROM user_settings WHERE user_id = %s",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                # Update existing
-                user_settings = row['settings']
-                user_settings['filters'] = filters
-                user_settings['last_updated'] = datetime.utcnow().isoformat()
-                
-                cursor.execute(
-                    "UPDATE user_settings SET settings = %s, last_updated = %s WHERE user_id = %s",
-                    (json.dumps(user_settings), datetime.utcnow(), user_id)
-                )
-            else:
-                # Insert new
-                user_settings = {
-                    'filters': filters,
-                    'last_updated': datetime.utcnow().isoformat()
-                }
-                cursor.execute(
-                    "INSERT INTO user_settings (user_id, settings, last_updated) VALUES (%s, %s, %s)",
-                    (user_id, json.dumps(user_settings), datetime.utcnow())
-                )
-            
-            conn.commit()
-            return True
-        finally:
-            conn.close()
+        from db_utils import (
+            get_user_settings as db_get_user_settings,
+            save_user_settings as db_save_user_settings,
+        )
+
+        current_settings = db_get_user_settings(int(user_id)) or {}
+        if not isinstance(current_settings, dict):
+            current_settings = {}
+
+        # Merge filters into the existing settings JSON structure
+        merged_settings = dict(current_settings)
+        merged_settings["filters"] = filters
+
+        db_save_user_settings(int(user_id), merged_settings)
+        return True
     except Exception as e:
         print(f"Error saving user filters to DB: {e}")
         return False
