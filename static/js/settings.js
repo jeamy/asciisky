@@ -48,12 +48,10 @@ export class SettingsManager {
             console.error('Error saving settings:', error);
         }
 
-        if (this.authenticatedUserId) {
-            // Fire-and-forget Sync in die Datenbank; Fehler sollen die UI nicht blockieren
-            this.saveUserSettingsToServer().catch(err => {
-                console.error('Error saving user settings to server:', err);
-            });
-        }
+        // Fire-and-forget Sync in die Datenbank; Fehler sollen die UI nicht blockieren
+        this.saveUserSettingsToServer().catch(err => {
+            console.error('Error saving user settings to server:', err);
+        });
     }
 
     // Diese Methoden wurden entfernt, da die Magnitude-Filter nicht mehr benötigt werden
@@ -240,7 +238,6 @@ export class SettingsManager {
 
     // Speichert aktuelle Einstellungen in der Datenbank (falls ein authentifizierter Benutzer bekannt ist)
     async saveUserSettingsToServer() {
-        if (!this.authenticatedUserId) return;
         try {
             const url = `${API_ENDPOINTS.USER_SETTINGS_SET}?nocache=1`;
             const resp = await fetch(url, {
@@ -252,6 +249,7 @@ export class SettingsManager {
             if (!resp.ok) {
                 if (resp.status === 401 || resp.status === 403) {
                     this.authenticatedUserId = null;
+                    return;
                 }
                 console.error('Error saving user settings to server: HTTP', resp.status);
             }

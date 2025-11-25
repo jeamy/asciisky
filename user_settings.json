@@ -7,7 +7,7 @@
     "name": "St.\u202fAndr\u00e4 im Lavanttal"
   },
   "filters": {
-    "asteroidMaxMagnitude": 12.0,
-    "cometMaxMagnitude": 13.5
+    "asteroidMaxMagnitude": 10.0,
+    "cometMaxMagnitude": 12.0
   }
 }
