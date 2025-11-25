@@ -167,17 +167,20 @@ The application runs multiple services. In local development these are defined i
 - **Hybrid Deduplication** – RabbitMQ + PostgreSQL Advisory Locks for duplicate protection
 - **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
 
-All services restart automatically unless stopped.
+ All services restart automatically unless stopped.
 
 **Worker Scaling** (via `.env`):
 ```bash
-# Unified Workers (handle all task types)
-UNIFIED_WORKERS=8     # Number of unified workers (replaces all separate workers)
-WORKER_MONITOR=1      # Worker monitoring dashboard
+# Main server (precompute_worker in docker-compose.production.yml)
+PRECOMPUTE_WORKERS=4  # Dedicated precompute workers on the main server
 
-# Legacy (for backward compatibility)
-PRECOMPUTE_WORKERS=4  # Mapped to UNIFIED_WORKERS if not set
+# Worker hosts (unified_worker in docker-compose.workers.yml)
+UNIFIED_WORKERS=8     # Number of unified workers per worker host (handles all task types)
+WORKER_MONITOR=1      # Worker monitoring dashboard
 ```
+
+On worker hosts, `UNIFIED_WORKERS` controls `unified_worker` scaling. If it is not set,
+the deployment scripts fall back to `PRECOMPUTE_WORKERS`.
 
 **Hybrid Deduplication Configuration:**
 ```bash
@@ -379,7 +382,8 @@ Notes:
 ### Unified Worker Configuration
 - `UNIFIED_WORKERS` - Number of unified workers (handles all task types) (default: 8)
 - `WORKER_MONITOR` - Worker monitoring dashboard instances (default: 1)
-- `PRECOMPUTE_WORKERS` - Legacy: Mapped to UNIFIED_WORKERS if not set (default: 4)
+- `PRECOMPUTE_WORKERS` - Number of dedicated `precompute_worker` instances on the main server (default: 4).
+  On worker hosts it is used as a fallback if `UNIFIED_WORKERS` is not set.
 
 ### Precompute Configuration
 - `ASCII_SKY_PRECOMPUTE_HOURS` – Number of hours into the future that the precompute coordinator generates tasks for (default: 720 = 30 days)
