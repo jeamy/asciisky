@@ -655,6 +655,10 @@
                 constellationBtn.className = 'object-btn';
                 constellationBtn.innerHTML = '✦ ' + t('constellations');
                 constellationBtn.title = t('toggle_constellations');
+                const initialVisible = !!(renderer && renderer.zodiacRenderer && renderer.zodiacRenderer.visible);
+                if (initialVisible) {
+                    constellationBtn.classList.add('active');
+                }
                 constellationBtn.onclick = async () => {
                     if (renderer && renderer.zodiacRenderer) {
                         // Load data if not already loaded
@@ -664,9 +668,7 @@
                             await renderer.zodiacRenderer.fetchZodiacData(location, timeISO);
                         }
                         
-                        renderer.zodiacRenderer.toggleVisibility();
-                        // Update button appearance
-                        const isActive = renderer.zodiacRenderer.visible;
+                        const isActive = renderer.zodiacRenderer.toggleVisibility();
                         constellationBtn.classList.toggle('active', isActive);
                     }
                 };

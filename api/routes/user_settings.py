@@ -45,7 +45,7 @@ def _default_user_settings() -> Dict[str, Any]:
         "filters": base_filters,
         "theme": "green",
         "language": "de",
-        "options": {},
+        "options": {"showConstellations": False},
     }
 
 

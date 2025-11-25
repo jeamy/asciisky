@@ -126,6 +126,24 @@ export class SettingsManager {
         this.saveSettings();
         return lang;
     }
+
+    getConstellationsVisible() {
+        try {
+            const opts = this.settings?.options;
+            if (opts && typeof opts.showConstellations === 'boolean') {
+                return !!opts.showConstellations;
+            }
+        } catch (_) { /* noop */ }
+        return false;
+    }
+
+    setConstellationsVisible(visible) {
+        if (!this.settings) this.settings = {};
+        if (!this.settings.options) this.settings.options = {};
+        this.settings.options.showConstellations = !!visible;
+        this.saveSettings();
+        return this.getConstellationsVisible();
+    }
     
     // --- Simulierte Zeit ---
     // Liefert den aktuell gesetzten Versatz in Minuten und den Aktivierungsstatus

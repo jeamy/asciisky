@@ -24,22 +24,22 @@
 }
 
 .constellation circle {
-    fill: #4a90e2;
+    fill: rgba(var(--primary-rgb), 0.7);
     opacity: 0.8;
-    stroke: #6bb6ff;
+    stroke: rgba(var(--primary-rgb), 0.9);
     stroke-width: 0.5;
 }
 
 /* Sterne unter dem Horizont */
 .constellation circle.below-horizon {
     opacity: 0.4;
-    fill: #3a70b2;
-    stroke: #3a70b2;
+    fill: rgba(var(--primary-rgb), 0.4);
+    stroke: rgba(var(--primary-rgb), 0.4);
     stroke-width: 0.3;
 }
 
 .constellation line {
-    stroke: #4a90e2;
+    stroke: rgba(var(--primary-rgb), 0.7);
     stroke-width: 1.0;
     opacity: 0.6;
     stroke-linecap: round;
@@ -47,20 +47,20 @@
 
 /* Verbindungslinien mit Sternen unter dem Horizont */
 .constellation line.below-horizon {
-    stroke: #3a70b2;
+    stroke: rgba(var(--primary-rgb), 0.4);
     opacity: 0.4;
     stroke-dasharray: 3, 3;
 }
 
 /* Verbindungslinien mit beiden Sternen unter dem Horizont */
 .constellation line.both-below-horizon {
-    stroke: #2a5092;
+    stroke: rgba(var(--primary-rgb), 0.3);
     opacity: 0.3;
     stroke-dasharray: 2, 4;
 }
 
 .constellation text {
-    fill: #4a90e2;
+    fill: var(--primary-color);
     font-size: 11px;
     font-family: monospace;
     text-anchor: middle;

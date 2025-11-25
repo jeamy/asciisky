@@ -4,6 +4,7 @@
 
 import { API_ENDPOINTS, CONFIG } from './constants.js';
 import { t } from './i18n.js';
+import { settingsManager } from './settings.js';
 
 export class ZodiacRenderer {
     // Konstanten für Sternbild-Filter
@@ -17,6 +18,14 @@ export class ZodiacRenderer {
         this.constellations = [];
         // Default Sichtbarkeit aus Konfiguration übernehmen (standard: aus)
         this.visible = !!(CONFIG.CONSTELLATIONS && CONFIG.CONSTELLATIONS.DEFAULT_VISIBLE === true);
+        try {
+            if (settingsManager && settingsManager.settings) {
+                const opts = settingsManager.settings.options;
+                if (opts && typeof opts.showConstellations === 'boolean') {
+                    this.visible = !!opts.showConstellations;
+                }
+            }
+        } catch (_) { /* noop */ }
         this.svgLayer = null;
         this.toggleButton = null;
         
@@ -515,7 +524,13 @@ export class ZodiacRenderer {
         if (this.visible && this.constellations.length > 0) {
             this.renderSVGConstellations();
         }
-        
+
+        try {
+            if (settingsManager && typeof settingsManager.setConstellationsVisible === 'function') {
+                settingsManager.setConstellationsVisible(this.visible);
+            }
+        } catch (_) { /* noop */ }
+
         return this.visible;
     }
 
@@ -546,6 +561,13 @@ export class ZodiacRenderer {
         // Ensure correct visibility class is applied (CSS drives opacity)
         if (this.svgLayer) {
             this.svgLayer.classList.toggle('visible', !!this.visible);
+        }
+
+        if (this.toggleButton) {
+            this.toggleButton.classList.toggle('active', !!this.visible);
+            this.toggleButton.title = this.visible ?
+                t('hide_constellations') :
+                t('show_constellations');
         }
 
         if (this.visible && this.constellations.length > 0) {
