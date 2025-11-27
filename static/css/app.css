@@ -179,19 +179,24 @@ h1 {
     margin-bottom: 20px;
     font-family: monospace;
     white-space: pre;
-    line-height: var(--sky-line-height, 1);
-    letter-spacing: var(--sky-letter-spacing, 2px);
-    font-size: var(--sky-font-size, 1rem);
-    width: 100%;
-    aspect-ratio: 1 / 1; /* Breite bestimmt die Höhe: quadratische Skyview-Area */
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    line-height: 1;
+    letter-spacing: 2px;
+    font-size: 1rem;
+    /* Feste Größe: Breite UND Höhe bleiben beim Zoom konstant */
+    /* 40 Zeilen * ~16px (1rem line-height) + 40px padding = ~680px */
+    width: calc(100% - 2px);
+    min-height: 680px !important;
+    height: 680px !important;
+    max-height: 680px !important;
     overflow: hidden;
-    /* keep physical size; no scrollbars when resolution increases */
     cursor: crosshair;
     position: relative;
-    /* Für die relative Positionierung des Dialogs */
+}
+
+.sky-container .sky-text {
+    position: absolute;
+    top: 20px;
+    left: 20px;
 }
 
 #object-dialog {

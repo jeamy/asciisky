@@ -36,6 +36,11 @@ export class SkyRenderer {
             CONFIG.SKY_WIDTH = size;
             CONFIG.SKY_HEIGHT = size;
             CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
+            this._savedPlanisphereConfig = {
+                width: CONFIG.SKY_WIDTH,
+                height: CONFIG.SKY_HEIGHT,
+                horizonRow: CONFIG.HORIZON_ROW
+            };
         }
         
         // Lade gespeicherte Standortdaten
@@ -54,6 +59,7 @@ export class SkyRenderer {
             height: CONFIG.SKY_HEIGHT,
             horizonRow: CONFIG.HORIZON_ROW
         };
+        this._savedPlanisphereConfig = null;
         // Unterstützte Zoomstufen (Faktoren)
         this.zoomLevels = [1, 2, 4];
         this.zoomIndex = 0; // Start: 1×, bleibt bei mobilen Geräten immer 0
@@ -145,6 +151,11 @@ export class SkyRenderer {
             CONFIG.SKY_WIDTH = size;
             CONFIG.SKY_HEIGHT = size;
             CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
+            this._savedPlanisphereConfig = {
+                width: CONFIG.SKY_WIDTH,
+                height: CONFIG.SKY_HEIGHT,
+                horizonRow: CONFIG.HORIZON_ROW
+            };
         } else if (this.viewMode === 'planisphere' && finalMode === 'horizon' && this._savedHorizonConfigForPlanisphere) {
             // Vorherige Horizon-Konfiguration wiederherstellen
             CONFIG.SKY_WIDTH = this._savedHorizonConfigForPlanisphere.width;
@@ -307,7 +318,6 @@ export class SkyRenderer {
         const horizonRow = CONFIG.HORIZON_ROW;
         const height = CONFIG.SKY_HEIGHT;
         const width = CONFIG.SKY_WIDTH;
-
         // Vertical mapping: above the horizon goes from horizonRow up to 0
         let row;
         if (altitude >= 0) {
@@ -500,7 +510,7 @@ export class SkyRenderer {
                 return;
             }
 
-            // In der Planisphären-Ansicht keinen Zoom-Button anzeigen
+            // In der Planisphären-Ansicht keinen Zoom-Button anzeigen (nur Horizontansicht zoombar)
             if (this.viewMode === 'planisphere') {
                 return;
             }
@@ -537,23 +547,38 @@ export class SkyRenderer {
             this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const factor = this.zoomLevels[this.zoomIndex] || 1;
             
-            // Reset vertical offset when switching zoom levels
-            this.verticalOffset = 0;
-            
-            // Skalierte Rastergröße setzen (physische Größe bleibt dank adjustSkyScale konstant)
+            // Skalierte Rastergröße setzen
             CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
             CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
             CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
-            
-            // Update cursor style based on zoom level
+
+            // Berechne vertikalen Offset, damit die Horizontlinie an derselben Position bleibt
+            if (factor === 1) {
+                // Zurück auf 1x: Offset zurücksetzen, Linie ist wieder zentriert
+                this.verticalOffset = 0;
+            } else if (factor === 2) {
+                // Wechsel auf 2x: Offset setzen, damit Horizontlinie an Position bleibt
+                const originalHorizonRow = this.originalSkyConfig.horizonRow;
+                const newHorizonRow = CONFIG.HORIZON_ROW;
+                const estimatedRowHeight = 16;
+                this.verticalOffset = -((newHorizonRow - originalHorizonRow) * estimatedRowHeight);
+            }
+            // Bei 4x: Offset beibehalten
+
+            // Cursor-Stil aktualisieren
             this.updateCursorStyle();
-            
+
             // Raster neu aufbauen und rendern
             this.initSky();
             this.render();
         } catch (e) {
             console.error('Error toggling zoom:', e);
         }
+    }
+
+    // Platzhalter – keine CSS-Skalierung, Container-Größe wird rein über CSS fixiert
+    adjustSkyScale(factor) {
+        // no-op
     }
 
     isMobileDevice() {
@@ -1361,6 +1386,12 @@ export class SkyRenderer {
         const constellationLayer = this.container.querySelector('#constellation-layer');
         if (constellationLayer) {
             constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
+        }
+
+        // Auch die Planisphären-Horizont-Layer verschieben
+        const planisphereLayer = this.container.querySelector('#planisphere-horizon-layer');
+        if (planisphereLayer) {
+            planisphereLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
     }
 

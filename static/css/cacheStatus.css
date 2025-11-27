@@ -181,9 +181,10 @@
   color: var(--text-dim);
 }
 
-/* Ensure the sky container flexes next to the panel */
+/* Ensure the sky container flexes next to the panel, with width independent of content.
+   flex-basis: 0 verhindert, dass Schriftgrößen-Änderungen (Zoom) die Breite verändern. */
 .main-layout .sky-container {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0; /* allow flex overflow shrinking */
 }
 
