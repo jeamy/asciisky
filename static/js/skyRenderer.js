@@ -12,10 +12,31 @@ export class SkyRenderer {
         this.skyManager = null; // Wird später gesetzt
         // Dedup for background precompute triggers (per loc/time/kinds)
         this._precomputeRequests = new Set();
+        // Einheitlicher Skalierungsfaktor für die Planisphären-Projektion
+        this.planisphereScale = 0.6;
         
         // Horizontale Verschiebung aus den Einstellungen laden
         this.horizontalShift = settingsManager.getHorizontalShift(); 
         console.log(`Loaded horizontal shift: ${this.horizontalShift}°`);
+        
+        // View-Mode aus den Einstellungen laden (horizon oder planisphere)
+        this.viewMode = (settingsManager && typeof settingsManager.getViewMode === 'function')
+            ? settingsManager.getViewMode()
+            : 'horizon';
+        console.log(`Loaded view mode: ${this.viewMode}`);
+
+        // Wenn wir direkt in der Planisphärenansicht starten, Raster quadratisch setzen
+        if (this.viewMode === 'planisphere') {
+            this._savedHorizonConfigForPlanisphere = {
+                width: CONFIG.SKY_WIDTH,
+                height: CONFIG.SKY_HEIGHT,
+                horizonRow: CONFIG.HORIZON_ROW
+            };
+            const size = Math.max(1, CONFIG.SKY_WIDTH);
+            CONFIG.SKY_WIDTH = size;
+            CONFIG.SKY_HEIGHT = size;
+            CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
+        }
         
         // Lade gespeicherte Standortdaten
         this.location = settingsManager.getLocation();
@@ -59,12 +80,19 @@ export class SkyRenderer {
         this.sky = Array(CONFIG.SKY_HEIGHT).fill().map(() => 
             Array(CONFIG.SKY_WIDTH).fill(' ')
         );
-        this.drawHorizon();
+        if (this.viewMode === 'planisphere') {
+            this.drawPlanisphereGrid();
+        } else {
+            this.drawHorizon();
+        }
         // Don't call render() here to avoid recursion
     }
     
     // Methode zum Verschieben des Horizonts nach links
     shiftHorizonLeft() {
+        if (this.viewMode !== 'horizon') {
+            return;
+        }
         // Verschiebe um 5 Grad nach links
         this.horizontalShift -= 5;
         
@@ -81,6 +109,9 @@ export class SkyRenderer {
     
     // Methode zum Verschieben des Horizonts nach rechts
     shiftHorizonRight() {
+        if (this.viewMode !== 'horizon') {
+            return;
+        }
         // Verschiebe um 5 Grad nach rechts
         this.horizontalShift += 5;
         
@@ -93,6 +124,47 @@ export class SkyRenderer {
         if (this.zodiacRenderer && this.zodiacRenderer.visible) {
             try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
         }
+    }
+
+    setViewMode(mode) {
+        const allowed = ['horizon', 'planisphere'];
+        const finalMode = allowed.includes(mode) ? mode : 'horizon';
+        if (this.viewMode === finalMode) {
+            return this.viewMode;
+        }
+        // Beim Wechsel zwischen den Ansichten die Rastergröße anpassen
+        if (finalMode === 'planisphere') {
+            // Aktuelle Horizon-Konfiguration sichern, um sie beim Zurückwechseln wiederherzustellen
+            this._savedHorizonConfigForPlanisphere = {
+                width: CONFIG.SKY_WIDTH,
+                height: CONFIG.SKY_HEIGHT,
+                horizonRow: CONFIG.HORIZON_ROW
+            };
+            // Planisphären-Raster quadratisch machen: Höhe an Breite anpassen
+            const size = Math.max(1, CONFIG.SKY_WIDTH);
+            CONFIG.SKY_WIDTH = size;
+            CONFIG.SKY_HEIGHT = size;
+            CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
+        } else if (this.viewMode === 'planisphere' && finalMode === 'horizon' && this._savedHorizonConfigForPlanisphere) {
+            // Vorherige Horizon-Konfiguration wiederherstellen
+            CONFIG.SKY_WIDTH = this._savedHorizonConfigForPlanisphere.width;
+            CONFIG.SKY_HEIGHT = this._savedHorizonConfigForPlanisphere.height;
+            CONFIG.HORIZON_ROW = this._savedHorizonConfigForPlanisphere.horizonRow;
+        }
+
+        this.viewMode = finalMode;
+        try {
+            if (settingsManager && typeof settingsManager.setViewMode === 'function') {
+                settingsManager.setViewMode(finalMode);
+            }
+        } catch (_) { /* noop */ }
+        // Reset pan/drag state when switching modes
+        this.verticalOffset = 0;
+        this.isDragging = false;
+        this._suppressNextClick = false;
+        this.initSky();
+        this.render();
+        return this.viewMode;
     }
 
     drawHorizon() {
@@ -186,9 +258,52 @@ export class SkyRenderer {
 
     }
 
+    drawPlanisphereGrid() {
+        const height = CONFIG.SKY_HEIGHT;
+        const width = CONFIG.SKY_WIDTH;
+        const centerRow = Math.floor(height / 2);
+        const centerCol = Math.floor(width / 2);
+        const maxRadius = Math.max(1, Math.min(centerRow, centerCol) - 2);
+
+        const center = { row: centerRow, col: centerCol };
+        const labels = [
+            { key: 'north', azimuth: 0 },
+            { key: 'east', azimuth: 90 },
+            { key: 'south', azimuth: 180 },
+            { key: 'west', azimuth: 270 }
+        ];
+
+        labels.forEach(({ key, azimuth }) => {
+            const pos = this.projectPlanisphereAltAzToGrid(0, azimuth);
+            const dx = pos.col - center.col;
+            const dy = pos.row - center.row;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const outRow = Math.round(center.row + (dy / len) * (maxRadius + 1));
+            const outCol = Math.round(center.col + (dx / len) * (maxRadius + 1));
+
+            const row = Math.max(0, Math.min(height - 1, outRow));
+            const label = t(key);
+            const startCol = Math.max(0, Math.min(width - label.length, outCol - Math.floor(label.length / 2)));
+            for (let i = 0; i < label.length && startCol + i < width; i++) {
+                this.sky[row][startCol + i] = label[i];
+            }
+        });
+    }
+
     // Converts altitude/azimuth into integer grid coordinates (row, col)
     // This projection is used by both ASCII rendering and SVG overlays
     altAzToGridPosition(altitude, azimuth) {
+        return this.projectAltAzToGrid(altitude, azimuth);
+    }
+
+    projectAltAzToGrid(altitude, azimuth) {
+        if (this.viewMode === 'planisphere') {
+            return this.projectPlanisphereAltAzToGrid(altitude, azimuth);
+        }
+        return this.projectHorizonAltAzToGrid(altitude, azimuth);
+    }
+
+    projectHorizonAltAzToGrid(altitude, azimuth) {
         const horizonRow = CONFIG.HORIZON_ROW;
         const height = CONFIG.SKY_HEIGHT;
         const width = CONFIG.SKY_WIDTH;
@@ -213,6 +328,54 @@ export class SkyRenderer {
         }
         row = Math.max(0, Math.min(height - 1, row));
         col = Math.max(0, Math.min(width - 1, col));
+        return { row, col };
+    }
+
+    projectPlanisphereAltAzToGrid(altitude, azimuth) {
+        const height = CONFIG.SKY_HEIGHT;
+        const width = CONFIG.SKY_WIDTH;
+        const centerRow = Math.floor(height / 2);
+        const centerCol = Math.floor(width / 2);
+        const maxRadius = Math.max(1, Math.min(centerRow, centerCol) - 2);
+        const scale = (this.viewMode === 'planisphere' && typeof this.planisphereScale === 'number')
+            ? this.planisphereScale
+            : 1;
+        const baseRadius = maxRadius * scale;
+
+        let alt = Number.isFinite(altitude) ? altitude : 0;
+        if (alt > 90) alt = 90;
+        if (alt < -90) alt = -90;
+
+        const altRad = alt * Math.PI / 180;
+        const maxZenithAngle = Math.PI / 2;
+
+        let r;
+        if (alt >= 0) {
+            // 90° (Zenit) -> r = 0, 0° (Horizont) -> r = baseRadius
+            let zenithAngle = maxZenithAngle - altRad;
+            if (zenithAngle < 0) zenithAngle = 0;
+            if (zenithAngle > maxZenithAngle) zenithAngle = maxZenithAngle;
+            r = (zenithAngle / maxZenithAngle) * baseRadius;
+        } else {
+            // Unter dem Horizont: linear außerhalb des Horizontkreises erweitern
+            const below = Math.abs(alt); // 0..90
+            r = baseRadius + (below / 90) * baseRadius; // -90° -> 2× baseRadius
+        }
+
+        let az = Number.isFinite(azimuth) ? azimuth : 0;
+        while (az < 0) az += 360;
+        while (az >= 360) az -= 360;
+        const theta = az * Math.PI / 180;
+
+        const dx = r * Math.sin(theta);
+        const dy = r * Math.cos(theta);
+
+        let col = Math.round(centerCol + dx);
+        let row = Math.round(centerRow - dy);
+
+        row = Math.max(0, Math.min(height - 1, row));
+        col = Math.max(0, Math.min(width - 1, col));
+
         return { row, col };
     }
 
@@ -280,6 +443,11 @@ export class SkyRenderer {
             this.applyVerticalOffset();
             // Re-setup pan events since DOM element was recreated
             this.setupPanEvents();
+            if (this.viewMode === 'planisphere') {
+                this.renderPlanisphereHorizonOverlay();
+            } else {
+                this.removePlanisphereHorizonOverlay();
+            }
             // Reproject constellation overlay to match the new layout and horizon shift
             if (this.zodiacRenderer && this.zodiacRenderer.visible) {
                 this.zodiacRenderer.updatePositions();
@@ -303,6 +471,11 @@ export class SkyRenderer {
                 return;
             }
 
+            // In der Planisphären-Ansicht keinen Zoom-Button anzeigen
+            if (this.viewMode === 'planisphere') {
+                return;
+            }
+
             const btn = document.createElement('button');
             btn.id = 'zoom-toggle';
             btn.className = 'zoom-button';
@@ -322,6 +495,10 @@ export class SkyRenderer {
 
     toggleZoom() {
         try {
+            // Zoom nur in der Horizontansicht erlauben
+            if (this.viewMode === 'planisphere') {
+                return;
+            }
             // Zoom nur auf Desktop-Geräten erlauben
             if (this.isMobileDevice()) {
                 return;
@@ -373,6 +550,9 @@ export class SkyRenderer {
         const existingArrows = document.getElementById('navigation-arrows');
         if (existingArrows) {
             existingArrows.remove();
+        }
+        if (this.viewMode !== 'horizon') {
+            return;
         }
         
         // Erstelle neue Navigationspfeile
@@ -518,18 +698,9 @@ export class SkyRenderer {
                 let col = (obj.displayCol !== undefined) ? obj.displayCol : null;
                 // Fallback falls Position nicht gesetzt wurde
                 if (row === null || col === null) {
-                    const horizonRow = CONFIG.HORIZON_ROW;
-                    const height = CONFIG.SKY_HEIGHT;
-                    const width = CONFIG.SKY_WIDTH;
-                    if (obj.altitude >= 0) {
-                        row = Math.round(horizonRow - (obj.altitude / 90 * horizonRow));
-                    } else {
-                        row = Math.round(horizonRow + (Math.abs(obj.altitude) / 90 * (height - horizonRow - 1)));
-                    }
-                    let effectiveAzimuth = obj.azimuth - this.horizontalShift;
-                    while (effectiveAzimuth < 0) effectiveAzimuth += 360;
-                    while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
-                    col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
+                    const pos = this.altAzToGridPosition(obj.altitude, obj.azimuth);
+                    row = pos.row;
+                    col = pos.col;
                 }
                 if (row === null || col === null) continue;
 
@@ -612,35 +783,19 @@ export class SkyRenderer {
             return;
         }
         
-        const horizonRow = CONFIG.HORIZON_ROW;
         const height = CONFIG.SKY_HEIGHT;
         const width = CONFIG.SKY_WIDTH;
         
         // Berechne die Zeile basierend auf der Höhe (-90° bis 90°)
         // Für Objekte über dem Horizont: 0 bis horizonRow
         // Für Objekte unter dem Horizont: horizonRow bis height-1
-        let row;
-        if (obj.altitude >= 0) {
-            // Über dem Horizont (0° bis 90°)
-            row = Math.round(horizonRow - (obj.altitude / 90 * horizonRow));
-        } else {
-            // Unter dem Horizont (0° bis -90°)
-            row = Math.round(horizonRow + (Math.abs(obj.altitude) / 90 * (height - horizonRow - 1)));
-        }
+        const pos = this.altAzToGridPosition(obj.altitude, obj.azimuth);
+        let row = pos.row;
+        let col = pos.col;
         
         // Berechne die Spalte basierend auf dem Azimut (0° bis 360°) mit horizontaler Verschiebung
         // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
         // Nutze den vollen Bereich 0°–360° über die gesamte Breite
-        
-        // Berechne den effektiven Azimut mit Verschiebung
-        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
-        
-        // Normalisiere den Azimut auf den Bereich 0-360
-        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
-        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
-        
-        // Berechne die Spalte basierend auf dem normalisierten Azimut
-        const col = Math.round((effectiveAzimuth / 360) * (width - 2)) + 1;
         
         // Speichere die Position des Objekts für spätere Verwendung
         obj.displayRow = row;
@@ -907,19 +1062,16 @@ export class SkyRenderer {
                     // Berücksichtige Sichtbarkeit basierend auf Höhe und Konfiguration
                     if (CONFIG.SHOW_BELOW_HORIZON || obj.altitude >= 0) {
                         // Verwende die gespeicherte Position, wenn vorhanden
-                        const objRow = obj.displayRow !== undefined ? obj.displayRow :
-                            (obj.altitude >= 0) ?
-                                Math.round(CONFIG.HORIZON_ROW - (obj.altitude / 90 * CONFIG.HORIZON_ROW)) :
-                                Math.round(CONFIG.HORIZON_ROW + (Math.abs(obj.altitude) / 90 * (CONFIG.SKY_HEIGHT - CONFIG.HORIZON_ROW - 1)));
-
-                        let effectiveAzimuth = obj.azimuth - this.horizontalShift;
-
-                        // Normalisiere den Azimut auf den Bereich 0-360
-                        while (effectiveAzimuth < 0) effectiveAzimuth += 360;
-                        while (effectiveAzimuth >= 360) effectiveAzimuth -= 360;
-
-                        const objCol = obj.displayCol !== undefined ? obj.displayCol :
-                            Math.round((effectiveAzimuth / 360) * (CONFIG.SKY_WIDTH - 2)) + 1;
+                        let objRow;
+                        let objCol;
+                        if (obj.displayRow !== undefined && obj.displayCol !== undefined) {
+                            objRow = obj.displayRow;
+                            objCol = obj.displayCol;
+                        } else {
+                            const pos = this.altAzToGridPosition(obj.altitude, obj.azimuth);
+                            objRow = pos.row;
+                            objCol = pos.col;
+                        }
 
                         // Berechne Distanz zum Klick
                         const distance = Math.sqrt(Math.pow(row - objRow, 2) + Math.pow(col - objCol, 2));
@@ -1000,10 +1152,14 @@ export class SkyRenderer {
 
                 if (e.key === 'ArrowLeft') {
                     e.preventDefault();
-                    this.shiftHorizonLeft();
+                    if (this.viewMode === 'horizon') {
+                        this.shiftHorizonLeft();
+                    }
                 } else if (e.key === 'ArrowRight') {
                     e.preventDefault();
-                    this.shiftHorizonRight();
+                    if (this.viewMode === 'horizon') {
+                        this.shiftHorizonRight();
+                    }
                 }
             } catch (_) { /* noop */ }
         });
@@ -1077,6 +1233,14 @@ export class SkyRenderer {
 
             // Horizontal drag -> pan horizon in 5° steps (same as arrow buttons), always active
             {
+                if (this.viewMode !== 'horizon') {
+                    this._horizDragAccumPx = 0;
+                    this._horizDragPending = false;
+                    this._horizDragScheduled = false;
+                    this._horizDragDirection = 0;
+                    this._didDrag = true;
+                    return;
+                }
                 const deltaX = e.clientX - this.lastMouseX;
                 this._horizDragAccumPx += deltaX;
                 this.lastMouseX = e.clientX;
@@ -1171,6 +1335,79 @@ export class SkyRenderer {
         }
     }
 
+    renderPlanisphereHorizonOverlay() {
+        try {
+            const existing = this.container.querySelector('#planisphere-horizon-layer');
+            if (existing) {
+                existing.remove();
+            }
+
+            if (this.viewMode !== 'planisphere') {
+                return;
+            }
+
+            const skyText = this.container.querySelector('.sky-text');
+            if (!skyText) return;
+
+            const width = skyText.clientWidth;
+            const height = skyText.clientHeight;
+            if (!width || !height) return;
+
+            // Align the SVG exactly with the ASCII sky area
+            const offsetX = skyText.offsetLeft;
+            const offsetY = skyText.offsetTop;
+
+            // Verwende dieselbe Projektion wie für die Objekte, um die Horizontlinie
+            // als Kurve (alt = 0°) zu zeichnen. Dadurch bleibt die Darstellung
+            // physikalisch konsistent, auch wenn die ASCII-Zellen nicht quadratisch sind.
+            const cellW = width / CONFIG.SKY_WIDTH;
+            const cellH = height / CONFIG.SKY_HEIGHT;
+
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.id = 'planisphere-horizon-layer';
+            svg.setAttribute('width', `${width}`);
+            svg.setAttribute('height', `${height}`);
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.style.position = 'absolute';
+            svg.style.left = `${offsetX}px`;
+            svg.style.top = `${offsetY}px`;
+            svg.style.width = `${width}px`;
+            svg.style.height = `${height}px`;
+            svg.style.pointerEvents = 'none';
+
+            const horizonPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const step = 2; // Schrittweite in Grad für die Abtastung
+            let d = '';
+            for (let az = 0; az <= 360; az += step) {
+                const p = this.projectPlanisphereAltAzToGrid(0, az);
+                const px = (p.col + 0.5) * cellW;
+                const py = (p.row + 0.5) * cellH;
+                d += (az === 0 ? `M ${px} ${py}` : ` L ${px} ${py}`);
+            }
+            d += ' Z';
+            horizonPath.setAttribute('d', d);
+            horizonPath.setAttribute('class', 'planisphere-horizon-curve');
+
+            svg.appendChild(horizonPath);
+
+            const constellationLayer = document.getElementById('constellation-layer');
+            if (constellationLayer && constellationLayer.parentNode === this.container) {
+                this.container.insertBefore(svg, constellationLayer);
+            } else {
+                this.container.appendChild(svg);
+            }
+        } catch (e) {
+            console.error('Error rendering planisphere horizon overlay:', e);
+        }
+    }
+
+    removePlanisphereHorizonOverlay() {
+        try {
+            const existing = this.container.querySelector('#planisphere-horizon-layer');
+            if (existing) existing.remove();
+        } catch (_) { /* noop */ }
+    }
+
     setupTouchEvents() {
         let touchStartX = 0;
         let touchStartY = 0;
@@ -1208,10 +1445,14 @@ export class SkyRenderer {
                 
                 if (touchDistanceX > 0) {
                     // Swipe right -> shift horizon left
-                    this.shiftHorizonLeft();
+                    if (this.viewMode === 'horizon') {
+                        this.shiftHorizonLeft();
+                    }
                 } else {
                     // Swipe left -> shift horizon right
-                    this.shiftHorizonRight();
+                    if (this.viewMode === 'horizon') {
+                        this.shiftHorizonRight();
+                    }
                 }
             }
         });

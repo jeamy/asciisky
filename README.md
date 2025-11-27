@@ -33,6 +33,10 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Hover tooltips with localized date, sunrise, sunset, and day length in hours and minutes
   - Visualization of astronomical, nautical, and civil twilight as colored bands
   - Monthly markers (vertical lines) on the 1st of each month with short month labels at the bottom
+- **Planisphere view** (circular sky map)
+  - Toggle between horizon and planisphere view
+  - Physically consistent projection of objects above and below the horizon
+  - SVG horizon overlay aligned with the ASCII sky grid
 - Minimalist UI design with optimized space usage
 - Horizontal navigation with arrow controls and mouse drag panning
 - Labels for bright asteroids, comets, and constellations

@@ -29,7 +29,8 @@ export class SettingsManager {
                 name: "Wien"
             },
             display: {
-                horizontalShift: 0
+                horizontalShift: 0,
+                viewMode: 'horizon'
             },
             // Simulierte Zeit: deaktiviert per Default
             simTime: {
@@ -79,6 +80,28 @@ export class SettingsManager {
     // Horizontale Verschiebung abrufen
     getHorizontalShift() {
         return this.settings.display?.horizontalShift || 0;
+    }
+
+    getViewMode() {
+        try {
+            const display = this.settings.display || {};
+            const mode = display.viewMode;
+            if (mode === 'horizon' || mode === 'planisphere') {
+                return mode;
+            }
+        } catch (_) {}
+        return 'horizon';
+    }
+
+    setViewMode(mode) {
+        const allowed = ['horizon', 'planisphere'];
+        const finalMode = allowed.includes(mode) ? mode : 'horizon';
+        if (!this.settings.display) {
+            this.settings.display = {};
+        }
+        this.settings.display.viewMode = finalMode;
+        this.saveSettings();
+        return finalMode;
     }
 
     // --- Theme & Sprache ---

@@ -68,6 +68,10 @@ export const i18n = {
         'south': 'S',
         'west': 'W',
         
+        // Ansichten
+        'horizon_view': 'Horizontansicht',
+        'planisphere_view': 'Planisphäre',
+        
         // Dialog-Texte
         'multiple_objects_found': 'Mehrere Objekte',
         'close': '×',
@@ -163,6 +167,8 @@ export const i18n = {
         'help_object_click_desc': 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten',
         'help_navigation': 'Navigation',
         'help_navigation_desc': 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)',
+        'help_view_modes': 'Ansichten: Horizont / Planisphäre',
+        'help_view_modes_desc': 'Über den Tab unter der Himmelsansicht können Sie zwischen Horizontansicht (rechteckig) und Planisphäre (runder Himmelsatlas) umschalten. In der Planisphäre zeigt die gepunktete Kurve den Horizont: Objekte über dem Horizont liegen innerhalb, Objekte darunter außerhalb der Kurve.',
         'help_zoom_pan': 'Zoom und Pan',
         'help_zoom_pan_desc': 'Am Desktop können Sie über den Zoom-Button die Ansicht vergrößern. Bei gezoomter Ansicht können Sie mit gedrückter Maustaste die Ansicht nach oben und unten verschieben.',
         'help_symbols': 'Symbole',
@@ -311,6 +317,10 @@ export const i18n = {
         'east': 'E',
         'south': 'S',
         'west': 'W',
+        
+        // Views
+        'horizon_view': 'Horizon view',
+        'planisphere_view': 'Planisphere',
         
         // Dialog texts
         'multiple_objects_found': 'Multiple Objects',

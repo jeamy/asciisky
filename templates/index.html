@@ -69,8 +69,14 @@
         <aside id="visible-objects-panel" class="visible-objects-panel" aria-live="polite"></aside>
         <aside id="cache-status-panel" class="cache-status-panel" aria-live="polite"></aside>
     </div>
-    <div id="sky-container" class="sky-container">
-        <!-- Sky will be rendered here -->
+    <div class="sky-panel">
+        <div id="view-mode-tabs" class="view-mode-tabs" role="tablist" aria-label="Sky view mode">
+            <button id="view-tab-horizon" class="view-tab active" role="tab" aria-selected="true">Horizon</button>
+            <button id="view-tab-planisphere" class="view-tab" role="tab" aria-selected="false">Planisphere</button>
+        </div>
+        <div id="sky-container" class="sky-container" role="tabpanel" aria-labelledby="view-tab-horizon">
+            <!-- Sky will be rendered here -->
+        </div>
     </div>
 </div>
     
@@ -157,6 +163,7 @@
             setupLocationButton();
             setupSimTimeControls();
             setupMagnitudeFilters();
+            setupViewModeTabs();
             updateUITexts();
             
             // Übernehme aktuellen (Session-)Standort in UI und SkyManager
@@ -295,6 +302,18 @@
         // Aktualisiert alle UI-Texte basierend auf der aktuellen Sprache
         function updateUITexts() {
             document.getElementById('click-info').textContent = t('click_info');
+            
+            // Aktualisiere die View-Mode-Tabs
+            const horizonTab = document.getElementById('view-tab-horizon');
+            const planisphereTab = document.getElementById('view-tab-planisphere');
+            if (horizonTab && planisphereTab) {
+                const horizonLabel = t('horizon_view');
+                const planisphereLabel = t('planisphere_view');
+                horizonTab.textContent = horizonLabel;
+                planisphereTab.textContent = planisphereLabel;
+                horizonTab.title = horizonLabel;
+                planisphereTab.title = planisphereLabel;
+            }
             
             // Aktualisiere die Objektnamen in der Objektliste
             document.querySelectorAll('.object-btn').forEach(btn => {
@@ -567,6 +586,55 @@
             link.type = 'text/css';
             link.href = url;
             document.head.appendChild(link);
+        }
+        
+        function setupViewModeTabs() {
+            const tabsContainer = document.getElementById('view-mode-tabs');
+            const horizonBtn = document.getElementById('view-tab-horizon');
+            const planisphereBtn = document.getElementById('view-tab-planisphere');
+            if (!tabsContainer || !horizonBtn || !planisphereBtn || !renderer) return;
+
+            const applyActive = (mode) => {
+                const isHorizon = mode === 'horizon';
+                horizonBtn.classList.toggle('active', isHorizon);
+                planisphereBtn.classList.toggle('active', !isHorizon);
+                horizonBtn.setAttribute('aria-selected', isHorizon ? 'true' : 'false');
+                planisphereBtn.setAttribute('aria-selected', !isHorizon ? 'true' : 'false');
+                const skyEl = document.getElementById('sky-container');
+                if (skyEl) {
+                    skyEl.setAttribute('aria-labelledby', isHorizon ? 'view-tab-horizon' : 'view-tab-planisphere');
+                }
+            };
+
+            let initialMode = 'horizon';
+            try {
+                if (settingsManager && typeof settingsManager.getViewMode === 'function') {
+                    const saved = settingsManager.getViewMode();
+                    if (saved === 'horizon' || saved === 'planisphere') {
+                        initialMode = saved;
+                    }
+                }
+            } catch (_) { /* noop */ }
+
+            try {
+                if (renderer && typeof renderer.setViewMode === 'function') {
+                    renderer.setViewMode(initialMode);
+                }
+            } catch (_) { /* noop */ }
+
+            applyActive(initialMode);
+
+            horizonBtn.addEventListener('click', () => {
+                if (!renderer || typeof renderer.setViewMode !== 'function') return;
+                renderer.setViewMode('horizon');
+                applyActive('horizon');
+            });
+
+            planisphereBtn.addEventListener('click', () => {
+                if (!renderer || typeof renderer.setViewMode !== 'function') return;
+                renderer.setViewMode('planisphere');
+                applyActive('planisphere');
+            });
         }
         
         // Handler für Standortänderungen
