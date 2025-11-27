@@ -13,7 +13,7 @@ export class SkyRenderer {
         // Dedup for background precompute triggers (per loc/time/kinds)
         this._precomputeRequests = new Set();
         // Einheitlicher Skalierungsfaktor für die Planisphären-Projektion
-        this.planisphereScale = 0.6;
+        this.planisphereScale = CONFIG.PLANISPHERE_ASPECT_SCALE
         
         // Horizontale Verschiebung aus den Einstellungen laden
         this.horizontalShift = settingsManager.getHorizontalShift(); 
@@ -341,6 +341,21 @@ export class SkyRenderer {
             ? this.planisphereScale
             : 1;
         const baseRadius = maxRadius * scale;
+        const configAspect = (CONFIG && typeof CONFIG.PLANISPHERE_ASPECT_RATIO === 'number' && CONFIG.PLANISPHERE_ASPECT_RATIO > 0)
+            ? CONFIG.PLANISPHERE_ASPECT_RATIO
+            : 1;
+        const measuredAspect = (this.viewMode === 'planisphere' && typeof this.planisphereAspectMeasured === 'number' && this.planisphereAspectMeasured > 0)
+            ? this.planisphereAspectMeasured
+            : null;
+
+        let aspect = 1;
+        if (measuredAspect) {
+            // Bevorzuge die gemessene Zeichen-Aspect-Ratio (Zellenhöhe / Zellenbreite)
+            aspect = measuredAspect;
+        } else if (configAspect > 0) {
+            // Fallback: Konfigurierter Wert (z.B. 1.5 für 1:1.5 Zellen)
+            aspect = configAspect;
+        }
 
         let alt = Number.isFinite(altitude) ? altitude : 0;
         if (alt > 90) alt = 90;
@@ -368,7 +383,7 @@ export class SkyRenderer {
         const theta = az * Math.PI / 180;
 
         const dx = r * Math.sin(theta);
-        const dy = r * Math.cos(theta);
+        const dy = (r * Math.cos(theta)) / aspect;
 
         let col = Math.round(centerCol + dx);
         let row = Math.round(centerRow - dy);
@@ -419,6 +434,20 @@ export class SkyRenderer {
 
         // Füge den Himmelstext hinzu
         this.container.appendChild(skyTextDiv);
+        
+        try {
+            if (this.viewMode === 'planisphere') {
+                const rect = skyTextDiv.getBoundingClientRect();
+                const cellW = rect.width / CONFIG.SKY_WIDTH;
+                const cellH = rect.height / CONFIG.SKY_HEIGHT;
+                if (cellW > 0 && cellH > 0) {
+                    const measured = cellH / cellW;
+                    if (Number.isFinite(measured) && measured > 0) {
+                        this.planisphereAspectMeasured = measured;
+                    }
+                }
+            }
+        } catch (_) { /* noop */ }
         
         // Füge das SVG-Layer wieder hinzu, falls es existierte
         if (svgLayer) {
@@ -1375,20 +1404,26 @@ export class SkyRenderer {
             svg.style.height = `${height}px`;
             svg.style.pointerEvents = 'none';
 
-            const horizonPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            const step = 2; // Schrittweite in Grad für die Abtastung
-            let d = '';
-            for (let az = 0; az <= 360; az += step) {
-                const p = this.projectPlanisphereAltAzToGrid(0, az);
-                const px = (p.col + 0.5) * cellW;
-                const py = (p.row + 0.5) * cellH;
-                d += (az === 0 ? `M ${px} ${py}` : ` L ${px} ${py}`);
-            }
-            d += ' Z';
-            horizonPath.setAttribute('d', d);
-            horizonPath.setAttribute('class', 'planisphere-horizon-curve');
+            // Berechne Kreiszentrum und Radius aus derselben Projektion,
+            // die auch das ASCII-Raster verwendet, damit beides exakt übereinstimmt.
+            const centerRow = Math.floor(CONFIG.SKY_HEIGHT / 2);
+            const centerCol = Math.floor(CONFIG.SKY_WIDTH / 2);
+            const centerX = (centerCol + 0.5) * cellW;
+            const centerY = (centerRow + 0.5) * cellH;
 
-            svg.appendChild(horizonPath);
+            // Ein Punkt auf dem Horizont (alt = 0°, az = 0°) definiert den Radius
+            const horizonPoint = this.projectPlanisphereAltAzToGrid(0, 0);
+            const hx = (horizonPoint.col + 0.5) * cellW;
+            const hy = (horizonPoint.row + 0.5) * cellH;
+            const radius = Math.sqrt((hx - centerX) ** 2 + (hy - centerY) ** 2);
+
+            const horizonCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            horizonCircle.setAttribute('cx', centerX);
+            horizonCircle.setAttribute('cy', centerY);
+            horizonCircle.setAttribute('r', radius);
+            horizonCircle.setAttribute('class', 'planisphere-horizon-curve');
+
+            svg.appendChild(horizonCircle);
 
             const constellationLayer = document.getElementById('constellation-layer');
             if (constellationLayer && constellationLayer.parentNode === this.container) {

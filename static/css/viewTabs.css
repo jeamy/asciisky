@@ -1,0 +1,57 @@
+/* View Tabs Styling - positioned in top-left corner */
+
+.view-tabs {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 100;
+}
+
+.view-tab {
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    color: var(--primary-color);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: normal;
+    font-size: 0.9rem;
+    text-align: left;
+    min-width: 140px;
+    transition: all 0.2s;
+}
+
+.view-tab:first-child {
+    border-radius: 4px 4px 0 0;
+}
+
+.view-tab:last-child {
+    border-radius: 0 0 4px 4px;
+}
+
+.view-tab:hover {
+    background: var(--ui-bg-hover);
+}
+
+.view-tab.active {
+    background: var(--ui-bg-active);
+    border-color: var(--primary-color);
+    font-weight: bold;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+    .view-tabs {
+        top: 10px;
+        left: 10px;
+    }
+
+    .view-tab {
+        padding: 10px 14px;
+        font-size: 1rem;
+        min-width: 120px;
+    }
+}

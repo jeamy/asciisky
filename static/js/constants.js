@@ -74,6 +74,8 @@ export const CONFIG = {
     MAX_ALTITUDE: 90,              // Maximale Höhe in Grad (Zenit)
     MIN_ALTITUDE: -90,             // Minimale Höhe in Grad (Nadir)
     ALTITUDE_PRECISION: 1,         // Genauigkeit der Höhenanzeige in Grad
+    PLANISPHERE_ASPECT_RATIO: 1.5,
+    PLANISPHERE_ASPECT_SCALE: 0.9,
     LABELS: {
         ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
         BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
