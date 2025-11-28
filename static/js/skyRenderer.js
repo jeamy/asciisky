@@ -19,6 +19,10 @@ export class SkyRenderer {
         this.horizontalShift = settingsManager.getHorizontalShift();
         console.log(`Loaded horizontal shift: ${this.horizontalShift}°`);
 
+        // Planisphären-Rotation aus den Einstellungen laden
+        this.planisphereRotation = settingsManager.getPlanisphereRotation ? settingsManager.getPlanisphereRotation() : 0;
+        console.log(`Loaded planisphere rotation: ${this.planisphereRotation}°`);
+
         // View-Mode aus den Einstellungen laden (horizon oder planisphere)
         this.viewMode = (settingsManager && typeof settingsManager.getViewMode === 'function')
             ? settingsManager.getViewMode()
@@ -128,6 +132,48 @@ export class SkyRenderer {
 
         // Speichere die aktuelle Verschiebung
         settingsManager.setHorizontalShift(this.horizontalShift);
+
+        // Aktualisiere die Anzeige
+        this.render();
+        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
+        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
+        }
+    }
+
+    // Methode zum Rotieren der Planisphäre nach links (gegen den Uhrzeigersinn)
+    rotatePlanisphereLeft() {
+        if (this.viewMode !== 'planisphere') {
+            return;
+        }
+        // Rotiere um 5 Grad nach links (gegen den Uhrzeigersinn)
+        this.planisphereRotation -= 5;
+
+        // Speichere die aktuelle Rotation
+        if (settingsManager.setPlanisphereRotation) {
+            settingsManager.setPlanisphereRotation(this.planisphereRotation);
+        }
+
+        // Aktualisiere die Anzeige
+        this.render();
+        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
+        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
+        }
+    }
+
+    // Methode zum Rotieren der Planisphäre nach rechts (im Uhrzeigersinn)
+    rotatePlanisphereRight() {
+        if (this.viewMode !== 'planisphere') {
+            return;
+        }
+        // Rotiere um 5 Grad nach rechts (im Uhrzeigersinn)
+        this.planisphereRotation += 5;
+
+        // Speichere die aktuelle Rotation
+        if (settingsManager.setPlanisphereRotation) {
+            settingsManager.setPlanisphereRotation(this.planisphereRotation);
+        }
 
         // Aktualisiere die Anzeige
         this.render();
@@ -403,10 +449,13 @@ export class SkyRenderer {
 
         let az = Number.isFinite(azimuth) ? azimuth : 0;
 
-        // Apply rotation if configured (e.g. 180° for South up)
+        // Apply static rotation from config (e.g. 180° for South up)
         if (CONFIG.PLANISPHERE_ROTATION) {
             az += CONFIG.PLANISPHERE_ROTATION;
         }
+
+        // Apply user-controlled rotation (from rotation buttons/drag)
+        az += this.planisphereRotation;
 
         while (az < 0) az += 360;
         while (az >= 360) az -= 360;
@@ -618,7 +667,9 @@ export class SkyRenderer {
         const skyEl = this.container.querySelector('.sky-text');
         if (skyEl) {
             const factor = this.zoomLevels[this.zoomIndex] || 1;
-            if (factor > 1 && !this.isMobileDevice()) {
+            // Show grab cursor when zoomed in horizon view, or always in planisphere view (for rotation)
+            if ((factor > 1 && this.viewMode === 'horizon' && !this.isMobileDevice()) ||
+                (this.viewMode === 'planisphere' && !this.isMobileDevice())) {
                 skyEl.style.cursor = 'grab';
             } else {
                 skyEl.style.cursor = 'default';
@@ -633,40 +684,62 @@ export class SkyRenderer {
         if (existingArrows) {
             existingArrows.remove();
         }
-        if (this.viewMode !== 'horizon') {
-            return;
-        }
 
         // Erstelle neue Navigationspfeile
         const arrowsDiv = document.createElement('div');
         arrowsDiv.id = 'navigation-arrows';
         arrowsDiv.className = 'navigation-arrows';
 
-        // Positioniere die Pfeile vertikal auf Höhe der Horizontlinie
-        const horizonRow = CONFIG.HORIZON_ROW;
-        const totalRows = CONFIG.SKY_HEIGHT - 1;
-        const horizonYPercent = (horizonRow / totalRows) * 100;
-        // Setze CSS-Variable, Styling verbleibt in externer CSS
-        arrowsDiv.style.setProperty('--horizon-top', `${horizonYPercent}%`);
+        if (this.viewMode === 'horizon') {
+            // Positioniere die Pfeile vertikal auf Höhe der Horizontlinie
+            const horizonRow = CONFIG.HORIZON_ROW;
+            const totalRows = CONFIG.SKY_HEIGHT - 1;
+            const horizonYPercent = (horizonRow / totalRows) * 100;
+            // Setze CSS-Variable, Styling verbleibt in externer CSS
+            arrowsDiv.style.setProperty('--horizon-top', `${horizonYPercent}%`);
 
-        // Linker Pfeil (rechts neben West)
-        const leftArrow = document.createElement('button');
-        leftArrow.id = 'nav-left';
-        leftArrow.className = 'nav-arrow nav-arrow-left';
-        leftArrow.title = t('shift_left');
-        leftArrow.innerHTML = '&#9665;';
-        leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonLeft(); });
+            // Linker Pfeil (rechts neben West)
+            const leftArrow = document.createElement('button');
+            leftArrow.id = 'nav-left';
+            leftArrow.className = 'nav-arrow nav-arrow-left';
+            leftArrow.title = t('shift_left');
+            leftArrow.innerHTML = '&#9665;';
+            leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonLeft(); });
 
-        // Rechter Pfeil (links neben Ost)
-        const rightArrow = document.createElement('button');
-        rightArrow.id = 'nav-right';
-        rightArrow.className = 'nav-arrow nav-arrow-right';
-        rightArrow.title = t('shift_right');
-        rightArrow.innerHTML = '&#9655;';
-        rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonRight(); });
+            // Rechter Pfeil (links neben Ost)
+            const rightArrow = document.createElement('button');
+            rightArrow.id = 'nav-right';
+            rightArrow.className = 'nav-arrow nav-arrow-right';
+            rightArrow.title = t('shift_right');
+            rightArrow.innerHTML = '&#9655;';
+            rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonRight(); });
 
-        arrowsDiv.appendChild(leftArrow);
-        arrowsDiv.appendChild(rightArrow);
+            arrowsDiv.appendChild(leftArrow);
+            arrowsDiv.appendChild(rightArrow);
+        } else if (this.viewMode === 'planisphere') {
+            // Für Planisphere: Pfeile für Rotation
+            arrowsDiv.classList.add('planisphere-arrows');
+
+            // Linker Pfeil (gegen den Uhrzeigersinn)
+            const leftArrow = document.createElement('button');
+            leftArrow.id = 'nav-left';
+            leftArrow.className = 'nav-arrow nav-arrow-left';
+            leftArrow.title = t('rotate_left') || 'Rotate Left';
+            leftArrow.innerHTML = '&#8634;'; // Counterclockwise arrow
+            leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.rotatePlanisphereLeft(); });
+
+            // Rechter Pfeil (im Uhrzeigersinn)
+            const rightArrow = document.createElement('button');
+            rightArrow.id = 'nav-right';
+            rightArrow.className = 'nav-arrow nav-arrow-right';
+            rightArrow.title = t('rotate_right') || 'Rotate Right';
+            rightArrow.innerHTML = '&#8635;'; // Clockwise arrow
+            rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.rotatePlanisphereRight(); });
+
+            arrowsDiv.appendChild(leftArrow);
+            arrowsDiv.appendChild(rightArrow);
+        }
+
         this.container.appendChild(arrowsDiv);
     }
 
@@ -1236,11 +1309,15 @@ export class SkyRenderer {
                     e.preventDefault();
                     if (this.viewMode === 'horizon') {
                         this.shiftHorizonLeft();
+                    } else if (this.viewMode === 'planisphere') {
+                        this.rotatePlanisphereLeft();
                     }
                 } else if (e.key === 'ArrowRight') {
                     e.preventDefault();
                     if (this.viewMode === 'horizon') {
                         this.shiftHorizonRight();
+                    } else if (this.viewMode === 'planisphere') {
+                        this.rotatePlanisphereRight();
                     }
                 }
             } catch (_) { /* noop */ }
@@ -1313,52 +1390,106 @@ export class SkyRenderer {
                 this.lastMouseY = e.clientY;
             }
 
-            // Horizontal drag -> pan horizon in 5° steps (same as arrow buttons), always active
+            // Horizontal drag -> pan horizon in 5° steps (horizon mode) or rotate planisphere (planisphere mode)
             {
-                if (this.viewMode !== 'horizon') {
+                if (this.viewMode === 'horizon') {
+                    const deltaX = e.clientX - this.lastMouseX;
+                    this._horizDragAccumPx += deltaX;
+                    this.lastMouseX = e.clientX;
+                    // Mark as drag if movement exceeds small threshold
+                    if (!this._didDrag) {
+                        const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
+                        const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
+                        if (totalDx > 3 || totalDy > 3) this._didDrag = true;
+                    }
+
+                    // Convert pixels to degrees based on current sky element width
+                    const rect = skyEl.getBoundingClientRect();
+                    const stepPx = rect.width * (5 / 360); // 5° step size in pixels
+                    if (stepPx > 0) {
+                        // Apply as many 5° steps as accumulated, but throttle to animation frames
+                        while (Math.abs(this._horizDragAccumPx) >= stepPx) {
+                            // Bestimme die Richtung für den nächsten Shift
+                            const direction = this._horizDragAccumPx > 0 ? -1 : 1; // -1=links, 1=rechts
+
+                            // Reduziere den Akkumulator
+                            if (this._horizDragAccumPx > 0) {
+                                this._horizDragAccumPx -= stepPx;
+                            } else {
+                                this._horizDragAccumPx += stepPx;
+                            }
+
+                            // Merke die letzte Richtung und markiere als anstehend
+                            this._horizDragDirection = direction;
+                            this._horizDragPending = true;
+
+                            // Schedule nur einmal pro Frame
+                            if (!this._horizDragScheduled) {
+                                this._horizDragScheduled = true;
+                                requestAnimationFrame(throttledHorizonShift);
+                            }
+                        }
+                    }
+                } else if (this.viewMode === 'planisphere') {
+                    // Planisphere rotation: horizontal drag rotates the view
+                    const deltaX = e.clientX - this.lastMouseX;
+                    this._horizDragAccumPx += deltaX;
+                    this.lastMouseX = e.clientX;
+
+                    // Mark as drag if movement exceeds small threshold
+                    if (!this._didDrag) {
+                        const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
+                        const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
+                        if (totalDx > 3 || totalDy > 3) this._didDrag = true;
+                    }
+
+                    // Convert pixels to degrees based on current sky element width
+                    const rect = skyEl.getBoundingClientRect();
+                    const stepPx = rect.width * (5 / 360); // 5° step size in pixels
+                    if (stepPx > 0) {
+                        // Apply as many 5° steps as accumulated
+                        while (Math.abs(this._horizDragAccumPx) >= stepPx) {
+                            // Bestimme die Richtung für die nächste Rotation
+                            const direction = this._horizDragAccumPx > 0 ? 1 : -1; // 1=rechts, -1=links
+
+                            // Reduziere den Akkumulator
+                            if (this._horizDragAccumPx > 0) {
+                                this._horizDragAccumPx -= stepPx;
+                            } else {
+                                this._horizDragAccumPx += stepPx;
+                            }
+
+                            // Merke die letzte Richtung und markiere als anstehend
+                            this._horizDragDirection = direction;
+                            this._horizDragPending = true;
+
+                            // Schedule nur einmal pro Frame
+                            if (!this._horizDragScheduled) {
+                                this._horizDragScheduled = true;
+                                requestAnimationFrame(() => {
+                                    if (!this._horizDragPending) return;
+
+                                    // Führe die Rotation aus
+                                    if (this._horizDragDirection > 0) {
+                                        this.rotatePlanisphereRight();
+                                    } else if (this._horizDragDirection < 0) {
+                                        this.rotatePlanisphereLeft();
+                                    }
+
+                                    // Markiere als erledigt
+                                    this._horizDragPending = false;
+                                    this._horizDragScheduled = false;
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    // Unknown view mode: reset accumulators
                     this._horizDragAccumPx = 0;
                     this._horizDragPending = false;
                     this._horizDragScheduled = false;
                     this._horizDragDirection = 0;
                     this._didDrag = true;
-                    return;
-                }
-                const deltaX = e.clientX - this.lastMouseX;
-                this._horizDragAccumPx += deltaX;
-                this.lastMouseX = e.clientX;
-                // Mark as drag if movement exceeds small threshold
-                if (!this._didDrag) {
-                    const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
-                    const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
-                    if (totalDx > 3 || totalDy > 3) this._didDrag = true;
-                }
-
-                // Convert pixels to degrees based on current sky element width
-                const rect = skyEl.getBoundingClientRect();
-                const stepPx = rect.width * (5 / 360); // 5° step size in pixels
-                if (stepPx > 0) {
-                    // Apply as many 5° steps as accumulated, but throttle to animation frames
-                    while (Math.abs(this._horizDragAccumPx) >= stepPx) {
-                        // Bestimme die Richtung für den nächsten Shift
-                        const direction = this._horizDragAccumPx > 0 ? -1 : 1; // -1=links, 1=rechts
-
-                        // Reduziere den Akkumulator
-                        if (this._horizDragAccumPx > 0) {
-                            this._horizDragAccumPx -= stepPx;
-                        } else {
-                            this._horizDragAccumPx += stepPx;
-                        }
-
-                        // Merke die letzte Richtung und markiere als anstehend
-                        this._horizDragDirection = direction;
-                        this._horizDragPending = true;
-
-                        // Schedule nur einmal pro Frame
-                        if (!this._horizDragScheduled) {
-                            this._horizDragScheduled = true;
-                            requestAnimationFrame(throttledHorizonShift);
-                        }
-                    }
                 }
             }
 

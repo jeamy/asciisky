@@ -4,43 +4,57 @@
     display: flex;
     justify-content: space-between;
     padding: 0;
-    top: var(--horizon-top, 50%); /* per JS gesetzte Position auf Höhe der Horizontlinie */
+    top: var(--horizon-top, 50%);
+    /* per JS gesetzte Position auf Höhe der Horizontlinie */
     transform: translateY(-50%);
-    pointer-events: none; /* Damit die Pfeile nicht mit dem Klicken auf Himmelskörper interferieren */
-    z-index: 5000; /* Sehr hoher z-index um sicherzustellen, dass die Pfeile über allen anderen Elementen liegen */
+    pointer-events: none;
+    /* Damit die Pfeile nicht mit dem Klicken auf Himmelskörper interferieren */
+    z-index: 5000;
+    /* Sehr hoher z-index um sicherzustellen, dass die Pfeile über allen anderen Elementen liegen */
 }
 
 .nav-arrow {
     font-size: 1.2rem;
-    background-color: rgba(0, 0, 0, 0.5); /* Neutrale dunkle Basis, Farbe kommt vom Theme */
+    background-color: rgba(0, 0, 0, 0.5);
+    /* Neutrale dunkle Basis, Farbe kommt vom Theme */
     border: none;
     color: rgba(var(--primary-rgb, 0, 255, 0), 0.85);
     border-radius: 50%;
-    width: 44px; /* Standard minimum touch target size */
+    width: 44px;
+    /* Standard minimum touch target size */
     height: 44px;
-    padding: 8px; /* Größere Klickfläche */
+    padding: 8px;
+    /* Größere Klickfläche */
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     opacity: 0.95;
     transition: all 0.15s ease-in-out;
-    pointer-events: auto; /* Damit die Pfeile klickbar sind */
+    pointer-events: auto;
+    /* Damit die Pfeile klickbar sind */
     position: absolute;
-    margin-top: -22px; /* Angepasst für größere Höhe */
+    margin-top: -22px;
+    /* Angepasst für größere Höhe */
 }
 
 .nav-arrow-left {
-    left: 10px; /* Am linken Rand, leicht eingerückt */
+    left: 10px;
+    /* Am linken Rand, leicht eingerückt */
 }
 
 .nav-arrow-right {
-    right: 10px; /* Am rechten Rand, leicht eingerückt */
+    right: 10px;
+    /* Am rechten Rand, leicht eingerückt */
 }
 
-.nav-arrow:hover { color: rgba(var(--primary-rgb, 0, 255, 0), 1); }
+.nav-arrow:hover {
+    color: rgba(var(--primary-rgb, 0, 255, 0), 1);
+}
 
-.nav-arrow:active { color: rgba(var(--primary-rgb, 0, 255, 0), 0.9); }
+.nav-arrow:active {
+    color: rgba(var(--primary-rgb, 0, 255, 0), 0.9);
+}
 
 @media (max-width: 768px) {
     .nav-arrow {
@@ -49,4 +63,30 @@
         width: 50px;
         height: 50px;
     }
+}
+
+/* Spezielle Positionierung für Planisphere-Rotationspfeile */
+.navigation-arrows.planisphere-arrows {
+    /* Deaktiviere die horizontale Zentrierung */
+    justify-content: flex-start;
+    /* Deaktiviere die vertikale Zentrierung auf Horizontlinie */
+    top: 0;
+    transform: none;
+    height: 100%;
+}
+
+/* Linker Pfeil (gegen Uhrzeigersinn) - links unten */
+.navigation-arrows.planisphere-arrows .nav-arrow-left {
+    left: -10px;
+    bottom: 10px;
+    top: auto;
+    margin-top: 0;
+}
+
+/* Rechter Pfeil (im Uhrzeigersinn) - rechts oben */
+.navigation-arrows.planisphere-arrows .nav-arrow-right {
+    right: 20px;
+    top: 0px;
+    left: auto;
+    margin-top: 0;
 }

@@ -125,6 +125,8 @@ export const i18n = {
         // Navigationspfeile
         'shift_left': 'Horizont nach links verschieben',
         'shift_right': 'Horizont nach rechts verschieben',
+        'rotate_left': 'Planisphäre gegen Uhrzeigersinn drehen',
+        'rotate_right': 'Planisphäre im Uhrzeigersinn drehen',
 
         // Filter-Einstellungen
         'asteroid_magnitude_label': 'Asteroiden max. Magnitude:',
@@ -375,6 +377,8 @@ export const i18n = {
         // Navigation arrows
         'shift_left': 'Shift horizon to the left',
         'shift_right': 'Shift horizon to the right',
+        'rotate_left': 'Rotate planisphere counterclockwise',
+        'rotate_right': 'Rotate planisphere clockwise',
 
         // Filter settings
         'asteroid_magnitude_label': 'Asteroids max. magnitude:',

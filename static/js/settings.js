@@ -19,7 +19,7 @@ export class SettingsManager {
         } catch (error) {
             console.error('Error loading settings:', error);
         }
-        
+
         // Default-Einstellungen zurückgeben, wenn keine gespeichert sind
         return {
             location: {
@@ -56,7 +56,7 @@ export class SettingsManager {
     }
 
     // Diese Methoden wurden entfernt, da die Magnitude-Filter nicht mehr benötigt werden
-    
+
     // Standortdaten abrufen
     getLocation() {
         return this.settings.location || {
@@ -66,7 +66,7 @@ export class SettingsManager {
             name: "Wien"
         };
     }
-    
+
     // Horizontale Verschiebung speichern
     setHorizontalShift(shift) {
         if (!this.settings.display) {
@@ -76,7 +76,7 @@ export class SettingsManager {
         this.saveSettings();
         return shift;
     }
-    
+
     // Horizontale Verschiebung abrufen
     getHorizontalShift() {
         return this.settings.display?.horizontalShift || 0;
@@ -89,7 +89,7 @@ export class SettingsManager {
             if (mode === 'horizon' || mode === 'planisphere') {
                 return mode;
             }
-        } catch (_) {}
+        } catch (_) { }
         return 'horizon';
     }
 
@@ -102,6 +102,21 @@ export class SettingsManager {
         this.settings.display.viewMode = finalMode;
         this.saveSettings();
         return finalMode;
+    }
+
+    // Planisphären-Rotation speichern
+    setPlanisphereRotation(rotation) {
+        if (!this.settings.display) {
+            this.settings.display = {};
+        }
+        this.settings.display.planisphereRotation = rotation;
+        this.saveSettings();
+        return rotation;
+    }
+
+    // Planisphären-Rotation abrufen
+    getPlanisphereRotation() {
+        return this.settings.display?.planisphereRotation || 0;
     }
 
     // --- Theme & Sprache ---
@@ -165,7 +180,7 @@ export class SettingsManager {
         this.saveSettings();
         return this.getConstellationsVisible();
     }
-    
+
     // --- Simulierte Zeit ---
     // Liefert den aktuell gesetzten Versatz in Minuten und den Aktivierungsstatus
     getSimulatedTimeOffset() {
@@ -364,7 +379,7 @@ export class SettingsManager {
             name: locationName || "Unbekannt"
         };
         this.saveSettings();
-        
+
         // Sofort mit dem Server synchronisieren
         try {
             // 1) Session sofort aktualisieren (Cookie-basierte Session)
@@ -376,18 +391,18 @@ export class SettingsManager {
         } catch (error) {
             console.error('Error syncing location with server:', error);
         }
-        
+
         return this.settings.location;
     }
-    
+
     // Synchronisiere Standorteinstellungen mit dem Server
     async syncSettingsToServer() {
         try {
             const location = this.getLocation();
-            
+
             // Standortdaten zum Server senden
             const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true&nocache=1`);
-            
+
             if (response.ok) {
                 this.serverSynced = true;
                 return true;
@@ -400,18 +415,18 @@ export class SettingsManager {
             return false;
         }
     }
-    
+
     // Initialisiere Einstellungen und synchronisiere mit dem Server
     async initialize() {
         // Lokale Einstellungen laden
         this.settings = this.loadSettings();
-        
+
         // Entferne veraltete Werte aus den Einstellungen
         this.cleanupSettings();
 
         // Falls eine userId bekannt ist: Settings aus der Datenbank laden und mit lokalen mergen
         await this.loadUserSettingsFromServer();
-        
+
         if (!this.authenticatedUserId) {
             // Session-Standort bevorzugen (falls vorhanden) nur für nicht eingeloggte Nutzer
             await this.fetchSessionLocation();
@@ -424,13 +439,13 @@ export class SettingsManager {
                 console.error('Error initializing session location for authenticated user:', e);
             }
         }
-        
+
         // Persistente Nutzereinstellungen mit aktuellem Standort abgleichen
         await this.syncSettingsToServer();
-        
+
         return this.settings;
     }
-    
+
     // Entferne veraltete Einstellungen
     cleanupSettings() {
         // Magnitude-Filter werden jetzt im Backend (user_settings.json) gespeichert
@@ -442,7 +457,7 @@ export class SettingsManager {
         if (this.settings.cometMaxMagnitude !== undefined) {
             delete this.settings.cometMaxMagnitude;
         }
-        
+
         // Speichere die bereinigten Einstellungen
         this.saveSettings();
     }
