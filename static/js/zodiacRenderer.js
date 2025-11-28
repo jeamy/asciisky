@@ -12,7 +12,7 @@ export class ZodiacRenderer {
     static MAX_AZ_SEPARATION_DEG = 180; // Keine Beschränkung der Azimut-Trennung mehr
     static MAX_ALT_SEPARATION_DEG = 180; // Keine Beschränkung der Höhen-Trennung mehr
     static DEBUG_GRID = false;          // Deaktiviert für normale Nutzung
-    
+
     constructor(skyRenderer) {
         this.skyRenderer = skyRenderer;
         this.constellations = [];
@@ -28,7 +28,7 @@ export class ZodiacRenderer {
         } catch (_) { /* noop */ }
         this.svgLayer = null;
         this.toggleButton = null;
-        
+
         this.initSVGLayer();
         this.createToggleButton();
     }
@@ -38,27 +38,27 @@ export class ZodiacRenderer {
      */
     initSVGLayer() {
         if (!CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) return;
-        
+
         const container = this.skyRenderer.container;
         if (!container) return;
-        
+
         // Remove existing SVG layer if any
         const existingSVG = document.getElementById('constellation-layer');
         if (existingSVG) {
             existingSVG.remove();
         }
-        
+
         // Load constellation CSS
         this.loadConstellationCSS();
-        
+
         // Create SVG element
         this.svgLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         this.svgLayer.id = 'constellation-layer';
         this.svgLayer.setAttribute('class', this.visible ? 'visible' : '');
-        
+
         container.appendChild(this.svgLayer);
     }
-    
+
     /**
      * Load constellation CSS file
      */
@@ -74,7 +74,7 @@ export class ZodiacRenderer {
             head.appendChild(link);
         }
     }
-    
+
     /**
      * Create toggle button for constellation visibility
      */
@@ -96,7 +96,7 @@ export class ZodiacRenderer {
                 console.error('Invalid location data for zodiac:', location);
                 return;
             }
-            
+
             const params = new URLSearchParams({
                 lat: location.latitude,
                 lon: location.longitude,
@@ -104,27 +104,27 @@ export class ZodiacRenderer {
             });
             // Ensure we bypass any previously cached 12-only result
             params.append('nocache', '1');
-            
+
             if (time) {
                 params.append('time', time);
             }
-            
+
             const response = await fetch(`${API_ENDPOINTS.ZODIAC}?${params}`);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
+
             const data = await response.json();
             this.constellations = data.constellations || [];
-            
+
             // If visible, render immediately
             if (this.visible && this.constellations.length > 0) {
                 this.renderSVGConstellations();
             }
-            
+
             // Debug-Funktion optional aufrufbar
             // this.debugConstellations();
-            
+
         } catch (error) {
             console.error('Error fetching zodiac data:', error);
             this.constellations = [];
@@ -140,7 +140,7 @@ export class ZodiacRenderer {
             this.resizeHandler = null;
         }
     }
-    
+
     /**
      * Zeigt alle Sternbilder an, unabhängig von ihrer Position
      */
@@ -149,38 +149,38 @@ export class ZodiacRenderer {
         if (!this.visible) {
             this.toggleVisibility();
         }
-        
+
         // Setze MIN_ALTITUDE_DEG auf -90, um alle Sterne zu zeigen
         ZodiacRenderer.MIN_ALTITUDE_DEG = -90;
-        
+
         // Rendere alle Sternbilder neu
         this.renderSVGConstellations();
-        
+
     }
-    
+
     /**
      * Debug-Funktion: Gibt alle Sternbilder und ihre Sterne in der Konsole aus
      */
     debugConstellations() {
-        
+
         // Gruppiere nach Sichtbarkeit
         const visibleStars = {};
         const belowHorizonStars = {};
-        
+
         for (const constellation of this.constellations) {
             const starsAbove = constellation.stars.filter(s => s.altitude >= 0).length;
-            const starsBelow = constellation.stars.filter(s => s.altitude < 0).length;
+            // const starsBelow = constellation.stars.filter(s => s.altitude < 0).length;
             const totalStars = constellation.stars.length;
             const percentVisible = totalStars > 0 ? (starsAbove / totalStars * 100).toFixed(0) : 0;
-            
-            
+
+
             if (percentVisible >= 50) {
                 visibleStars[constellation.name] = { starsAbove, totalStars, percentVisible };
             } else {
                 belowHorizonStars[constellation.name] = { starsAbove, totalStars, percentVisible };
             }
         }
-        
+
     }
 
     /**
@@ -188,20 +188,24 @@ export class ZodiacRenderer {
      */
     renderSVGConstellations() {
         if (!this.svgLayer || !this.constellations || !this.visible) return;
-        
+
         // Clear existing content
         this.svgLayer.innerHTML = '';
-        
+
         const container = this.skyRenderer.container;
         const skyText = container.querySelector('.sky-text');
         if (!skyText) return;
-        
-        // Use offsetLeft/offsetTop to align inside flex-centered container reliably
-        const offsetX = skyText.offsetLeft;
-        const offsetY = skyText.offsetTop;
+
+        // Use getBoundingClientRect to align inside flex-centered container reliably,
+        // accounting for transforms on sky-text
+        const textRect = skyText.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+
+        const offsetX = textRect.left - containerRect.left - container.clientLeft + container.scrollLeft;
+        const offsetY = textRect.top - containerRect.top - container.clientTop + container.scrollTop;
         const skyWidth = skyText.clientWidth;
         const skyHeight = skyText.clientHeight;
-        
+
         // Set SVG dimensions to match sky area
         this.svgLayer.setAttribute('viewBox', `0 0 ${skyWidth} ${skyHeight}`);
         // Set explicit pixel size and position so it exactly matches .sky-text
@@ -213,55 +217,55 @@ export class ZodiacRenderer {
         // Also set width/height attributes for SVG coordinate system
         this.svgLayer.setAttribute('width', `${skyWidth}`);
         this.svgLayer.setAttribute('height', `${skyHeight}`);
-        
+
         // Optional: Draw debug grid to visualize cell boundaries
         if (ZodiacRenderer.DEBUG_GRID) {
             this.drawDebugGrid(skyWidth, skyHeight);
         }
-        
+
         // Sortiere Sternbilder nach Namen für bessere Übersicht
         const sortedConstellations = [...this.constellations].sort((a, b) => a.name.localeCompare(b.name));
-        
+
         for (const constellation of sortedConstellations) {
             this.renderSVGConstellation(constellation, 0, 0, skyWidth, skyHeight);
         }
     }
-    
+
     /**
      * Render a single constellation in SVG
      */
     renderSVGConstellation(constellation, offsetX, offsetY, skyWidth, skyHeight) {
         // Zeige alle Sternbilder an, auch wenn alle Sterne unter dem Horizont sind
         // Wir filtern nur nach der absoluten Mindesthöhe
-        const constellationVisibleStars = constellation.stars.filter(s => s.altitude > ZodiacRenderer.MIN_ALTITUDE_DEG);
-        
+        // const constellationVisibleStars = constellation.stars.filter(s => s.altitude > ZodiacRenderer.MIN_ALTITUDE_DEG);
+
         const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         group.setAttribute('class', 'constellation');
         group.setAttribute('data-name', constellation.name);
-        
+
         // RICHTIG: Verwende die exakten Stern-Daten aus der API
         const starPositions = [];
-        
+
         // 1. Zeichne alle Sterne des Sternbilds
         for (const star of constellation.stars) {
             // Verwende die exakten Altitude/Azimuth Werte aus der API
             const altitude = star.altitude;
             const azimuth = star.azimuth;
-            
+
             // Konvertiere zu Grid-Position
             const gridPos = this.altAzToGridPosition(altitude, azimuth);
             if (!gridPos) {
                 console.warn(`[zodiac] Failed to convert coordinates for star ${star.hip_id}: alt=${altitude.toFixed(2)}°, az=${azimuth.toFixed(2)}°`);
                 continue;
             }
-            
+
             // Konvertiere zu Pixel-Koordinaten (Zellmitte)
             const cellW = skyWidth / CONFIG.SKY_WIDTH;
             const cellH = skyHeight / CONFIG.SKY_HEIGHT;
             // Exakte Zellmitte für präzise Ausrichtung
             const x = gridPos.col * cellW + (cellW / 2);
             const y = gridPos.row * cellH + (cellH / 2);
-            
+
             // Speichere Position und Winkel für Linien/Filter
             starPositions.push({
                 hip_id: star.hip_id,
@@ -272,45 +276,45 @@ export class ZodiacRenderer {
                 azimuth: azimuth,
                 altitude: altitude
             });
-            
+
             // Zeichne Stern (auch unsichtbare, aber schwächer)
             const starCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
             starCircle.setAttribute('cx', x);
             starCircle.setAttribute('cy', y);
             starCircle.setAttribute('r', this.getStarRadius(star.magnitude));
-            
+
             // Unterschiedliche Darstellung für Sterne über/unter dem Horizont
             if (star.altitude < 0) {
                 starCircle.classList.add('below-horizon');
             }
-            
+
             group.appendChild(starCircle);
         }
-        
+
         // 2. Zeichne Verbindungslinien zwischen den Sternen
         // NEOWISE-Ansatz: Strenge Filter für natürlich aussehende Sternbilder
         // 1. Kleine azimutale Trennung (keine Diagonalen quer über die Karte)
         // 2. Nur Sterne über Mindesthöhe verbinden
         // 3. Nicht zu große Höhenunterschiede
-        
+
         for (const [star1Id, star2Id] of constellation.lines) {
             const star1 = starPositions.find(s => s.hip_id === star1Id);
             const star2 = starPositions.find(s => s.hip_id === star2Id);
-            
+
             // Beide Sterne müssen vorhanden sein
             if (!star1 || !star2) {
                 console.warn(`[zodiac] Missing star in line ${star1Id}-${star2Id}. Available stars: ${starPositions.map(s => s.hip_id).join(', ')}`);
                 continue;
             }
-            
+
             // Keine Filterung nach Azimut oder Höhe mehr
             // Wir zeichnen alle Linien, wie sie in den äquatorialen Koordinaten definiert sind
             // Debug-Information für sehr weit entfernte Sterne
             const dAz = Math.abs(star2.azimuth - star1.azimuth);
             const azSeparation = Math.min(dAz, 360 - dAz);
             const altSeparation = Math.abs(star2.altitude - star1.altitude);
-            
-             // Azimut-Wrap-around behandeln: kürzeste Verbindung wählen
+
+            // Azimut-Wrap-around behandeln: kürzeste Verbindung wählen
             let x1 = star1.x;
             let y1 = star1.y;
             let x2 = star2.x;
@@ -333,17 +337,17 @@ export class ZodiacRenderer {
             line.setAttribute('y1', y1);
             line.setAttribute('x2', x2);
             line.setAttribute('y2', y2);
-            
+
             // Unterschiedliche Darstellung für Linien mit Sternen unter dem Horizont
             if (star1.altitude < 0 && star2.altitude < 0) {
                 line.classList.add('both-below-horizon');
             } else if (star1.altitude < 0 || star2.altitude < 0) {
                 line.classList.add('below-horizon');
             }
-            
+
             group.appendChild(line);
         }
-        
+
         // 3. Label in der Mitte der sichtbaren Sterne
         // Nur Sterne über der Mindesthöhe für Label-Positionierung verwenden
         const visibleStars = starPositions.filter(s => s.altitude > ZodiacRenderer.MIN_ALTITUDE_DEG);
@@ -373,10 +377,10 @@ export class ZodiacRenderer {
             label.textContent = t(constellation.name) || constellation.name_de || constellation.name;
             group.appendChild(label);
         }
-        
+
         this.svgLayer.appendChild(group);
     }
-    
+
     /**
      * Convert altitude/azimuth to grid position
      */
@@ -387,7 +391,7 @@ export class ZodiacRenderer {
         const result = this.skyRenderer.altAzToGridPosition(altitude, azimuth);
         return result;
     }
-    
+
     /**
      * Get star radius based on magnitude
      */
@@ -398,19 +402,19 @@ export class ZodiacRenderer {
         if (magnitude < 4) return 1.5;
         return 1;
     }
-    
+
     /**
      * Draw debug grid to visualize cell boundaries
      */
     drawDebugGrid(skyWidth, skyHeight) {
         if (!this.svgLayer) return;
-        
+
         const gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         gridGroup.setAttribute('class', 'debug-grid');
-        
+
         const cellW = skyWidth / CONFIG.SKY_WIDTH;
         const cellH = skyHeight / CONFIG.SKY_HEIGHT;
-        
+
         // Draw vertical lines (columns)
         for (let col = 0; col <= CONFIG.SKY_WIDTH; col++) {
             const x = col * cellW;
@@ -423,7 +427,7 @@ export class ZodiacRenderer {
             line.setAttribute('stroke-width', '0.5');
             line.setAttribute('opacity', '0.2');
             gridGroup.appendChild(line);
-            
+
             // Add column numbers at top
             if (col % 10 === 0) {
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -435,7 +439,7 @@ export class ZodiacRenderer {
                 gridGroup.appendChild(text);
             }
         }
-        
+
         // Draw horizontal lines (rows)
         for (let row = 0; row <= CONFIG.SKY_HEIGHT; row++) {
             const y = row * cellH;
@@ -448,7 +452,7 @@ export class ZodiacRenderer {
             line.setAttribute('stroke-width', '0.5');
             line.setAttribute('opacity', '0.2');
             gridGroup.appendChild(line);
-            
+
             // Add row numbers at left
             if (row % 5 === 0) {
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -460,13 +464,13 @@ export class ZodiacRenderer {
                 gridGroup.appendChild(text);
             }
         }
-        
+
         // Add cell center dots for key positions
         for (let row = 0; row <= CONFIG.SKY_HEIGHT; row += 10) {
             for (let col = 0; col <= CONFIG.SKY_WIDTH; col += 10) {
                 const x = col * cellW + (cellW / 2);
                 const y = row * cellH + (cellH / 2);
-                
+
                 const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 dot.setAttribute('cx', x);
                 dot.setAttribute('cy', y);
@@ -476,7 +480,7 @@ export class ZodiacRenderer {
                 gridGroup.appendChild(dot);
             }
         }
-        
+
         // Mark the horizon line
         const horizonY = CONFIG.HORIZON_ROW * cellH;
         const horizonLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -488,7 +492,7 @@ export class ZodiacRenderer {
         horizonLine.setAttribute('stroke-width', '1');
         horizonLine.setAttribute('opacity', '0.5');
         gridGroup.appendChild(horizonLine);
-        
+
         this.svgLayer.appendChild(gridGroup);
     }
 
@@ -498,28 +502,28 @@ export class ZodiacRenderer {
      */
     toggleVisibility() {
         this.visible = !this.visible;
-        
+
         // Check if SVG layer exists in DOM and update reference
         const svgInDOM = document.getElementById('constellation-layer');
-        
+
         // Update reference if needed
         if (svgInDOM && svgInDOM !== this.svgLayer) {
             this.svgLayer = svgInDOM;
         }
-        
+
         // Update SVG layer visibility
         if (this.svgLayer) {
             this.svgLayer.setAttribute('class', this.visible ? 'visible' : '');
         }
-        
+
         // Update button appearance
         if (this.toggleButton) {
             this.toggleButton.classList.toggle('active', this.visible);
-            this.toggleButton.title = this.visible ? 
+            this.toggleButton.title = this.visible ?
                 t('hide_constellations') :
                 t('show_constellations');
         }
-        
+
         // Re-render if visible
         if (this.visible && this.constellations.length > 0) {
             this.renderSVGConstellations();
@@ -541,7 +545,7 @@ export class ZodiacRenderer {
         ZodiacRenderer.DEBUG_GRID = !ZodiacRenderer.DEBUG_GRID;
         return ZodiacRenderer.DEBUG_GRID;
     }
-    
+
     /**
      * Update constellation positions (called when sky is re-rendered)
      */

@@ -66,7 +66,7 @@ export const CONFIG = {
     UPDATE_INTERVAL_MS: 60000, // 60 seconds
     SKY_WIDTH: 80,
     SKY_HEIGHT: 40,
-        HORIZON_ROW: 20, // Row where the horizon is drawn (middle of SKY_HEIGHT)
+    HORIZON_ROW: 20, // Row where the horizon is drawn (middle of SKY_HEIGHT)
     CARDINAL_DIRECTIONS: ['N', 'O', 'S', 'W'],
     OBJECT_SYMBOLS: OBJECT_SYMBOLS,  // Reference to the constant defined above
     SHOW_BELOW_HORIZON: true,       // Zeige Objekte unter dem Horizont
@@ -75,7 +75,7 @@ export const CONFIG = {
     MIN_ALTITUDE: -90,             // Minimale Höhe in Grad (Nadir)
     ALTITUDE_PRECISION: 1,         // Genauigkeit der Höhenanzeige in Grad
     PLANISPHERE_ASPECT_RATIO: 1.5,
-    PLANISPHERE_ASPECT_SCALE: 0.8,
+    PLANISPHERE_ASPECT_SCALE: 0.7,
     LABELS: {
         ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
         BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
@@ -135,7 +135,7 @@ export const DEBUG = (() => {
 (() => {
     try {
         if (!DEBUG && typeof console !== 'undefined') {
-            const noop = () => {};
+            const noop = () => { };
             console.log = noop;
             console.debug = noop;
             console.info = noop;

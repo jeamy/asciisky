@@ -14,16 +14,35 @@ export class SkyRenderer {
         this._precomputeRequests = new Set();
         // Einheitlicher Skalierungsfaktor für die Planisphären-Projektion
         this.planisphereScale = CONFIG.PLANISPHERE_ASPECT_SCALE
-        
+
         // Horizontale Verschiebung aus den Einstellungen laden
-        this.horizontalShift = settingsManager.getHorizontalShift(); 
+        this.horizontalShift = settingsManager.getHorizontalShift();
         console.log(`Loaded horizontal shift: ${this.horizontalShift}°`);
-        
+
         // View-Mode aus den Einstellungen laden (horizon oder planisphere)
         this.viewMode = (settingsManager && typeof settingsManager.getViewMode === 'function')
             ? settingsManager.getViewMode()
             : 'horizon';
         console.log(`Loaded view mode: ${this.viewMode}`);
+
+        // Lade gespeicherte Standortdaten
+        this.location = settingsManager.getLocation();
+
+        console.log(`Loaded location settings: lat=${this.location.latitude}, lon=${this.location.longitude}, elevation=${this.location.elevation}`);
+
+        // Update-Race-Guard: Token/Zähler für laufende Updates
+        this._updateCounter = 0;     // monotoner Zähler
+        this._activeUpdate = 0;      // aktuell gültiger Token
+
+        // Zoom-State und Originalauflösung merken (für 1x/2x Umschaltung)
+        // WICHTIG: originalSkyConfig MUSS VOR der Planisphären-Anpassung gesetzt werden!
+        this.isZoomed = false;
+        this.originalSkyConfig = {
+            width: CONFIG.SKY_WIDTH,
+            height: CONFIG.SKY_HEIGHT,
+            horizonRow: CONFIG.HORIZON_ROW
+        };
+        this._savedPlanisphereConfig = null;
 
         // Wenn wir direkt in der Planisphärenansicht starten, Raster quadratisch setzen
         if (this.viewMode === 'planisphere') {
@@ -41,29 +60,15 @@ export class SkyRenderer {
                 height: CONFIG.SKY_HEIGHT,
                 horizonRow: CONFIG.HORIZON_ROW
             };
+            // CSS-Klasse für zentrierte Darstellung
+            if (this.container) {
+                this.container.classList.add('planisphere-view');
+            }
         }
-        
-        // Lade gespeicherte Standortdaten
-        this.location = settingsManager.getLocation();
-        
-        console.log(`Loaded location settings: lat=${this.location.latitude}, lon=${this.location.longitude}, elevation=${this.location.elevation}`);
-
-        // Update-Race-Guard: Token/Zähler für laufende Updates
-        this._updateCounter = 0;     // monotoner Zähler
-        this._activeUpdate = 0;      // aktuell gültiger Token
-        
-        // Zoom-State und Originalauflösung merken (für 1x/2x Umschaltung)
-        this.isZoomed = false;
-        this.originalSkyConfig = {
-            width: CONFIG.SKY_WIDTH,
-            height: CONFIG.SKY_HEIGHT,
-            horizonRow: CONFIG.HORIZON_ROW
-        };
-        this._savedPlanisphereConfig = null;
         // Unterstützte Zoomstufen (Faktoren)
         this.zoomLevels = [1, 2, 4];
         this.zoomIndex = 0; // Start: 1×, bleibt bei mobilen Geräten immer 0
-        
+
         // Pan-Funktionalität für gezoomte Ansicht
         this.verticalOffset = 0; // Vertikale Verschiebung in Pixeln
         this.isDragging = false;
@@ -71,19 +76,19 @@ export class SkyRenderer {
 
         this.initSky();
         this.setupEventListeners();
-        
+
         // Initialize zodiac renderer if enabled
         if (CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) {
             this.zodiacRenderer = new ZodiacRenderer(this);
         }
-        
+
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
         this.update();
     }
 
     initSky() {
         // Initialize empty sky
-        this.sky = Array(CONFIG.SKY_HEIGHT).fill().map(() => 
+        this.sky = Array(CONFIG.SKY_HEIGHT).fill().map(() =>
             Array(CONFIG.SKY_WIDTH).fill(' ')
         );
         if (this.viewMode === 'planisphere') {
@@ -93,7 +98,7 @@ export class SkyRenderer {
         }
         // Don't call render() here to avoid recursion
     }
-    
+
     // Methode zum Verschieben des Horizonts nach links
     shiftHorizonLeft() {
         if (this.viewMode !== 'horizon') {
@@ -101,10 +106,10 @@ export class SkyRenderer {
         }
         // Verschiebe um 5 Grad nach links
         this.horizontalShift -= 5;
-        
+
         // Speichere die aktuelle Verschiebung
         settingsManager.setHorizontalShift(this.horizontalShift);
-        
+
         // Aktualisiere die Anzeige
         this.render();
         // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
@@ -112,7 +117,7 @@ export class SkyRenderer {
             try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
         }
     }
-    
+
     // Methode zum Verschieben des Horizonts nach rechts
     shiftHorizonRight() {
         if (this.viewMode !== 'horizon') {
@@ -120,10 +125,10 @@ export class SkyRenderer {
         }
         // Verschiebe um 5 Grad nach rechts
         this.horizontalShift += 5;
-        
+
         // Speichere die aktuelle Verschiebung
         settingsManager.setHorizontalShift(this.horizontalShift);
-        
+
         // Aktualisiere die Anzeige
         this.render();
         // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
@@ -164,6 +169,14 @@ export class SkyRenderer {
         }
 
         this.viewMode = finalMode;
+
+        // CSS-Klasse für Planisphäre setzen/entfernen (für zentrierte Darstellung)
+        if (finalMode === 'planisphere') {
+            this.container.classList.add('planisphere-view');
+        } else {
+            this.container.classList.remove('planisphere-view');
+        }
+
         try {
             if (settingsManager && typeof settingsManager.setViewMode === 'function') {
                 settingsManager.setViewMode(finalMode);
@@ -182,18 +195,18 @@ export class SkyRenderer {
         const horizonRow = CONFIG.HORIZON_ROW;
         const width = CONFIG.SKY_WIDTH;
         const height = CONFIG.SKY_HEIGHT;
-        
+
         // Draw horizon line deutlicher
         for (let col = 1; col < width - 1; col++) {
             this.sky[horizonRow][col] = ASCII_ART.HORIZON;
         }
-        
+
         // Add corners
         this.sky[horizonRow][0] = ASCII_ART.HORIZON_START;
         this.sky[horizonRow][width - 1] = ASCII_ART.HORIZON_END;
-        
+
         // Keine Beschriftung für den Horizont
-        
+
         // Add cardinal directions along the horizon (dehnen: nur 3 gleichzeitig anzeigen)
         // Azimut-Mapping: 0°=Nord, 90°=Ost, 180°=Süd, 270°=West
         const dirDefs = [
@@ -202,7 +215,7 @@ export class SkyRenderer {
             { dir: 'S', azimuth: 180 },
             { dir: 'W', azimuth: 270 }
         ];
-        
+
         // Bestimme die Richtung, die aktuell "aus dem Blick" liegt: die mit effektivem Azimut am nächsten zu 0°
         // Standard (horizontalShift=0): N ist am nächsten zu 0° => O,S,W bleiben sichtbar
         const withEffective = dirDefs.map(p => {
@@ -212,12 +225,12 @@ export class SkyRenderer {
             const distToZero = Math.min(eff, 360 - eff); // Abstand zu 0° entlang des Kreises
             return { ...p, effectiveAzimuth: eff, distToZero };
         });
-        
+
         // Verstecke genau eine Richtung: die mit minimalem Abstand zu 0°
         withEffective.sort((a, b) => a.distToZero - b.distToZero);
         const hidden = withEffective[0].dir;
         const visible = withEffective.filter(p => p.dir !== hidden);
-        
+
         // Platziere die drei sichtbaren Richtungen anhand ihres absoluten (verschobenen) Azimuts,
         // damit sie sich bei Klick auf die Pfeile sichtbar bewegen
         const inner = width - 2;
@@ -236,17 +249,17 @@ export class SkyRenderer {
             const col = Math.round((v.eff / 360) * inner) + 1;
             placeDir(v.dir, col);
         });
-        
+
         // Füge Höhenmarkierungen hinzu (alle 30 Grad)
         const altitudeMarks = [90, 60, 30, 0, -30, -60, -90];
         altitudeMarks.forEach(alt => {
             const normalizedAlt = (alt - CONFIG.MIN_ALTITUDE) / (CONFIG.MAX_ALTITUDE - CONFIG.MIN_ALTITUDE);
             const row = Math.round((1 - normalizedAlt) * (height - 1));
-            
+
             if (row >= 0 && row < height && row !== horizonRow) {
                 // Markiere die Höhe am linken Rand
                 this.sky[row][0] = alt > 0 ? '+' : alt < 0 ? '-' : '0';
-                
+
                 // Füge die Höhenzahl hinzu
                 const altStr = Math.abs(alt).toString();
                 for (let i = 0; i < altStr.length && i + 1 < width; i++) {
@@ -434,19 +447,24 @@ export class SkyRenderer {
 
         // Rette das SVG-Layer vor dem Leeren
         const svgLayer = document.getElementById('constellation-layer');
-        
+
         // Entferne alte object-count-displays vor dem Leeren
         const oldCounts = document.querySelectorAll('#object-count-display');
         oldCounts.forEach(count => count.remove());
-        
+
         // Leere den Container
         this.container.innerHTML = '';
 
         // Füge den Himmelstext hinzu
         this.container.appendChild(skyTextDiv);
-        
+
         try {
             if (this.viewMode === 'planisphere') {
+                // Enforce centering styles to ensure correct positioning
+                skyTextDiv.style.top = '50%';
+                skyTextDiv.style.left = '50%';
+                skyTextDiv.style.transform = 'translate(-50%, -50%)';
+
                 const rect = skyTextDiv.getBoundingClientRect();
                 const cellW = rect.width / CONFIG.SKY_WIDTH;
                 const cellH = rect.height / CONFIG.SKY_HEIGHT;
@@ -458,7 +476,7 @@ export class SkyRenderer {
                 }
             }
         } catch (_) { /* noop */ }
-        
+
         // Füge das SVG-Layer wieder hinzu, falls es existierte
         if (svgLayer) {
             this.container.appendChild(svgLayer);
@@ -542,11 +560,11 @@ export class SkyRenderer {
             if (this.isMobileDevice()) {
                 return;
             }
-            
+
             // Zyklisch auf nächste Zoomstufe schalten
             this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const factor = this.zoomLevels[this.zoomIndex] || 1;
-            
+
             // Skalierte Rastergröße setzen
             CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
             CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
@@ -582,8 +600,8 @@ export class SkyRenderer {
     }
 
     isMobileDevice() {
-        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
-               window.innerWidth <= 768;
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+            window.innerWidth <= 768;
     }
 
     updateCursorStyle() {
@@ -608,19 +626,19 @@ export class SkyRenderer {
         if (this.viewMode !== 'horizon') {
             return;
         }
-        
+
         // Erstelle neue Navigationspfeile
         const arrowsDiv = document.createElement('div');
         arrowsDiv.id = 'navigation-arrows';
         arrowsDiv.className = 'navigation-arrows';
-        
+
         // Positioniere die Pfeile vertikal auf Höhe der Horizontlinie
         const horizonRow = CONFIG.HORIZON_ROW;
         const totalRows = CONFIG.SKY_HEIGHT - 1;
         const horizonYPercent = (horizonRow / totalRows) * 100;
         // Setze CSS-Variable, Styling verbleibt in externer CSS
         arrowsDiv.style.setProperty('--horizon-top', `${horizonYPercent}%`);
-        
+
         // Linker Pfeil (rechts neben West)
         const leftArrow = document.createElement('button');
         leftArrow.id = 'nav-left';
@@ -628,7 +646,7 @@ export class SkyRenderer {
         leftArrow.title = t('shift_left');
         leftArrow.innerHTML = '&#9665;';
         leftArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonLeft(); });
-        
+
         // Rechter Pfeil (links neben Ost)
         const rightArrow = document.createElement('button');
         rightArrow.id = 'nav-right';
@@ -636,7 +654,7 @@ export class SkyRenderer {
         rightArrow.title = t('shift_right');
         rightArrow.innerHTML = '&#9655;';
         rightArrow.addEventListener('click', (e) => { e.stopPropagation(); this.shiftHorizonRight(); });
-        
+
         arrowsDiv.appendChild(leftArrow);
         arrowsDiv.appendChild(rightArrow);
         this.container.appendChild(arrowsDiv);
@@ -666,7 +684,7 @@ export class SkyRenderer {
         // Hole Magnitude-Werte aus der Filters-API (benutzerdefinierte Einstellungen)
         let asteroidMag = 10.0; // Fallback
         let cometMag = 14.0;    // Fallback
-        
+
         try {
             const response = await fetch(`${API_ENDPOINTS.FILTERS_GET}?nocache=1`);
             if (response.ok) {
@@ -684,7 +702,7 @@ export class SkyRenderer {
         const countDiv = document.createElement('div');
         countDiv.id = 'object-count-display';
         countDiv.className = 'object-count-display';
-        
+
         countDiv.innerHTML = `
             <div class="count-item">${t('asteroids_up_to_mag')} ${asteroidMag}: ${asteroidCount}</div>
             <div class="count-item">${t('comets_up_to_mag')} ${cometMag}: ${cometCount}</div>
@@ -726,7 +744,7 @@ export class SkyRenderer {
             const textRect = textEl.getBoundingClientRect();
             // Berücksichtige Scroll-Offsets des Containers, da overflow:auto aktiv ist
             const offsetX = (textRect.left - containerRect.left) + this.container.scrollLeft;
-            const offsetY = (textRect.top  - containerRect.top)  + this.container.scrollTop;
+            const offsetY = (textRect.top - containerRect.top) + this.container.scrollTop;
             const colWidth = textRect.width / CONFIG.SKY_WIDTH;
             const rowHeight = textRect.height / CONFIG.SKY_HEIGHT;
 
@@ -836,40 +854,40 @@ export class SkyRenderer {
         if (obj.altitude < 0 && !CONFIG.SHOW_BELOW_HORIZON) {
             return;
         }
-        
+
         const height = CONFIG.SKY_HEIGHT;
         const width = CONFIG.SKY_WIDTH;
-        
+
         // Berechne die Zeile basierend auf der Höhe (-90° bis 90°)
         // Für Objekte über dem Horizont: 0 bis horizonRow
         // Für Objekte unter dem Horizont: horizonRow bis height-1
         const pos = this.altAzToGridPosition(obj.altitude, obj.azimuth);
         let row = pos.row;
         let col = pos.col;
-        
+
         // Berechne die Spalte basierend auf dem Azimut (0° bis 360°) mit horizontaler Verschiebung
         // Azimut: 0° = Nord, 90° = Ost, 180° = Süd, 270° = West
         // Nutze den vollen Bereich 0°–360° über die gesamte Breite
-        
+
         // Speichere die Position des Objekts für spätere Verwendung
         obj.displayRow = row;
         obj.displayCol = col;
-        
+
         // Nur zeichnen, wenn innerhalb der Grenzen
         if (row >= 0 && row < height && col >= 0 && col < width) {
             // Prüfe, ob dies das ausgewählte Objekt ist
             const isSelected = this.selectedObject && this.selectedObject.name === obj.name;
-            
+
             // Prüfe, ob an dieser Position bereits ein Objekt gezeichnet wurde
             const existingContent = this.sky[row][col];
-            const isOccupied = existingContent !== ' ' && 
-                              existingContent !== ASCII_ART.HORIZON && 
-                              existingContent !== 'N' && 
-                              existingContent !== 'S' && 
-                              existingContent !== 'O' && 
-                              existingContent !== 'W';
-            
-            
+            const isOccupied = existingContent !== ' ' &&
+                existingContent !== ASCII_ART.HORIZON &&
+                existingContent !== 'N' &&
+                existingContent !== 'S' &&
+                existingContent !== 'O' &&
+                existingContent !== 'W';
+
+
             // Wähle Symbol basierend auf Auswahl und Überlappung
             let symbol;
             if (isSelected) {
@@ -899,7 +917,7 @@ export class SkyRenderer {
             } else {
                 // Bevorzuge Symbol vom Backend; fallback auf lokale Symboltabelle
                 const backendSymbol = obj.symbol && String(obj.symbol).trim() !== '' ? obj.symbol : null;
-                
+
                 // Spezialbehandlung für Mond: Wähle Symbol basierend auf Phase
                 if (obj.name && obj.name.toLowerCase() === 'moon' && obj.phase_name && MOON_PHASE_SYMBOLS[obj.phase_name]) {
                     symbol = MOON_PHASE_SYMBOLS[obj.phase_name];
@@ -915,11 +933,11 @@ export class SkyRenderer {
                 } else {
                     symbol = '★'; // Fallback auf Stern-Symbol
                 }
-               
+
             }
-            
+
             this.sky[row][col] = symbol;
-            
+
             // Füge Label und Höheninformation hinzu, wenn ausgewählt
             if (isSelected) {
                 // Formatiere die Höhe mit der konfigurierten Genauigkeit
@@ -927,10 +945,10 @@ export class SkyRenderer {
                 const displayName = this.getLocalizedDisplayName(obj.name);
                 const label = `${displayName} (${altitudeStr}°)`;
                 const startCol = Math.max(0, col - Math.floor(label.length / 2));
-                
+
                 // Stelle sicher, dass das Label nicht außerhalb des sichtbaren Bereichs liegt
                 const labelRow = Math.min(row + 1, height - 1);
-                
+
                 for (let i = 0; i < label.length && startCol + i < width; i++) {
                     this.sky[labelRow][startCol + i] = label[i] || ' ';
                 }
@@ -1007,7 +1025,7 @@ export class SkyRenderer {
         console.log(`Selecting object: ${objectName}`);
         if (this.celestialData?.bodies[objectName]) {
             this.selectedObject = this.celestialData.bodies[objectName];
-            
+
             // Highlight the object in the list
             const listItems = document.querySelectorAll('#objectList li');
             listItems.forEach(item => {
@@ -1017,10 +1035,10 @@ export class SkyRenderer {
                     item.classList.remove('selected');
                 }
             });
-            
+
             // Highlight the object in the sky
             this.render();
-            
+
             // Nur Dialog anzeigen, wenn showDialog true ist
             if (showDialog) {
                 this.showObjectDialog(this.selectedObject);
@@ -1030,22 +1048,22 @@ export class SkyRenderer {
         console.log(`Object ${objectName} not found in celestial data`);
         return false;
     }
-    
+
     highlightObject(objectName) {
         // Setze das ausgewählte Objekt, ohne einen Dialog anzuzeigen
         this.selectObject(objectName, false);
     }
-    
+
     removeDialog() {
         const dialog = document.getElementById('object-dialog');
         if (dialog) dialog.remove();
     }
-    
+
     // Positioniert einen Dialog je nach Bildschirmgröße
     positionDialog(dialog) {
         const isMobile = window.innerWidth <= 768;
         const skyRect = this.container.getBoundingClientRect();
-        
+
         if (!isMobile) {
             // Desktop: Neben der Himmelsansicht
             dialog.style.top = `${skyRect.top}px`;
@@ -1227,18 +1245,18 @@ export class SkyRenderer {
         this._horizDragPending = false;
         this._horizDragScheduled = false;
         this._horizDragDirection = 0; // -1=links, 0=keine, 1=rechts
-        
+
         // Hilfsfunktion für throttled horizon shift
         const throttledHorizonShift = () => {
             if (!this._horizDragPending) return;
-            
+
             // Führe den anstehenden Shift aus
             if (this._horizDragDirection < 0) {
                 this.shiftHorizonLeft();
             } else if (this._horizDragDirection > 0) {
                 this.shiftHorizonRight();
             }
-            
+
             // Markiere als erledigt
             this._horizDragPending = false;
             this._horizDragScheduled = false;
@@ -1277,11 +1295,11 @@ export class SkyRenderer {
             if (factor > 1) {
                 const deltaY = e.clientY - this.lastMouseY;
                 this.verticalOffset += deltaY;
-                
+
                 // Limit vertical offset to reasonable bounds
                 const maxOffset = CONFIG.SKY_HEIGHT * 10; // Allow scrolling beyond visible area
                 this.verticalOffset = Math.max(-maxOffset, Math.min(maxOffset, this.verticalOffset));
-                
+
                 this.lastMouseY = e.clientY;
             }
 
@@ -1313,18 +1331,18 @@ export class SkyRenderer {
                     while (Math.abs(this._horizDragAccumPx) >= stepPx) {
                         // Bestimme die Richtung für den nächsten Shift
                         const direction = this._horizDragAccumPx > 0 ? -1 : 1; // -1=links, 1=rechts
-                        
+
                         // Reduziere den Akkumulator
                         if (this._horizDragAccumPx > 0) {
                             this._horizDragAccumPx -= stepPx;
                         } else {
                             this._horizDragAccumPx += stepPx;
                         }
-                        
+
                         // Merke die letzte Richtung und markiere als anstehend
                         this._horizDragDirection = direction;
                         this._horizDragPending = true;
-                        
+
                         // Schedule nur einmal pro Frame
                         if (!this._horizDragScheduled) {
                             this._horizDragScheduled = true;
@@ -1371,27 +1389,26 @@ export class SkyRenderer {
     }
 
     applyVerticalOffset() {
+        // In der Planisphäre kein vertikales Offset anwenden (Zentrierung via CSS)
+        if (this.viewMode === 'planisphere') {
+            return;
+        }
+
         const skyEl = this.container.querySelector('.sky-text');
         if (skyEl) {
             skyEl.style.transform = `translateY(${this.verticalOffset}px)`;
         }
-        
+
         // Auch die Labels verschieben
         const labelsLayer = this.container.querySelector('.labels-layer');
         if (labelsLayer) {
             labelsLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
-        
+
         // Auch die Sternbilder-SVG-Layer verschieben
         const constellationLayer = this.container.querySelector('#constellation-layer');
         if (constellationLayer) {
             constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
-        }
-
-        // Auch die Planisphären-Horizont-Layer verschieben
-        const planisphereLayer = this.container.querySelector('#planisphere-horizon-layer');
-        if (planisphereLayer) {
-            planisphereLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
     }
 
@@ -1413,9 +1430,14 @@ export class SkyRenderer {
             const height = skyText.clientHeight;
             if (!width || !height) return;
 
-            // Align the SVG exactly with the ASCII sky area
-            const offsetX = skyText.offsetLeft;
-            const offsetY = skyText.offsetTop;
+            // Align the SVG exactly with the ASCII sky area using getBoundingClientRect
+            // to account for transforms (centering) on the sky-text element
+            const textRect = skyText.getBoundingClientRect();
+            const containerRect = this.container.getBoundingClientRect();
+
+            // Calculate position relative to the container's padding box
+            const offsetX = textRect.left - containerRect.left - this.container.clientLeft + this.container.scrollLeft;
+            const offsetY = textRect.top - containerRect.top - this.container.clientTop + this.container.scrollTop;
 
             // Verwende dieselbe Projektion wie für die Objekte, um die Horizontlinie
             // als Kurve (alt = 0°) zu zeichnen. Dadurch bleibt die Darstellung
@@ -1491,24 +1513,24 @@ export class SkyRenderer {
         this.container.addEventListener('touchend', (e) => {
             // Calculate touch duration
             const touchDuration = Date.now() - touchStartTime;
-            
+
             // Get the final touch position
             const touchEndX = e.changedTouches[0].clientX;
             const touchEndY = e.changedTouches[0].clientY;
-            
+
             // Calculate the horizontal distance moved
             const touchDistanceX = touchEndX - touchStartX;
-            
+
             // If it's a short tap (not a swipe), let the click handler take care of it
             if (touchDuration < maxTapDuration && Math.abs(touchDistanceX) < minSwipeDistance) {
                 return;
             }
-            
+
             // If it's a horizontal swipe with enough distance
             if (Math.abs(touchDistanceX) >= minSwipeDistance) {
                 // Prevent the default behavior (page scrolling)
                 e.preventDefault();
-                
+
                 if (touchDistanceX > 0) {
                     // Swipe right -> shift horizon left
                     if (this.viewMode === 'horizon') {
@@ -1527,7 +1549,7 @@ export class SkyRenderer {
         this.container.addEventListener('touchmove', (e) => {
             const touchCurrentX = e.touches[0].clientX;
             const touchDistanceX = touchCurrentX - touchStartX;
-            
+
             // If it seems like a horizontal swipe, prevent default scrolling
             if (Math.abs(touchDistanceX) > Math.abs(e.touches[0].clientY - touchStartY)) {
                 e.preventDefault();
@@ -1618,13 +1640,13 @@ export class SkyRenderer {
             if (!content) {
                 return;
             }
-            
+
             // Find fresh data - search by name in all bodies
             let fresh = null;
             if (this.celestialData && this.celestialData.bodies) {
                 // Try direct lookup first
                 fresh = this.celestialData.bodies[this.selectedObject.name];
-                
+
                 // If not found, search by matching name (for asteroids/comets with prefixed keys)
                 if (!fresh) {
                     for (const [key, body] of Object.entries(this.celestialData.bodies)) {
@@ -1635,10 +1657,10 @@ export class SkyRenderer {
                     }
                 }
             }
-            
+
             if (fresh) {
                 this.selectedObject = fresh;
-            } 
+            }
             const info = this.buildObjectInfoLines(this.selectedObject);
             content.innerHTML = info.join('\n');
             this.render();
@@ -1649,14 +1671,14 @@ export class SkyRenderer {
 
     showObjectDialog(obj) {
         console.log('Showing dialog for:', obj.name, obj);
-        
+
         try {
             // Entferne vorhandenen Dialog, falls vorhanden
             const existingDialog = document.getElementById('object-dialog');
             if (existingDialog) {
                 existingDialog.remove();
             }
-            
+
             // Stelle sicher, dass die Dialog-Styles geladen sind
             if (!document.querySelector('link[href="/static/css/dialogStyles.css"]')) {
                 const linkElem = document.createElement('link');
@@ -1664,7 +1686,7 @@ export class SkyRenderer {
                 linkElem.href = '/static/css/dialogStyles.css';
                 document.head.appendChild(linkElem);
             }
-            
+
             // Dialog-Inhalt erstellen
             const info = this.buildObjectInfoLines(obj);
             // Erstelle den Dialog
@@ -1674,20 +1696,20 @@ export class SkyRenderer {
                 <button id="dialog-close">${t('close')}</button>
                 <div id="dialog-content">${info.join('\n')}</div>
             `;
-            
+
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
-            
+
             // Positioniere den Dialog je nach Bildschirmgröße
             const isMobile = window.innerWidth <= 768;
             const skyRect = this.container.getBoundingClientRect();
-            
+
             if (!isMobile) {
                 // Desktop: Neben der Himmelsansicht
                 dialog.style.top = `${skyRect.top}px`;
                 dialog.style.left = `${skyRect.right + 10}px`;
             }
-            
+
             // Close-Button-Event hinzufügen
             document.getElementById('dialog-close').addEventListener('click', () => {
                 this.clearSelection();
@@ -1696,14 +1718,14 @@ export class SkyRenderer {
             console.error('Error showing object info:', error);
         }
     }
-    
+
     showMultiObjectDialog(objects) {
         if (!objects || objects.length === 0) return;
-        
+
         try {
             // Entferne vorherige Dialoge
             this.removeDialog();
-            
+
             // Entferne doppelte Einträge nach normalisiertem Namen
             const seen = new Set();
             const uniqueObjects = [];
@@ -1719,10 +1741,10 @@ export class SkyRenderer {
             const dialog = document.createElement('div');
             dialog.className = 'object-dialog multi-object-dialog';
             dialog.id = 'object-dialog';
-            
+
             // Dialog-Header mit Titel und Close-Button
             let dialogContent = `<div class="dialog-header"><h3>${t('multiple_objects_found')}</h3><button id="dialog-close">${t('close')}</button></div>`;
-            
+
             // Füge Liste der Objekte hinzu
             dialogContent += '<div class="object-list">';
             uniqueObjects.forEach((obj, index) => {
@@ -1730,62 +1752,62 @@ export class SkyRenderer {
                 dialogContent += `<div class="object-list-item" data-object-name="${obj.name}">${obj.symbol || ''} ${displayName}</div>`;
             });
             dialogContent += '</div>';
-            
+
             // Füge Trennlinie hinzu
             dialogContent += '<hr class="dialog-divider">';
-            
+
             // Füge Datenbereich hinzu
             dialogContent += '<div class="object-data"></div>';
-            
+
             dialog.innerHTML = dialogContent;
-            
+
             // Füge den Dialog zum Body hinzu
             document.body.appendChild(dialog);
-            
+
             // Positioniere den Dialog je nach Bildschirmgröße
             const isMobile = window.innerWidth <= 768;
             const skyRect = this.container.getBoundingClientRect();
-            
+
             if (!isMobile) {
                 // Desktop: Neben der Himmelsansicht
                 dialog.style.top = `${skyRect.top}px`;
                 dialog.style.left = `${skyRect.right + 10}px`;
             }
-            
+
             // Lade die externen Styles für den Dialog
             const linkElem = document.createElement('link');
             linkElem.rel = 'stylesheet';
             linkElem.href = '/static/css/dialogStyles.css';
             document.head.appendChild(linkElem);
-            
+
             // Event-Listener für den Close-Button
             const closeButton = dialog.querySelector('#dialog-close');
             closeButton.addEventListener('click', () => {
                 this.clearSelection();
             });
-            
+
             // Event-Listener für die Objektliste
             const listItems = dialog.querySelectorAll('.object-list-item');
             const dataContainer = dialog.querySelector('.object-data');
-            
+
             // Funktion zum Anzeigen der Objektdaten
             const showObjectData = (objectName) => {
                 // Finde das ausgewählte Objekt
                 const selectedObject = uniqueObjects.find(obj => obj.name === objectName);
                 if (!selectedObject) return;
-                
+
                 // Erstelle Informationstext
                 const displayName = this.getLocalizedDisplayName(selectedObject.name);
                 const info = this.buildObjectInfoLines(selectedObject);
                 // Aktualisiere den Datenbereich
                 dataContainer.innerHTML = info.join('\n');
-                
+
                 // Setze das ausgewählte Objekt für die Labelanzeige
                 this.selectedObject = selectedObject;
-                
+
                 // Hebe das entsprechende Objekt im Himmel hervor und zeige das Label an
                 this.render(); // Neu rendern, um das Label anzuzeigen
-                
+
                 // Markiere das ausgewählte Element in der Liste
                 listItems.forEach(item => {
                     if (item.getAttribute('data-object-name') === objectName) {
@@ -1795,7 +1817,7 @@ export class SkyRenderer {
                     }
                 });
             };
-            
+
             // Füge Event-Listener zu den Listeneinträgen hinzu
             listItems.forEach(item => {
                 item.addEventListener('click', () => {
@@ -1803,7 +1825,7 @@ export class SkyRenderer {
                     showObjectData(objectName);
                 });
             });
-            
+
             // Zeige das erste Objekt standardmäßig an
             if (uniqueObjects.length > 0) {
                 showObjectData(uniqueObjects[0].name);
@@ -1814,27 +1836,27 @@ export class SkyRenderer {
     }
 
     // Methode zum Setzen der Magnitude-Filter wurde entfernt
-    
+
     // Methode zum Laden von Asteroiden
     async loadAsteroids(token) {
         try {
             // Erstelle die URL mit Standortparametern
             let url = `${API_ENDPOINTS.ASTEROIDS}?nocache=1`;
-            
+
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
                 url += `&lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
-            
+
             url = this.appendTimeParam(url);
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`HTTP error loading asteroids! status: ${response.status}`);
             }
-            
+
             const data = await response.json();
             console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} asteroids`);
-            
+
             // Falls dieses Update veraltet ist, breche ab
             if (!this.isActiveUpdate(token)) return;
 
@@ -1861,27 +1883,27 @@ export class SkyRenderer {
             console.error('Error loading asteroids:', error);
         }
     }
-    
+
     // Methode zum Laden von Kometen
     async loadComets(token) {
         try {
             // Erstelle die URL mit Standortparametern
             let url = `${API_ENDPOINTS.COMETS}?nocache=1`;
-            
+
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
                 url += `?lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
-            
+
             url = this.appendTimeParam(url);
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`HTTP error loading comets! status: ${response.status}`);
             }
-            
+
             const data = await response.json();
             console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} comets`);
-            
+
             // Falls dieses Update veraltet ist, breche ab
             if (!this.isActiveUpdate(token)) return;
 
@@ -1919,7 +1941,7 @@ export class SkyRenderer {
             clearInterval(this.updateInterval);
         }
     }
-    
+
     // Lade Himmelsdaten und aktualisiere die Anzeige (deprecated – nutzt update())
     async updateSkyData() {
         // Vereinheitlichte Update-Logik verwenden, damit Renderpfad konsistent bleibt
@@ -1935,19 +1957,19 @@ export class SkyRenderer {
                 return;
             }
             this._updateRunning = true;
-            
+
             console.log('Updating sky data...');
             // Zeige allgemeinen Ladeindikator früh, um langsame Starts (z.B. MPCORB-Download) zu signalisieren
             this.showLoading('loading');
             // Neuer Update-Token: nur die neueste Update-Runde darf Daten anwenden
             const token = ++this._updateCounter;
             this._activeUpdate = token;
-            
+
             // Hole die aktuellen Standortdaten
             const location = settingsManager.getLocation();
             // Halte Instanz-Location synchron, da Hilfsloader (Asteroiden/Kometen) darauf zugreifen
             this.location = location;
-            
+
             // Lade die Basisdaten (Sonne, Mond, Planeten)
             {
                 let url = `${API_ENDPOINTS.SKY}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&nocache=1`;
@@ -1977,7 +1999,7 @@ export class SkyRenderer {
                 // (Asteroiden/Kometen werden ggf. separat nachgeladen oder im Hintergrund vorbereitet)
                 this.hideLoading();
             }
-            
+
             // Prüfe Cache-Verfügbarkeit und lade nur, was bereits vorliegt; fehlendes im Hintergrund anstoßen
             const avail = await this.checkCacheAvailability(this.location);
             const availableAsteroids = !!(avail && avail.available && avail.available.asteroids);
@@ -1990,7 +2012,7 @@ export class SkyRenderer {
             // They should be visible at all times like planets
             tasks.push(this.loadAsteroids(token));
             tasks.push(this.loadComets(token));
-            
+
             // Load zodiac constellations if enabled
             if (this.zodiacRenderer) {
                 tasks.push(this.loadZodiacData(token, this.location, timeISO));
@@ -2013,7 +2035,7 @@ export class SkyRenderer {
                     this.refreshDialogIfVisible();
                 }
             }
-            
+
             // Aktualisiere die Visible Objects Liste
             try {
                 const { updateVisibleObjectsList } = await import('./visibleObjectsList.js');
@@ -2021,10 +2043,10 @@ export class SkyRenderer {
             } catch (e) {
                 console.error('Error updating visible objects list:', e);
             }
-            
+
             // Aktualisiere die Anzeige
             // Hinweis: Erste Render erfolgte bereits nach den Celestial-Daten
-            
+
         } catch (error) {
             console.error('Error updating sky data:', error);
             this.container.textContent = t('error_loading');
@@ -2035,7 +2057,7 @@ export class SkyRenderer {
             this._updateRunning = false;
         }
     }
-    
+
     async loadZodiacData(token, location, timeISO) {
         try {
             if (this.zodiacRenderer) {
