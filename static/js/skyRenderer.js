@@ -253,8 +253,9 @@ export class SkyRenderer {
         // Füge Höhenmarkierungen hinzu (alle 30 Grad)
         const altitudeMarks = [90, 60, 30, 0, -30, -60, -90];
         altitudeMarks.forEach(alt => {
-            const normalizedAlt = (alt - CONFIG.MIN_ALTITUDE) / (CONFIG.MAX_ALTITUDE - CONFIG.MIN_ALTITUDE);
-            const row = Math.round((1 - normalizedAlt) * (height - 1));
+            // Use the same projection as the objects and grid lines to ensure alignment
+            const p = this.projectHorizonAltAzToGrid(alt, 0);
+            const row = p.row;
 
             if (row >= 0 && row < height && row !== horizonRow) {
                 // Markiere die Höhe am linken Rand
