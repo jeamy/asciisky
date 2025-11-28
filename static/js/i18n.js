@@ -36,7 +36,7 @@ export const i18n = {
         'task_completed': 'Aufgabe abgeschlossen!',
         'task_not_found_server_restart': 'Die Vorberechnungsaufgabe ist nicht mehr aktiv (Server wurde möglicherweise neu gestartet). Sie können bei Bedarf eine neue Vorberechnung starten.',
         'status': 'Status',
-        
+
         // Himmelsobjekte
         'sun': 'Sonne',
         'moon': 'Mond',
@@ -61,21 +61,21 @@ export const i18n = {
         'pluto': 'Pluto',
         'asteroid': 'Asteroid',
         'comet': 'Komet',
-        
+
         // Himmelsrichtungen
         'north': 'N',
         'east': 'O',
         'south': 'S',
         'west': 'W',
-        
+
         // Ansichten
         'horizon_view': 'Horizontansicht',
         'planisphere_view': 'Planisphäre',
-        
+
         // Dialog-Texte
         'multiple_objects_found': 'Mehrere Objekte',
         'close': '×',
-        
+
         // Objektinformationen
         'altitude': 'Höhe',
         'azimuth': 'Azimut',
@@ -89,7 +89,7 @@ export const i18n = {
         'astronomical_twilight': 'Astronomische Dämmerung',
         'nautical_twilight': 'Nautische Dämmerung',
         'civil_twilight': 'Bürgerliche Dämmerung',
-        
+
         // Mondphasen
         'new_moon': 'Neumond',
         'waxing_crescent': 'Zunehmende Sichel',
@@ -99,14 +99,14 @@ export const i18n = {
         'waning_gibbous': 'Abnehmender Mond',
         'last_quarter': 'Letztes Viertel',
         'waning_crescent': 'Abnehmende Sichel',
-        
+
         // Zeiteinheiten
         'hour': 'Uhr',
         'au': 'AE', // Astronomische Einheit
-        
+
         // Standort-Dialog
         'location_settings': 'Standort-Einstellungen',
-        
+
         // Simulierte Zeit
         'sim_time_controls': 'Simulierte Zeit',
         'sim_time_use': 'Simulierte Zeit verwenden',
@@ -121,11 +121,11 @@ export const i18n = {
         'click_to_set_time': 'Klicken, um eine benutzerdefinierte Zeit einzugeben',
         'invalid_time_input': 'Bitte geben Sie ein gültiges Datum und eine gültige Zeit ein.',
         'time_input_error': 'Fehler bei der Zeiteingabe. Bitte versuchen Sie es erneut.',
-        
+
         // Navigationspfeile
         'shift_left': 'Horizont nach links verschieben',
         'shift_right': 'Horizont nach rechts verschieben',
-        
+
         // Filter-Einstellungen
         'asteroid_magnitude_label': 'Asteroiden max. Magnitude:',
         'comet_magnitude_label': 'Kometen max. Magnitude:',
@@ -150,7 +150,7 @@ export const i18n = {
         'location_name': 'Ortsname',
         'apply': 'Übernehmen',
         'invalid_coordinates': 'Ungültige Koordinaten',
-        
+
         // Hilfe-Dialog
         'help_title': 'Hilfe - ASCII Sky Tracker',
         'help_controls': 'Steuerung',
@@ -205,26 +205,26 @@ export const i18n = {
         'sunpath_curve': 'Sonnenauf-/untergang (Jahreskurve)',
         'toggle_sunpath': 'Sonnenauf-/untergangskurve ein/ausblenden',
         'sunpath_title': 'Sonnenauf-/untergang für',
-        
+
         // Object count display
         'visible_objects': 'Sichtbare Objekte',
         'asteroids_up_to_mag': 'Asteroiden bis Mag',
         'comets_up_to_mag': 'Kometen bis Mag',
         'no_data': 'Keine Daten verfügbar',
         'no_visible_objects': 'Keine Objekte über dem Horizont',
-        
+
         // Magnitude filters
         'magnitude_filters': 'Helligkeitsfilter',
         'magnitude_filter_info': 'Bei Änderung der Filter werden die Daten neu berechnet (einige Minuten). Die Objekte erscheinen automatisch, sobald sie verfügbar sind.',
         'cache_invalidated_message': 'Filter geändert. Neuberechnung läuft (einige Minuten)...',
         'error_applying_filters': 'Fehler beim Anwenden der Filter',
-        
+
         // Constellation controls
         'constellations': 'Sternbilder',
         'toggle_constellations': 'Sternbilder ein/ausblenden',
         'show_constellations': 'Sternbilder anzeigen',
         'hide_constellations': 'Sternbilder ausblenden',
-        
+
         // Constellation names
         // Zodiac
         'Aries': 'Widder',
@@ -255,7 +255,7 @@ export const i18n = {
         'Aquila': 'Adler',
         'Bootes': 'Bärenhüter',
     },
-    
+
     // Englisch als Fallback
     'en': {
         // General texts
@@ -286,7 +286,7 @@ export const i18n = {
         'task_completed': 'Task completed!',
         'task_not_found_server_restart': 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.',
         'status': 'Status',
-        
+
         // Celestial objects
         'sun': 'Sun',
         'moon': 'Moon',
@@ -311,21 +311,21 @@ export const i18n = {
         'pluto': 'Pluto',
         'asteroid': 'Asteroid',
         'comet': 'Comet',
-        
+
         // Cardinal directions
         'north': 'N',
         'east': 'E',
         'south': 'S',
         'west': 'W',
-        
+
         // Views
         'horizon_view': 'Horizon view',
         'planisphere_view': 'Planisphere',
-        
+
         // Dialog texts
         'multiple_objects_found': 'Multiple Objects',
         'close': '×',
-        
+
         // Object information
         'altitude': 'Altitude',
         'azimuth': 'Azimuth',
@@ -339,7 +339,7 @@ export const i18n = {
         'astronomical_twilight': 'Astronomical twilight',
         'nautical_twilight': 'Nautical twilight',
         'civil_twilight': 'Civil twilight',
-        
+
         // Moon phases
         'new_moon': 'New Moon',
         'waxing_crescent': 'Waxing Crescent',
@@ -349,14 +349,14 @@ export const i18n = {
         'waning_gibbous': 'Waning Gibbous',
         'last_quarter': 'Last Quarter',
         'waning_crescent': 'Waning Crescent',
-        
+
         // Time units
         'hour': '',
         'au': 'AU', // Astronomical Unit
-        
+
         // Location dialog
         'location_settings': 'Location Settings',
-        
+
         // Simulated time
         'sim_time_controls': 'Simulated Time',
         'sim_time_use': 'Use simulated time',
@@ -371,11 +371,11 @@ export const i18n = {
         'click_to_set_time': 'Click to enter a custom time',
         'invalid_time_input': 'Please enter a valid date and time.',
         'time_input_error': 'Error processing time input. Please try again.',
-        
+
         // Navigation arrows
         'shift_left': 'Shift horizon to the left',
         'shift_right': 'Shift horizon to the right',
-        
+
         // Filter settings
         'asteroid_magnitude_label': 'Asteroids max. magnitude:',
         'comet_magnitude_label': 'Comets max. magnitude:',
@@ -409,6 +409,8 @@ export const i18n = {
         'help_object_click_desc': 'Shows details like position, magnitude, and rise/set times',
         'help_navigation': 'Navigation',
         'help_navigation_desc': 'Left/right arrows shift the horizon by 5° (make N, E, S, W visible)',
+        'help_view_modes': 'Views: Horizon / Planisphere',
+        'help_view_modes_desc': 'Use the tab below the sky view to switch between Horizon view (rectangular) and Planisphere (circular sky chart). In the Planisphere, the dotted curve shows the horizon: objects above the horizon are inside, objects below are outside the curve.',
         'help_zoom_pan': 'Zoom and Pan',
         'help_zoom_pan_desc': 'On desktop, you can use the zoom button to enlarge the view. When zoomed in, you can click and drag to move the view up and down.',
         'help_symbols': 'Symbols',
@@ -444,26 +446,26 @@ export const i18n = {
         'sunpath_curve': 'Sunrise/sunset (year curve)',
         'toggle_sunpath': 'Toggle sunrise/sunset curve',
         'sunpath_title': 'Sunrise/sunset for',
-        
+
         // Object count display
         'visible_objects': 'Visible Objects',
         'asteroids_up_to_mag': 'Asteroids up to Mag',
         'comets_up_to_mag': 'Comets up to Mag',
         'no_data': 'No data available',
         'no_visible_objects': 'No objects above horizon',
-        
+
         // Magnitude filters
         'magnitude_filters': 'Brightness Filters',
         'magnitude_filter_info': 'Changing filters will recalculate data (several minutes). Objects appear automatically when available.',
         'cache_invalidated_message': 'Filters changed. Recalculating (several minutes)...',
         'error_applying_filters': 'Error applying filters',
-        
+
         // Constellation controls
         'constellations': 'Constellations',
         'toggle_constellations': 'Toggle constellations',
         'show_constellations': 'Show constellations',
         'hide_constellations': 'Hide constellations',
-        
+
         // Constellation names
         // Zodiac
         'Aries': 'Aries',
@@ -505,12 +507,12 @@ export function t(key) {
     if (i18n[currentLanguage] && i18n[currentLanguage][key]) {
         return i18n[currentLanguage][key];
     }
-    
+
     // Fallback auf Englisch
     if (i18n['en'] && i18n['en'][key]) {
         return i18n['en'][key];
     }
-    
+
     // Wenn keine Übersetzung gefunden wurde, gib den Schlüssel zurück
     return key;
 }

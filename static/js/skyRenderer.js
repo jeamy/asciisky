@@ -401,6 +401,12 @@ export class SkyRenderer {
         }
 
         let az = Number.isFinite(azimuth) ? azimuth : 0;
+
+        // Apply rotation if configured (e.g. 180° for South up)
+        if (CONFIG.PLANISPHERE_ROTATION) {
+            az += CONFIG.PLANISPHERE_ROTATION;
+        }
+
         while (az < 0) az += 360;
         while (az >= 360) az -= 360;
         const theta = az * Math.PI / 180;
@@ -501,14 +507,17 @@ export class SkyRenderer {
             // Re-setup pan events since DOM element was recreated
             this.setupPanEvents();
             if (this.viewMode === 'planisphere') {
-                this.renderPlanisphereHorizonOverlay();
+                // this.renderPlanisphereHorizonOverlay(); // now handled by renderGridOverlay
             } else {
-                this.removePlanisphereHorizonOverlay();
+                // this.removePlanisphereHorizonOverlay(); // now handled by renderGridOverlay
             }
             // Reproject constellation overlay to match the new layout and horizon shift
             if (this.zodiacRenderer && this.zodiacRenderer.visible) {
                 this.zodiacRenderer.updatePositions();
             }
+
+            // Render grid overlay (both for planisphere and horizon)
+            this.renderGridOverlay();
         });
     }
 
@@ -1412,15 +1421,13 @@ export class SkyRenderer {
         }
     }
 
-    renderPlanisphereHorizonOverlay() {
+    renderGridOverlay() {
         try {
-            const existing = this.container.querySelector('#planisphere-horizon-layer');
+            // Re-use the same ID for the overlay layer
+            const layerId = 'grid-overlay-layer';
+            const existing = this.container.querySelector(`#${layerId}`);
             if (existing) {
                 existing.remove();
-            }
-
-            if (this.viewMode !== 'planisphere') {
-                return;
             }
 
             const skyText = this.container.querySelector('.sky-text');
@@ -1431,22 +1438,17 @@ export class SkyRenderer {
             if (!width || !height) return;
 
             // Align the SVG exactly with the ASCII sky area using getBoundingClientRect
-            // to account for transforms (centering) on the sky-text element
             const textRect = skyText.getBoundingClientRect();
             const containerRect = this.container.getBoundingClientRect();
 
-            // Calculate position relative to the container's padding box
             const offsetX = textRect.left - containerRect.left - this.container.clientLeft + this.container.scrollLeft;
             const offsetY = textRect.top - containerRect.top - this.container.clientTop + this.container.scrollTop;
 
-            // Verwende dieselbe Projektion wie für die Objekte, um die Horizontlinie
-            // als Kurve (alt = 0°) zu zeichnen. Dadurch bleibt die Darstellung
-            // physikalisch konsistent, auch wenn die ASCII-Zellen nicht quadratisch sind.
             const cellW = width / CONFIG.SKY_WIDTH;
             const cellH = height / CONFIG.SKY_HEIGHT;
 
             const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            svg.id = 'planisphere-horizon-layer';
+            svg.id = layerId;
             svg.setAttribute('width', `${width}`);
             svg.setAttribute('height', `${height}`);
             svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -1456,27 +1458,102 @@ export class SkyRenderer {
             svg.style.width = `${width}px`;
             svg.style.height = `${height}px`;
             svg.style.pointerEvents = 'none';
+            svg.style.zIndex = '950'; // Same as before
 
-            // Berechne Kreiszentrum und Radius aus derselben Projektion,
-            // die auch das ASCII-Raster verwendet, damit beides exakt übereinstimmt.
-            const centerRow = Math.floor(CONFIG.SKY_HEIGHT / 2);
-            const centerCol = Math.floor(CONFIG.SKY_WIDTH / 2);
-            const centerX = (centerCol + 0.5) * cellW;
-            const centerY = (centerRow + 0.5) * cellH;
+            if (this.viewMode === 'planisphere') {
+                // --- Planisphere Grid Logic ---
+                const centerRow = Math.floor(CONFIG.SKY_HEIGHT / 2);
+                const centerCol = Math.floor(CONFIG.SKY_WIDTH / 2);
+                const centerX = (centerCol + 0.5) * cellW;
+                const centerY = (centerRow + 0.5) * cellH;
 
-            // Ein Punkt auf dem Horizont (alt = 0°, az = 0°) definiert den Radius
-            const horizonPoint = this.projectPlanisphereAltAzToGrid(0, 0);
-            const hx = (horizonPoint.col + 0.5) * cellW;
-            const hy = (horizonPoint.row + 0.5) * cellH;
-            const radius = Math.sqrt((hx - centerX) ** 2 + (hy - centerY) ** 2);
+                // Horizon circle (alt=0)
+                const horizonPoint = this.projectPlanisphereAltAzToGrid(0, 0);
+                const hx = (horizonPoint.col + 0.5) * cellW;
+                const hy = (horizonPoint.row + 0.5) * cellH;
+                const radius = Math.sqrt((hx - centerX) ** 2 + (hy - centerY) ** 2);
 
-            const horizonCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            horizonCircle.setAttribute('cx', centerX);
-            horizonCircle.setAttribute('cy', centerY);
-            horizonCircle.setAttribute('r', radius);
-            horizonCircle.setAttribute('class', 'planisphere-horizon-curve');
+                const horizonCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                horizonCircle.setAttribute('cx', centerX);
+                horizonCircle.setAttribute('cy', centerY);
+                horizonCircle.setAttribute('r', radius);
+                horizonCircle.setAttribute('class', 'planisphere-horizon-curve'); // Keep class for styling
 
-            svg.appendChild(horizonCircle);
+                // Fine azimuth lines (every 15 degrees)
+                for (let az = 0; az < 360; az += 15) {
+                    const p = this.projectPlanisphereAltAzToGrid(0, az);
+                    const px = (p.col + 0.5) * cellW;
+                    const py = (p.row + 0.5) * cellH;
+
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', centerX);
+                    line.setAttribute('y1', centerY);
+                    line.setAttribute('x2', px);
+                    line.setAttribute('y2', py);
+                    line.setAttribute('class', 'planisphere-grid-line'); // Re-use class
+                    line.setAttribute('stroke-dasharray', '2,2');
+                    svg.appendChild(line);
+                }
+
+                // Fine altitude circles (every 15 degrees)
+                for (let alt = 15; alt < 90; alt += 15) {
+                    const p = this.projectPlanisphereAltAzToGrid(alt, 0);
+                    const px = (p.col + 0.5) * cellW;
+                    const py = (p.row + 0.5) * cellH;
+                    const r = Math.sqrt((px - centerX) ** 2 + (py - centerY) ** 2);
+
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', centerX);
+                    circle.setAttribute('cy', centerY);
+                    circle.setAttribute('r', r);
+                    circle.setAttribute('class', 'planisphere-grid-line');
+                    circle.setAttribute('fill', 'none');
+                    circle.setAttribute('stroke-dasharray', '2,2');
+                    svg.appendChild(circle);
+                }
+
+                svg.appendChild(horizonCircle);
+
+            } else if (this.viewMode === 'horizon') {
+                // --- Horizon View Grid Logic ---
+
+                // Horizontal Altitude Lines (every 15 degrees)
+                // From -90 to +90. But horizon view might clamp.
+                // projectHorizonAltAzToGrid handles clamping.
+                for (let alt = -75; alt <= 75; alt += 15) {
+                    if (alt === 0) continue; // Skip 0 if we want a special horizon line, or draw it differently
+
+                    // Project a point to get the row (Y)
+                    const p = this.projectHorizonAltAzToGrid(alt, 0);
+                    // Check if row is within visible range (0..HEIGHT-1)
+                    if (p.row < 0 || p.row >= CONFIG.SKY_HEIGHT) continue;
+
+                    const py = (p.row + 0.5) * cellH;
+
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', 0);
+                    line.setAttribute('y1', py);
+                    line.setAttribute('x2', width);
+                    line.setAttribute('y2', py);
+                    line.setAttribute('class', 'planisphere-grid-line'); // Re-use class for consistency
+                    line.setAttribute('stroke-dasharray', '2,2');
+                    svg.appendChild(line);
+                }
+
+                // Vertical Azimuth Lines removed as per user request
+                // for (let az = 0; az < 360; az += 15) { ... }
+
+                // Horizon Line (Alt = 0) - distinct style?
+                const p0 = this.projectHorizonAltAzToGrid(0, 0);
+                const py0 = (p0.row + 0.5) * cellH;
+                const horizonLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                horizonLine.setAttribute('x1', 0);
+                horizonLine.setAttribute('y1', py0);
+                horizonLine.setAttribute('x2', width);
+                horizonLine.setAttribute('y2', py0);
+                horizonLine.setAttribute('class', 'planisphere-horizon-curve'); // Re-use class
+                svg.appendChild(horizonLine);
+            }
 
             const constellationLayer = document.getElementById('constellation-layer');
             if (constellationLayer && constellationLayer.parentNode === this.container) {
@@ -1485,13 +1562,13 @@ export class SkyRenderer {
                 this.container.appendChild(svg);
             }
         } catch (e) {
-            console.error('Error rendering planisphere horizon overlay:', e);
+            console.error('Error rendering grid overlay:', e);
         }
     }
 
-    removePlanisphereHorizonOverlay() {
+    removeGridOverlay() {
         try {
-            const existing = this.container.querySelector('#planisphere-horizon-layer');
+            const existing = this.container.querySelector('#grid-overlay-layer');
             if (existing) existing.remove();
         } catch (_) { /* noop */ }
     }

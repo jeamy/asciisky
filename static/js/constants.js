@@ -76,6 +76,7 @@ export const CONFIG = {
     ALTITUDE_PRECISION: 1,         // Genauigkeit der Höhenanzeige in Grad
     PLANISPHERE_ASPECT_RATIO: 1.5,
     PLANISPHERE_ASPECT_SCALE: 0.7,
+    PLANISPHERE_ROTATION: 180, // Rotation in degrees (0 = North up, 180 = South up)
     LABELS: {
         ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
         BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
