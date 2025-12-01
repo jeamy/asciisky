@@ -96,7 +96,6 @@ def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Asteroid DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
-        return None
     
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
@@ -272,7 +271,6 @@ def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Comet DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
-        return None
     
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
