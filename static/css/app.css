@@ -144,10 +144,9 @@ body {
         gap: 15px;
     }
 
-    /* Responsive Header for Desktop - RESTORED VIEWPORT POSITIONING */
+    /* Responsive Header for Desktop - FIXED POSITIONING TO FORCE EDGES */
     header {
         position: static;
-        /* Allows absolute children to position relative to viewport */
         flex-direction: row;
         justify-content: center;
         align-items: center;
@@ -157,23 +156,27 @@ body {
     }
 
     .theme-controls {
-        position: absolute !important;
+        position: fixed !important;
+        /* Force to viewport viewport */
         left: 20px;
         top: 20px;
         transform: none;
         width: auto;
         margin: 0;
         order: unset;
+        z-index: 2000;
     }
 
     .header-controls {
-        position: absolute !important;
+        position: fixed !important;
+        /* Force to viewport viewport */
         right: 20px;
         top: 20px;
         transform: none;
         width: auto;
         gap: 10px;
         order: unset;
+        z-index: 2000;
     }
 
     h1 {
