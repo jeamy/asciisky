@@ -64,12 +64,13 @@ body.theme-amber {
     --dialog-box-shadow: 0 0 20px rgba(255, 200, 87, 0.35);
 }
 
-/* Zoom-Button in der Himmelsansicht */
+/* Zoom-Button in der Himmelsansicht - oben zentriert */
 .sky-container .zoom-button {
     position: absolute;
     top: 10px;
-    right: 10px;
-    z-index: 50;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
     background: var(--ui-bg);
     border: 1px solid var(--ui-border);
     color: var(--primary-color);

@@ -48,6 +48,10 @@ export class SkyRenderer {
         };
         this._savedPlanisphereConfig = null;
 
+        // Planisphere pan offset (für Verschiebung der Ansicht im gezoomten Zustand)
+        this.planispherePanX = 0;
+        this.planispherePanY = 0;
+
         // Wenn wir direkt in der Planisphärenansicht starten, Raster quadratisch setzen
         if (this.viewMode === 'planisphere') {
             this._savedHorizonConfigForPlanisphere = {
@@ -587,11 +591,6 @@ export class SkyRenderer {
                 return;
             }
 
-            // In der Planisphären-Ansicht keinen Zoom-Button anzeigen (nur Horizontansicht zoombar)
-            if (this.viewMode === 'planisphere') {
-                return;
-            }
-
             const btn = document.createElement('button');
             btn.id = 'zoom-toggle';
             btn.className = 'zoom-button';
@@ -600,7 +599,7 @@ export class SkyRenderer {
             const nextIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const nextFactor = this.zoomLevels[nextIndex];
             btn.title = `Zoom ${nextFactor}×`;
-            btn.textContent = `${nextFactor}×`;
+            btn.textContent = `${factor}×`;
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.toggleZoom();
@@ -611,10 +610,6 @@ export class SkyRenderer {
 
     toggleZoom() {
         try {
-            // Zoom nur in der Horizontansicht erlauben
-            if (this.viewMode === 'planisphere') {
-                return;
-            }
             // Zoom nur auf Desktop-Geräten erlauben
             if (this.isMobileDevice()) {
                 return;
@@ -624,23 +619,40 @@ export class SkyRenderer {
             this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
             const factor = this.zoomLevels[this.zoomIndex] || 1;
 
-            // Skalierte Rastergröße setzen
-            CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
-            CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
-            CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
+            if (this.viewMode === 'planisphere') {
+                // Planisphäre: Quadratisches Raster skalieren
+                const baseSize = this._savedHorizonConfigForPlanisphere 
+                    ? this._savedHorizonConfigForPlanisphere.width 
+                    : this.originalSkyConfig.width;
+                const size = Math.max(1, Math.round(baseSize * factor));
+                CONFIG.SKY_WIDTH = size;
+                CONFIG.SKY_HEIGHT = size;
+                CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
 
-            // Berechne vertikalen Offset, damit die Horizontlinie an derselben Position bleibt
-            if (factor === 1) {
-                // Zurück auf 1x: Offset zurücksetzen, Linie ist wieder zentriert
-                this.verticalOffset = 0;
-            } else if (factor === 2) {
-                // Wechsel auf 2x: Offset setzen, damit Horizontlinie an Position bleibt
-                const originalHorizonRow = this.originalSkyConfig.horizonRow;
-                const newHorizonRow = CONFIG.HORIZON_ROW;
-                const estimatedRowHeight = 16;
-                this.verticalOffset = -((newHorizonRow - originalHorizonRow) * estimatedRowHeight);
+                // Bei Zoom-Reset auch Pan-Offset zurücksetzen
+                if (factor === 1) {
+                    this.planispherePanX = 0;
+                    this.planispherePanY = 0;
+                }
+            } else {
+                // Horizontansicht: Skalierte Rastergröße setzen
+                CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
+                CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
+                CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
+
+                // Berechne vertikalen Offset, damit die Horizontlinie an derselben Position bleibt
+                if (factor === 1) {
+                    // Zurück auf 1x: Offset zurücksetzen, Linie ist wieder zentriert
+                    this.verticalOffset = 0;
+                } else if (factor === 2) {
+                    // Wechsel auf 2x: Offset setzen, damit Horizontlinie an Position bleibt
+                    const originalHorizonRow = this.originalSkyConfig.horizonRow;
+                    const newHorizonRow = CONFIG.HORIZON_ROW;
+                    const estimatedRowHeight = 16;
+                    this.verticalOffset = -((newHorizonRow - originalHorizonRow) * estimatedRowHeight);
+                }
+                // Bei 4x: Offset beibehalten
             }
-            // Bei 4x: Offset beibehalten
 
             // Cursor-Stil aktualisieren
             this.updateCursorStyle();
@@ -1378,8 +1390,8 @@ export class SkyRenderer {
 
             const factor = this.zoomLevels[this.zoomIndex] || 1;
 
-            // Vertical drag only when zoomed
-            if (factor > 1) {
+            // Vertical drag only when zoomed in HORIZON mode
+            if (factor > 1 && this.viewMode === 'horizon') {
                 const deltaY = e.clientY - this.lastMouseY;
                 this.verticalOffset += deltaY;
 
@@ -1390,7 +1402,7 @@ export class SkyRenderer {
                 this.lastMouseY = e.clientY;
             }
 
-            // Horizontal drag -> pan horizon in 5° steps (horizon mode) or rotate planisphere (planisphere mode)
+            // Horizontal drag -> pan horizon in 5° steps (horizon mode) or rotate/pan planisphere (planisphere mode)
             {
                 if (this.viewMode === 'horizon') {
                     const deltaX = e.clientX - this.lastMouseX;
@@ -1431,11 +1443,8 @@ export class SkyRenderer {
                         }
                     }
                 } else if (this.viewMode === 'planisphere') {
-                    // Planisphere rotation: horizontal drag rotates the view
-                    const deltaX = e.clientX - this.lastMouseX;
-                    this._horizDragAccumPx += deltaX;
-                    this.lastMouseX = e.clientX;
-
+                    const factor = this.zoomLevels[this.zoomIndex] || 1;
+                    
                     // Mark as drag if movement exceeds small threshold
                     if (!this._didDrag) {
                         const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
@@ -1443,43 +1452,63 @@ export class SkyRenderer {
                         if (totalDx > 3 || totalDy > 3) this._didDrag = true;
                     }
 
-                    // Convert pixels to degrees based on current sky element width
-                    const rect = skyEl.getBoundingClientRect();
-                    const stepPx = rect.width * (5 / 360); // 5° step size in pixels
-                    if (stepPx > 0) {
-                        // Apply as many 5° steps as accumulated
-                        while (Math.abs(this._horizDragAccumPx) >= stepPx) {
-                            // Bestimme die Richtung für die nächste Rotation
-                            const direction = this._horizDragAccumPx > 0 ? 1 : -1; // 1=rechts, -1=links
+                    if (factor > 1) {
+                        // Gezoomt: X/Y-Panning der Ansicht
+                        const deltaX = e.clientX - this.lastMouseX;
+                        const deltaY = e.clientY - this.lastMouseY;
+                        this.planispherePanX += deltaX;
+                        this.planispherePanY += deltaY;
+                        this.lastMouseX = e.clientX;
+                        this.lastMouseY = e.clientY;
 
-                            // Reduziere den Akkumulator
-                            if (this._horizDragAccumPx > 0) {
-                                this._horizDragAccumPx -= stepPx;
-                            } else {
-                                this._horizDragAccumPx += stepPx;
-                            }
+                        // Limit pan offset to reasonable bounds
+                        const maxPan = CONFIG.SKY_WIDTH * 10;
+                        this.planispherePanX = Math.max(-maxPan, Math.min(maxPan, this.planispherePanX));
+                        this.planispherePanY = Math.max(-maxPan, Math.min(maxPan, this.planispherePanY));
+                    } else {
+                        // Nicht gezoomt: Rotation wie bisher
+                        const deltaX = e.clientX - this.lastMouseX;
+                        this._horizDragAccumPx += deltaX;
+                        this.lastMouseX = e.clientX;
 
-                            // Merke die letzte Richtung und markiere als anstehend
-                            this._horizDragDirection = direction;
-                            this._horizDragPending = true;
+                        // Convert pixels to degrees based on current sky element width
+                        const rect = skyEl.getBoundingClientRect();
+                        const stepPx = rect.width * (5 / 360); // 5° step size in pixels
+                        if (stepPx > 0) {
+                            // Apply as many 5° steps as accumulated
+                            while (Math.abs(this._horizDragAccumPx) >= stepPx) {
+                                // Bestimme die Richtung für die nächste Rotation
+                                const direction = this._horizDragAccumPx > 0 ? 1 : -1; // 1=rechts, -1=links
 
-                            // Schedule nur einmal pro Frame
-                            if (!this._horizDragScheduled) {
-                                this._horizDragScheduled = true;
-                                requestAnimationFrame(() => {
-                                    if (!this._horizDragPending) return;
+                                // Reduziere den Akkumulator
+                                if (this._horizDragAccumPx > 0) {
+                                    this._horizDragAccumPx -= stepPx;
+                                } else {
+                                    this._horizDragAccumPx += stepPx;
+                                }
 
-                                    // Führe die Rotation aus
-                                    if (this._horizDragDirection > 0) {
-                                        this.rotatePlanisphereRight();
-                                    } else if (this._horizDragDirection < 0) {
-                                        this.rotatePlanisphereLeft();
-                                    }
+                                // Merke die letzte Richtung und markiere als anstehend
+                                this._horizDragDirection = direction;
+                                this._horizDragPending = true;
 
-                                    // Markiere als erledigt
-                                    this._horizDragPending = false;
-                                    this._horizDragScheduled = false;
-                                });
+                                // Schedule nur einmal pro Frame
+                                if (!this._horizDragScheduled) {
+                                    this._horizDragScheduled = true;
+                                    requestAnimationFrame(() => {
+                                        if (!this._horizDragPending) return;
+
+                                        // Führe die Rotation aus
+                                        if (this._horizDragDirection > 0) {
+                                            this.rotatePlanisphereRight();
+                                        } else if (this._horizDragDirection < 0) {
+                                            this.rotatePlanisphereLeft();
+                                        }
+
+                                        // Markiere als erledigt
+                                        this._horizDragPending = false;
+                                        this._horizDragScheduled = false;
+                                    });
+                                }
                             }
                         }
                     }
@@ -1503,7 +1532,12 @@ export class SkyRenderer {
                 const skyEl = this.container.querySelector('.sky-text');
                 if (skyEl) {
                     const factor = this.zoomLevels[this.zoomIndex] || 1;
-                    skyEl.style.cursor = factor > 1 ? 'grab' : 'default';
+                    // In Planisphäre immer grab (für Rotation), sonst nur wenn gezoomt
+                    if (this.viewMode === 'planisphere' || factor > 1) {
+                        skyEl.style.cursor = 'grab';
+                    } else {
+                        skyEl.style.cursor = 'default';
+                    }
                 }
                 // Reset horizontal accumulator
                 this._horizDragAccumPx = 0;
@@ -1530,24 +1564,55 @@ export class SkyRenderer {
     }
 
     applyVerticalOffset() {
-        // In der Planisphäre kein vertikales Offset anwenden (Zentrierung via CSS)
+        const skyEl = this.container.querySelector('.sky-text');
+        const labelsLayer = this.container.querySelector('.labels-layer');
+        const constellationLayer = this.container.querySelector('#constellation-layer');
+        const gridOverlay = this.container.querySelector('#grid-overlay-layer');
+
         if (this.viewMode === 'planisphere') {
+            // Planisphäre: X/Y Panning im gezoomten Zustand
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            if (factor > 1) {
+                // Verschiebung anwenden (zusätzlich zur Zentrierung)
+                const translateX = this.planispherePanX;
+                const translateY = this.planispherePanY;
+                if (skyEl) {
+                    skyEl.style.transform = `translate(calc(-50% + ${translateX}px), calc(-50% + ${translateY}px))`;
+                }
+                if (labelsLayer) {
+                    labelsLayer.style.transform = `translate(${translateX}px, ${translateY}px)`;
+                }
+                if (constellationLayer) {
+                    constellationLayer.style.transform = `translate(${translateX}px, ${translateY}px)`;
+                }
+                if (gridOverlay) {
+                    gridOverlay.style.transform = `translate(${translateX}px, ${translateY}px)`;
+                }
+            } else {
+                // Keine Verschiebung bei 1x Zoom
+                if (skyEl) {
+                    skyEl.style.transform = 'translate(-50%, -50%)';
+                }
+                if (labelsLayer) {
+                    labelsLayer.style.transform = '';
+                }
+                if (constellationLayer) {
+                    constellationLayer.style.transform = '';
+                }
+                if (gridOverlay) {
+                    gridOverlay.style.transform = '';
+                }
+            }
             return;
         }
 
-        const skyEl = this.container.querySelector('.sky-text');
+        // Horizontansicht: Vertikales Panning
         if (skyEl) {
             skyEl.style.transform = `translateY(${this.verticalOffset}px)`;
         }
-
-        // Auch die Labels verschieben
-        const labelsLayer = this.container.querySelector('.labels-layer');
         if (labelsLayer) {
             labelsLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
-
-        // Auch die Sternbilder-SVG-Layer verschieben
-        const constellationLayer = this.container.querySelector('#constellation-layer');
         if (constellationLayer) {
             constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
