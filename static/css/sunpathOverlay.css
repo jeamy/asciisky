@@ -58,6 +58,13 @@
   stroke-width: 1.5;
 }
 
+.sunpath.transit {
+  fill: none;
+  stroke: #66ff99;
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+}
+
 .sunpath-hitareas rect {
   fill: transparent;
   pointer-events: all;

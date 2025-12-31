@@ -341,6 +341,7 @@ export class SunpathOverlay {
 
         const labelDate = t('date');
         const labelSunrise = t('rise_time');
+        const labelTransit = t('transit_time');
         const labelSunset = t('set_time');
         const labelLength = t('day_length') || 'Tageslänge';
 
@@ -364,7 +365,9 @@ export class SunpathOverlay {
         const labelNaut = t('nautical_twilight');
         const labelCivil = t('civil_twilight');
 
-        let html = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
+        const transit = formatIsoLocalTime(point.transit);
+
+        let html = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelTransit}: ${transit}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
         html += `<br>${labelAstro}: ${astro}`;
         html += `<br>${labelNaut}: ${naut}`;
         html += `<br>${labelCivil}: ${civil}`;
@@ -654,12 +657,19 @@ export class SunpathOverlay {
         };
 
         const sunrisePathData = buildPath('sunrise_hours');
+        const transitPathData = buildPath('transit_hours');
         const sunsetPathData = buildPath('sunset_hours');
 
         if (sunrisePathData) {
             const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             p.setAttribute('d', sunrisePathData);
             p.setAttribute('class', 'sunpath sunrise');
+            svg.appendChild(p);
+        }
+        if (transitPathData) {
+            const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            p.setAttribute('d', transitPathData);
+            p.setAttribute('class', 'sunpath transit');
             svg.appendChild(p);
         }
         if (sunsetPathData) {

@@ -148,7 +148,7 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
     return result
 
-SUNPATH_VERSION = 4
+SUNPATH_VERSION = 5
 
 def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) -> dict:
     """Compute sunrise and sunset times for each day of a year at a given location.
@@ -207,6 +207,23 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
             sun_events_by_date[d]['sunrise'] = dt_local
         elif ev == 0 and sun_events_by_date[d]['sunset'] is None:
             sun_events_by_date[d]['sunset'] = dt_local
+
+    # 1b. Meridian transits (solar noon / highest point)
+    transit_func = almanac.meridian_transits(eph, sun, location)
+    transit_times, transit_events = almanac.find_discrete(t_start, t_end, transit_func)
+    transit_events_by_date = {}
+    for ti, ev in zip(transit_times, transit_events):
+        try:
+            dt_local = ti.utc_datetime().astimezone(tz)
+            d = dt_local.date()
+            # Upper transit = highest culmination; Skyfield uses event=1 for upper
+            # But select the event with maximum altitude per day for safety.
+            alt_deg = (location.at(ti).observe(sun).apparent().altaz()[0].degrees)
+            prev = transit_events_by_date.get(d)
+            if prev is None or alt_deg > prev[1]:
+                transit_events_by_date[d] = (dt_local, alt_deg, int(ev))
+        except Exception:
+            continue
 
     # 2. Twilight
     # Calculate all twilight transitions for the year
@@ -353,12 +370,18 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         def serialize_dt(dt):
             return dt.isoformat() if dt else None
 
+        transit_dt = None
+        if day_date in transit_events_by_date:
+            transit_dt = transit_events_by_date[day_date][0]
+
         points.append({
             "date": day_date.isoformat(),
             "sunrise": sunrise_dt.isoformat() if sunrise_dt else None,
             "sunset": sunset_dt.isoformat() if sunset_dt else None,
             "sunrise_hours": to_hours(sunrise_dt),
             "sunset_hours": to_hours(sunset_dt),
+            "transit": transit_dt.isoformat() if transit_dt else None,
+            "transit_hours": to_hours(transit_dt),
             "day_length_hours": length_hours,
             "astronomical_twilight_start": serialize_dt(astro_start),
             "astronomical_twilight_end": serialize_dt(astro_end),
