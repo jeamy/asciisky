@@ -21,6 +21,7 @@ A web application that displays the current positions of celestial bodies (Sun, 
   - Constellation lines connecting major stars (using data from [constellationship.fab](https://github.com/Stellarium/stellarium/tree/master/skycultures/western))
   - Constellation names in the selected language
   - Smooth panning and zooming
+- Messier objects overlay (catalog from RASC list via SEDS [dataRASC.txt](http://www.messier.seds.org/xtra/similar/dataRASC.txt)), real-time Alt/Az with rise/set/transit, toggleable like constellations
 - Auto-updates every 60 seconds
 - Internationalization (i18n) with German as default language
 - Simulated time controls (optional): view the sky at a chosen UTC time
