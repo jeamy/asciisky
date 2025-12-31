@@ -3,9 +3,7 @@ import { t, getCurrentLanguage } from './i18n.js';
 import { settingsManager } from './settings.js';
 
 const SUNPATH_CACHE = new Map();
-const SUNPATH_FETCH_MAX_RETRIES = 6;
-const SUNPATH_FETCH_BASE_DELAY_MS = 1200;
-const SUNPATH_FETCH_MAX_DELAY_MS = 6000;
+const SUNPATH_SCHEMA_VERSION = 5;
 
 function pad2(value) {
     return String(value).padStart(2, '0');
@@ -41,6 +39,33 @@ function parseIsoLocalTime(iso) {
 function formatIsoLocalTime(iso) {
     const parts = parseIsoLocalTime(iso);
     return parts ? parts.formatted : '—';
+}
+
+function formatDecimalHour(decimalHour) {
+    if (typeof decimalHour !== 'number' || !Number.isFinite(decimalHour)) return null;
+    let h = decimalHour % 24;
+    if (h < 0) h += 24;
+    const hours = Math.floor(h);
+    const minutes = Math.floor((h - hours) * 60);
+    return `${pad2(hours)}:${pad2(minutes)}`;
+}
+
+function fallbackTransitLabel(point) {
+    if (!point) return null;
+    const sunrise = parseIsoLocalTime(point.sunrise);
+    const sunset = parseIsoLocalTime(point.sunset);
+    if (!sunrise || !sunset) return null;
+
+    let start = sunrise.decimalHour;
+    let end = sunset.decimalHour;
+    if (start == null || end == null) return null;
+
+    // Handle wrap around midnight (sunset after midnight local time)
+    if (end <= start) {
+        end += 24;
+    }
+    const mid = (start + end) / 2;
+    return formatDecimalHour(mid);
 }
 
 function formatIsoInterval(startIso, endIso) {
@@ -254,7 +279,13 @@ export class SunpathOverlay {
             showLoadingIndicator('loading_sunpath');
         }
         try {
-            if (!this.data || this.currentKey !== key) {
+            const needsRefetch =
+                !this.data ||
+                this.currentKey !== key ||
+                !this.data.version ||
+                this.data.version < SUNPATH_SCHEMA_VERSION;
+
+            if (needsRefetch) {
                 await this.fetchData(loc, year);
                 this.currentKey = key;
             }
@@ -284,9 +315,14 @@ export class SunpathOverlay {
         const key = makeCacheKey(location, year);
         if (key && SUNPATH_CACHE.has(key)) {
             const cached = SUNPATH_CACHE.get(key);
-            this.data = cached;
-            this.locationTimezone = (cached && cached.location && cached.location.timezone) || 'UTC';
-            return;
+            const cachedVersion = cached && typeof cached === 'object' ? cached.version : null;
+            if (cachedVersion && cachedVersion >= SUNPATH_SCHEMA_VERSION) {
+                this.data = cached;
+                this.locationTimezone = (cached && cached.location && cached.location.timezone) || 'UTC';
+                return;
+            }
+            // drop stale cache and refetch
+            SUNPATH_CACHE.delete(key);
         }
         try {
             const lat = typeof location.latitude === 'number' ? location.latitude : location.lat;
@@ -365,7 +401,19 @@ export class SunpathOverlay {
         const labelNaut = t('nautical_twilight');
         const labelCivil = t('civil_twilight');
 
-        const transit = formatIsoLocalTime(point.transit);
+        let transit = formatIsoLocalTime(point.transit);
+        if (transit === '—' && typeof point.transit_hours === 'number') {
+            const byHours = formatDecimalHour(point.transit_hours);
+            if (byHours) {
+                transit = byHours;
+            }
+        }
+        if (transit === '—') {
+            const fallback = fallbackTransitLabel(point);
+            if (fallback) {
+                transit = fallback;
+            }
+        }
 
         let html = `${labelDate}: ${dateStr}<br>${labelSunrise}: ${sunrise}<br>${labelTransit}: ${transit}<br>${labelSunset}: ${sunset}<br>${labelLength}: ${dayLen}`;
         html += `<br>${labelAstro}: ${astro}`;
