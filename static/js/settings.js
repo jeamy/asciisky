@@ -181,6 +181,24 @@ export class SettingsManager {
         return this.getConstellationsVisible();
     }
 
+    getMessierVisible() {
+        try {
+            const opts = this.settings?.options;
+            if (opts && typeof opts.showMessier === 'boolean') {
+                return !!opts.showMessier;
+            }
+        } catch (_) { /* noop */ }
+        return true;
+    }
+
+    setMessierVisible(visible) {
+        if (!this.settings) this.settings = {};
+        if (!this.settings.options) this.settings.options = {};
+        this.settings.options.showMessier = !!visible;
+        this.saveSettings();
+        return this.getMessierVisible();
+    }
+
     // --- Simulierte Zeit ---
     // Liefert den aktuell gesetzten Versatz in Minuten und den Aktivierungsstatus
     getSimulatedTimeOffset() {

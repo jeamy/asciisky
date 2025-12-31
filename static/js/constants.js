@@ -7,6 +7,7 @@ export const API_ENDPOINTS = {
     COMETS: '/api/comets',
     ZODIAC: '/api/zodiac',
     SUNPATH: '/api/celestial/sunpath',
+    MESSIER: '/api/messier',
     // Legacy endpoints removed (RabbitMQ migration):
     // CACHE_STATUS: '/api/cache_status',
     // PRECOMPUTE_WINDOW: '/api/precompute_window',
@@ -81,7 +82,9 @@ export const CONFIG = {
         ENABLE_BRIGHT_MINOR_PLANET_LABELS: true,
         BRIGHT_MINOR_PLANET_MAG_THRESHOLD: 9.0,
         ENABLE_BRIGHT_COMET_LABELS: true,
-        BRIGHT_COMET_MAG_THRESHOLD: 9.0
+        BRIGHT_COMET_MAG_THRESHOLD: 9.0,
+        ENABLE_MESSIER_LABELS: true,
+        MESSIER_MAG_THRESHOLD: 10.0
     },
     CONSTELLATIONS: {
         ENABLE_CONSTELLATION_LAYER: true,

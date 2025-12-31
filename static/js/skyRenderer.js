@@ -2,6 +2,7 @@ import { API_ENDPOINTS, CONFIG, ASCII_ART, ASTRO_CONSTANTS, MOON_PHASE_SYMBOLS }
 import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
 import { ZodiacRenderer } from './zodiacRenderer.js';
+import { MessierRenderer } from './messierRenderer.js';
 
 export class SkyRenderer {
     constructor(containerId) {
@@ -89,6 +90,8 @@ export class SkyRenderer {
         if (CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) {
             this.zodiacRenderer = new ZodiacRenderer(this);
         }
+        // Initialize Messier renderer (always enabled; visibility controlled by toggle)
+        this.messierRenderer = new MessierRenderer(this);
 
         // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
         this.update();
@@ -123,6 +126,9 @@ export class SkyRenderer {
         // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
         if (this.zodiacRenderer && this.zodiacRenderer.visible) {
             try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
+        }
+        if (this.messierRenderer && this.messierRenderer.visible) {
+            try { requestAnimationFrame(() => { try { this.messierRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
         }
     }
 
@@ -505,8 +511,9 @@ export class SkyRenderer {
         // Speichere die vorhandenen Navigationspfeile
         const existingArrows = document.getElementById('navigation-arrows');
 
-        // Rette das SVG-Layer vor dem Leeren
+        // Rette die SVG-Layer vor dem Leeren
         const svgLayer = document.getElementById('constellation-layer');
+        const messierLayer = document.getElementById('messier-layer');
 
         // Entferne alte object-count-displays vor dem Leeren
         const oldCounts = document.querySelectorAll('#object-count-display');
@@ -537,10 +544,9 @@ export class SkyRenderer {
             }
         } catch (_) { /* noop */ }
 
-        // Füge das SVG-Layer wieder hinzu, falls es existierte
-        if (svgLayer) {
-            this.container.appendChild(svgLayer);
-        }
+        // Füge die SVG-Layer wieder hinzu, falls sie existierten
+        if (svgLayer) this.container.appendChild(svgLayer);
+        if (messierLayer) this.container.appendChild(messierLayer);
 
         // Füge Objektanzahl-Display hinzu
         this.addObjectCountDisplay();
@@ -572,6 +578,10 @@ export class SkyRenderer {
 
             // Render grid overlay (both for planisphere and horizon)
             this.renderGridOverlay();
+            // Reproject Messier overlay after layout
+            if (this.messierRenderer && this.messierRenderer.visible) {
+                this.messierRenderer.updatePositions();
+            }
         });
     }
 
@@ -1585,6 +1595,10 @@ export class SkyRenderer {
                 if (constellationLayer) {
                     constellationLayer.style.transform = `translate(${translateX}px, ${translateY}px)`;
                 }
+                const messierLayer = this.container.querySelector('#messier-layer');
+                if (messierLayer) {
+                    messierLayer.style.transform = `translate(${translateX}px, ${translateY}px)`;
+                }
                 if (gridOverlay) {
                     gridOverlay.style.transform = `translate(${translateX}px, ${translateY}px)`;
                 }
@@ -1598,6 +1612,10 @@ export class SkyRenderer {
                 }
                 if (constellationLayer) {
                     constellationLayer.style.transform = '';
+                }
+                const messierLayer = this.container.querySelector('#messier-layer');
+                if (messierLayer) {
+                    messierLayer.style.transform = '';
                 }
                 if (gridOverlay) {
                     gridOverlay.style.transform = '';
@@ -1615,6 +1633,10 @@ export class SkyRenderer {
         }
         if (constellationLayer) {
             constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
+        }
+        const messierLayer = this.container.querySelector('#messier-layer');
+        if (messierLayer) {
+            messierLayer.style.transform = `translateY(${this.verticalOffset}px)`;
         }
     }
 
@@ -1868,8 +1890,12 @@ export class SkyRenderer {
             `${obj.symbol || ''} ${displayName}`.trim(),
             `${t('altitude')}: ${obj.altitude?.toFixed ? obj.altitude.toFixed(1) : obj.altitude}°`,
             `${t('azimuth')}: ${obj.azimuth?.toFixed ? obj.azimuth.toFixed(1) : obj.azimuth}°`,
-            `${t('distance')}: ${obj.distance?.toFixed ? obj.distance.toFixed(3) : obj.distance} ${t('au')}`
         ];
+
+        // Messier-Objekte haben keine sinnvolle Distanzangabe
+        if (!obj.isMessier && obj.distance !== undefined) {
+            info.push(`${t('distance')}: ${obj.distance?.toFixed ? obj.distance.toFixed(3) : obj.distance} ${t('au')}`);
+        }
 
         if (obj.rise_time) {
             const label = this.buildTimeLabel(obj.rise_time);
@@ -2291,6 +2317,10 @@ export class SkyRenderer {
             if (this.zodiacRenderer) {
                 tasks.push(this.loadZodiacData(token, this.location, timeISO));
             }
+            // Load Messier overlay
+            if (this.messierRenderer) {
+                tasks.push(this.loadMessierData(token, this.location, timeISO));
+            }
 
             // If cache is missing, trigger background precompute for future
             const missing = [];
@@ -2307,6 +2337,12 @@ export class SkyRenderer {
                 if (this.isActiveUpdate(token)) {
                     this.render();
                     this.refreshDialogIfVisible();
+                    if (this.messierRenderer && this.messierRenderer.visible) {
+                        try { this.messierRenderer.updatePositions(); } catch (_) { /* noop */ }
+                    }
+                    if (this.zodiacRenderer && this.zodiacRenderer.visible) {
+                        try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ }
+                    }
                 }
             }
 
@@ -2342,6 +2378,19 @@ export class SkyRenderer {
             }
         } catch (error) {
             console.error('Error loading zodiac data:', error);
+        }
+    }
+
+    async loadMessierData(token, location, timeISO) {
+        try {
+            if (this.messierRenderer) {
+                await this.messierRenderer.fetchMessierData(location, timeISO);
+                if (this.isActiveUpdate(token)) {
+                    this.messierRenderer.updatePositions();
+                }
+            }
+        } catch (error) {
+            console.error('Error loading Messier data:', error);
         }
     }
 }

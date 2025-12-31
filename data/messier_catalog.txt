@@ -1,0 +1,198 @@
+RASC's Messier Object list, ordered by Season
+=============================================
+
+Below please find the Messier objects as listed in the RASC's 
+Observer's Handbook 1996. The data are those from the SEDS Messier database,
+not those in the Handbook, with the "Remarks" taken from the Handbook. 
+This table was arranged by Alan Dyer.
+
+A html version of this list is available at
+    http://messier.seds.org/xtra/similar/dataRASC.html
+
+Messier object data in the tables below:
+
+Type: 
+    1=Open Cluster, 2=Globular Cluster, 3=Planetary Nebula, 4=Diffuse Nebula, 
+    5=Spiral Galaxy, 6=Elliptical Galaxy, 7=Irregular Galaxy, 
+    8=Lenticular (S0) Galaxy, 9=Supernova Remnant, 
+    A=System of 4 stars or Asterism, B=Milky Way Patch, C=Binary star.
+ra, dec:
+    right ascension and declination for epoch 2000.0
+B:  apparent visual magnitude
+D:  apparent (angular) diameter in arc minutes
+d:  distance in kilo-light-years
+Remarks:
+    Remarks from the RASC's Observer's Handbook (unchanged)
+
+Winter
+======
+
+M#    NGC# Con Type  ra    dec   B      D          d      Remarks
+
+  M1  1952 Tau 9 05 34.5 +22 01  8.2    6x4        6.3    !! famous Crab Nebula supernova remnant
+ M45     - Tau 1 03 47.0 +24 07  1.6  110.0        0.4    !! Pleiades; use low power, look for nebulosity
+                                                         
+ M36  1960 Aur 1 05 36.1 +34 08  6.3   12.0        4.1    best at low power; bright but scattered group
+ M37  2099 Aur 1 05 52.4 +32 33  6.2   24.0        4.6    !! finest of the 3 Auriga clusters; very rich
+ M38  1922 Aur 1 05 28.4 +35 50  7.4   21.0        4.2    look for the small cluster NGC 1907 1/2 deg south
+                                                         
+ M42  1976 Ori 4 05 35.4 -05 27  4.0   85x60       1.6    !! Orion Nebula !; a magnificient object
+ M43  1982 Ori 4 05 35.6 -05 16  9.1   20x15       1.6    detached part of Orion Nebula; in same field
+ M78  2068 Ori 4 05 46.7 +00 03 10.3    8x6        1.6    featureless reflection nebula
+                                                         
+ M79  1904 Lep 2 05 24.2 -24 31  8.4    8.7       39.8    20-cm telescope needed to resolve
+                                                         
+ M35  2168 Gem 1 06 08.9 +24 20  5.3   28.0        2.8    !! look for small cluster NGC 2158 1/4 deg SW
+                                                         
+ M41  2287 CMa 1 06 46.0 -20 44  4.6   38.0        2.4    4 deg S of Sirius; bright but coarse cluster
+                                                         
+ M50  2323 Mon 1 07 03.2 -08 20  6.3   16.0        3      between Sirius and Procyon; use low power
+                                                         
+ M46  2437 Pup 1 07 41.8 -14 49  6.0   27.0        5.4    !! contains planetary nebula NGC 2438
+ M47  2422 Pup 1 07 36.6 -14 30  4.5   30.0        1.6    coarse cluster; 1.5 deg W of M46
+ M93  2447 Pup 1 07 44.6 -23 52  6.0   22.0        4.5    compact, bright cluster; fairly rich
+                                                         
+ M48  2548 Hya 1 08 13.8 -05 48  5.3   54.0        1.5    former 'lost' Messier object; sparse group
+
+Spring
+======
+
+M#    NGC# Con Type  ra    dec   B      D          d      Remarks
+
+ M44  2632 Cnc 1 08 40.1 +19 59  3.7   95.0        0.5    !! Beehive Cluster; use low power &amp; wide field
+ M67  2682 Cnc 1 08 50.4 +11 49  6.1   30.0        2.25   one of the oldest star clusters
+
+ M40  Win4 UMa C 12 22.4 +58 05  9.1    0.8        0.3    double star Winnecke 4; separation of 50"
+ M81  3031 UMa 5 09 55.6 +69 04  7.9   21x10   11000      !! bright spiral; M82 1/2 deg N
+ M82  3034 UMa 7 09.55.8 +69 41  8.8    9x4    11000      !! the `exploding galaxy'; look for structure
+ M97  3587 UMa 3 11 14.8 +55 01  9.9  3.4x3.3      2.6    !! Owl Nebula; appears brighter than 11.2 mag
+M101  5457 UMa 5 14 03.2 +54 21  9.6   22.0    24000      !! Pinwheel Galaxy; face-on spiral; diffuse
+M108  3556 UMa 5 11 11.5 +55 40 10.7    8x1    45000      nearly edge-on; very close to M97
+M109  3992 UMa 5 11 57.6 +53 23 10.8    7x4    55000      barred spiral near gamma UMa
+
+ M65  3623 Leo 5 11 18.9 +13 05  9.3    8x1.5  35000      !! bright elongated spiral
+ M66  3627 Leo 5 11 20.2 +12 59  8.2    8x2.5  35000      !! M65 &amp; NGC 3628 in same field
+ M95  3351 Leo 5 10 44.0 +11 42 10.4  4.4x3.3  38000      bright barred spiral
+ M96  3368 Leo 5 10 46.8 +11 49  9.1    6x4    38000      M95 in same field
+M105  3379 Leo 6 10 47.8 +12 35  9.2    2.0    38000      very bear M95 and M96
+
+ M53  5024 Com 2 13 12.9 +18 10  7.6   12.6       56.4    15-cm telescope needed to resolve
+ M64  4826 Com 5 12 56.7 +21 41  8.8  9.3x5.4  12000      !! Black Eye Galaxy; `eye' needs large aperture
+ M85  4382 Com 8 12 25.4 +18 11  9.3  7.1x5.2  60000      bright elliptical shape
+ M88  4501 Com 5 12 32.0 +14 25 10.2    7x4    60000      bright multiple-arm spiral
+ M91  4548 Com 5 12 35.4 +14 30  9.5  5.4x4.4  60000      some lists say M91 is M58, not NGC 4548
+ M98  4192 Com 5 12 13.8 +14 54 11.7  9.5x3.2  60000      nearly edge-on spiral near star 6 Comae B.
+ M99  4254 Com 5 12 18.8 +14 25 10.1  5.4x4.8  60000      nearly face-on spiral near M98
+M100  4321 Com 5 12 22.9 +15 49 10.6    7x6    60000      face-on spiral with starlike nucleus
+
+ M49  4472 Vir 6 12 29.8 +08 00  8.5    9x7.5  60000      very bright elliptical
+ M58  4579 Vir 5 12 37.7 +11 49  9.2  5.5x4.5  60000      bright barred spiral; M59 and M60 1 deg East
+ M59  4621 Vir 6 12 42.0 +11 39  9.6    5x3.5  60000      bright elliptical paired with M60
+ M60  4649 Vir 6 12 43.7 +11 33  8.9    7x6    60000      bright elliptical with M59 and NGC 4647
+ M61  4303 Vir 5 12 21.9 +04 28 10.1    6x5.5  60000      face-on two-armed spiral
+ M84  4374 Vir 8 12 25.1 +12 53  9.3    5.0    60000      M86 and many NGC's nearby; lots to explore !
+ M86  4406 Vir 8 12 26.2 +12 57  9.7  7.5x5.5  60000      in richest part of Coma-Virgo galaxy cluster
+ M87  4486 Vir 6 12 30.8 +12 24  9.2    7.0    60000      the one with the famous jet and black hole
+ M89  4552 Vir 6 12 35.7 +12 33  9.5    4.0    60000      resembles M87 but smaller
+ M90  4569 Vir 5 12 36.8 +13 10 10.0  9.5x4.5  60000      bright spiral; near M89
+M104  4594 Vir 5 12 40.0 -11 37  8.7    9x4    50000      !! Sombrero Galaxy; look for dust lane
+
+  M3  5272 CVn 2 13 42.2 +28 23  6.3   16.2       30.6    !! contains many variable stars
+ M51  5194 CVn 5 13 29.9 +47 12  8.1   11x7    37000      !! Whirlpool Galaxy; superb in big telescopes
+ M63  5055 CVn 5 13 15.8 +42 02  9.5   10x6    37000      !! Sunflower Galaxy; bright, elongated
+ M94  4736 CVn 5 12 50.9 +41 07  7.9    7x3    14500      very bright and very comet-like
+M106  4258 CVn 5 12 19.0 +47 18  8.6   19x8    25000      !! large bright spiral
+
+ M68  4590 Hya 2 12 39.5 -26 45  8.0   12.0       32.3    15-cm telescope needed to resolve
+ M83  5236 Hya 5 13 37.0 -29 52  7.6   11x10   10000      large and diffuse; tough from northern latitudes
+
+M102? 5866 Dra 8 15 06.5 +55 46 10.0  5.2x2.3  40000      or is M102 = M101 ? (look for NGC 5907 nearby)
+
+  M5  5904 Ser 2 15 18.6 +02 05  6.2   17.4       22.8    !! one of the finest globulars
+
+Summer
+======
+
+M#    NGC# Con Type  ra    dec   B      D          d      Remarks
+
+ M13  6205 Her 2 16 41.7 +36 28  5.7   16.6       22.2    !! Hercules cluster !; NGC 6207 1/2 deg NE
+ M92  6341 Her 2 17 17.1 +43 08  6.5   11.2       26.1    9 deg NE of M13; fine object but often overlooked
+
+  M9  6333 Oph 2 17 19.2 -18 31  7.3    9.3       26.4    smallest of Ophiuchus globulars
+ M10  6254 Oph 2 16 57.1 -04 06  6.7   15.1       13.4    rich cluster; M12 3 deg NW
+ M12  6218 Oph 2 16 47.2 -01 57  6.6   14.5       17.6    loose globular cluster
+ M14  6402 Oph 2 17 37.6 -03 15  7.7   11.7       27.4    20-cm telescope needed to resolve
+ M19  6273 Oph 2 17 02.6 -26 16  6.6   13.5       27.1    oblate cluster; M62 4 deg South
+ M62  6266 Oph 2 17 01.2 -30 07  6.6   14.1       21.5    unsymmetrical; in rich field
+M107  6171 Oph 2 16 32.5 -13 03  9.2   10.0       19.6    small, faint globular
+
+  M4  6121 Sco 2 16 23.6 -26 32  6.4   26.3        6.8    bright globular near Antares
+  M6  6405 Sco 1 17 40.1 -32 13  5.3   15.0        2      !! Butterfly Cluster; best at low power
+  M7  6475 Sco 1 17 53.9 -34 49  4.1   80.0        1      !! excellent in binocular or rich-field scope
+ M80  6093 Sco 2 16 17.0 -22 59  7.7    8.9       27.4    very compressed globular
+
+ M16  6611 Ser 1 18 18.8 -13 47  6.4    7.0        7      Eagle Nebula with open cl.; use nebula filter
+
+  M8  6523 Sgr 4 18 03.8 -24 23  6.0   60x35       6.5    !! Lagoon Nebula with open cl. NGC 6530
+ M17  6618 Sgr 4 18 20.8 -16 11  7.5   11.0        5      !! Swan or Omega Nebula !; use nebula filter
+ M18  6613 Sgr 1 18 19.9 -17 08  7.5    9.0        6      sparse cluster; 1 deg S of M17
+ M20  6514 Sgr 4 18 02.6 -23 02  9.0   28.0        2.2    !! Trifid Nebula; emission &amp; reflection nebula
+ M21  6531 Sgr 1 18 04.6 -22 30  6.5   13.0        4.25   0.7 deg NE of M20; sparse cluster
+ M22  6656 Sgr 2 18 36.4 -23 54  5.9   24.0       10.1    spectacular from southern latitude
+ M23  6494 Sgr 1 17 56.8 -19 01  6.9   27.0        4.5    bright loose cluster
+ M24 >6603 Sgr B 18 16.9 -18 29  4.6    5.0       10      rich star cloud; contains open cl. NGC 6603
+ M25 I4725 Sgr 1 18 31.6 -19 15  6.5   40.0        2      bright but sparse cluster
+ M28  6626 Sgr 2 18 24.5 -24 52  7.3   11.2       17.9    compact globular near M22
+ M54  6715 Sgr 2 18 55.1 -30 29  8.0    9.1       82.8    not easily resolved
+ M55  6809 Sgr 2 19 40.0 -30 58  5.0   19.0       16.6    bright, loose globular
+ M69  6637 Sgr 2 18 31.4 -32 21  8.9    7.1       25.4    small, poor globular
+ M70  6681 Sgr 2 18 43.2 -32 18  9.6    7.8       28.0    small globular 2 deg E of M69
+ M75  6864 Sgr 2 20 06.1 -21 55  8.0    6.0       57.7    small and distant globular; 59,000 ly away
+
+ M11  6705 Sct 1 18 51.1 -06 16  6.3   14.0        6      !! Wild Duck Cluster; perhaps the best open cluster
+ M26  6694 Sct 1 18 45.2 -09 24  9.3   15.0        5      bright, coarse cluster
+
+ M56  6779 Lyr 2 19 16.6 +30 11  8.2    7.1       31.6    within a rich star field
+ M57  6720 Lyr 3 18 53.6 +33 02  8.8  1.4x1.0      4.1    !! Ring Nebula !; 15 mag central star VERY tough
+
+ M71  6838 Sge 2 19 53.8 +18 47  9.0    7.2       11.7    loose globular; looks like an open cluster
+
+ M27  6853 Vul 3 19 59.6 +22 43  7.4  8.0x5.7      1.25   !! Dumbbell Nebula !; superb object
+
+ M29  6913 Cyg 1 20 23.9 +38 32  7.1    7.0        7.2    small, poor open cluster 2 deg S of gamma Cygni
+ M39  7092 Cyg 1 21 32.2 +48 26  5.2   32.0        0.825  very sparse cluster; use low power
+
+Autumn
+======
+
+M#    NGC# Con Type  ra    dec   B      D          d      Remarks
+
+  M2  7089 Aqr 2 21 33.5 -00 49  6.3   12.9       36.2    20-cm telescope needed to resolve
+ M72  6981 Aqr 2 20 53.5 -12 32  9.8    5.9       52.8    near NGC 7009, the Saturn Nebula
+ M73  6994 Aqr A 20 58.9 -12 38  9.0    2.8        ?      group of 4 stars only; an `asterism'
+
+ M15  7078 Peg 2 21 30.0 +12 10  6.0   12.3       32.6    rich, compact cluster
+
+ M30  7099 Cap 2 21 40.4 -23 11  8.4   11.0       24.8    toughest object in one-night Messier marathon
+
+ M52  7654 Cas 1 23 24.2 +61 35  7.3   13.0        7      young rich cluster; faint Bubble Neb. nearby
+M103   581 Cas 1 01 33.2 +60 42  7.4    6.0        8      3 NGC clusters nearby
+
+ M31   224 And 5 00 42.7 +41 16  4.8  178       2200      !! Andromeda Gal.; 4 deg wide; look for dust lanes
+ M32   221 And 6 00 42.7 +40 52  8.7    8x6     2200      closest companion to M31
+M110   205 And 6 00 40.4 +41 41  9.4   17x10    2200      more distant companion to M31
+
+ M33   598 Tri 5 01 33.9 +30 39  6.7   73x45    2300      large diffuse spiral; requires dark sky
+
+ M74   628 Psc 5 01 36.7 +15 47 10.2 10.2x9.5  35000      faint, illusive spiral; difficult in small telescopes
+
+ M77  1068 Cet 5 02 42.7 -00 01  8.9    7x6    60000      a Seyfert galaxy; starlike nucleus
+
+ M34  1039 Per 1 02 42.0 +42 47  5.5   35.0        1.4    best at very low power
+ M76   650 Per 3 01 42.4 +51 34 10.1  2.7x1.8      3.4    Little Dumbbell; faintest Messier object
+
+
+
+
+Hartmut Frommert   - http://spider.seds.org/
+Christine Kronberg - http://www.maa.mhn.de/P/smil.html

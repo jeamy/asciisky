@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./static/css/timeInputDialog.css">
     <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
     <link rel="stylesheet" href="./static/css/constellations.css">
+    <link rel="stylesheet" href="./static/css/messier.css">
     <link rel="stylesheet" href="./static/css/visibleObjects.css">
     <link rel="stylesheet" href="./static/css/magnitudeFilter.css">
     <link rel="stylesheet" href="./static/css/sunpathOverlay.css">
@@ -742,6 +743,29 @@
                     }
                 };
                 container.appendChild(constellationBtn);
+
+                // Messier-Button zwischen Sternbilder und Sonnenbahn
+                const messierBtn = document.createElement('button');
+                messierBtn.id = 'messier-toggle';
+                messierBtn.className = 'object-btn';
+                messierBtn.innerHTML = '✧ ' + t('messier');
+                messierBtn.title = t('toggle_messier');
+                messierBtn.onclick = async () => {
+                    try {
+                        if (renderer && renderer.messierRenderer) {
+                            if (!renderer.messierRenderer.objects.length) {
+                                const location = renderer.location || settingsManager.getLocation();
+                                const timeISO = settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO();
+                                await renderer.messierRenderer.fetchMessierData(location, timeISO);
+                            }
+                            const isActive = renderer.messierRenderer.toggleVisibility();
+                            messierBtn.classList.toggle('active', isActive);
+                        }
+                    } catch (e) {
+                        console.error('Failed to toggle Messier overlay:', e);
+                    }
+                };
+                container.appendChild(messierBtn);
 
                 // Sonnenbahn-Button neben Sternbilder hinzufügen
                 const sunpathBtn = document.createElement('button');

@@ -226,6 +226,10 @@ export const i18n = {
         'toggle_constellations': 'Sternbilder ein/ausblenden',
         'show_constellations': 'Sternbilder anzeigen',
         'hide_constellations': 'Sternbilder ausblenden',
+        'messier': 'Messier-Objekte',
+        'toggle_messier': 'Messier-Objekte ein/ausblenden',
+        'show_messier': 'Messier-Objekte anzeigen',
+        'hide_messier': 'Messier-Objekte ausblenden',
 
         // Constellation names
         // Zodiac
@@ -469,6 +473,10 @@ export const i18n = {
         'toggle_constellations': 'Toggle constellations',
         'show_constellations': 'Show constellations',
         'hide_constellations': 'Hide constellations',
+        'messier': 'Messier objects',
+        'toggle_messier': 'Toggle Messier objects',
+        'show_messier': 'Show Messier objects',
+        'hide_messier': 'Hide Messier objects',
 
         // Constellation names
         // Zodiac
