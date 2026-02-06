@@ -133,7 +133,7 @@ services:
       - MONITOR_PORT=${MONITOR_PORT:-8080}
       - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
     ports:
-      - "${MONITOR_PORT:-8080}:8080"  # Dashboard Port
+      - "127.0.0.1:${MONITOR_PORT:-8080}:8080"  # Dashboard Port
     restart: unless-stopped
     networks:
       - worker-net

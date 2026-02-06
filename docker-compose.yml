@@ -47,7 +47,7 @@ services:
     build: .
     pull_policy: never
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
       - /var/run/docker.sock:/var/run/docker.sock
@@ -205,7 +205,7 @@ services:
       - MONITOR_PORT=${MONITOR_PORT:-8080}
       - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
     ports:
-      - "${MONITOR_PORT:-8080}:8080"  # Dashboard Port
+      - "127.0.0.1:${MONITOR_PORT:-8080}:8080"  # Dashboard Port
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${MONITOR_PORT:-8080}/api/health"]
