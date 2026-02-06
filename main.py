@@ -82,4 +82,4 @@ if __name__ == "__main__":
     import uvicorn
     # The port is hardcoded to 8000. If you have issues with zombie processes,
     # you might need to change this or kill the process.
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
