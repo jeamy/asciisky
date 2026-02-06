@@ -517,6 +517,7 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 
 This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet, SWE-1 and google-labs-jules[bot]. Babysitting by a human in a virtual environment.
 
+This research has made use of data and/or services provided by the International Astronomical Union's Minor Planet Center. 
 
 ## Live Demo
 

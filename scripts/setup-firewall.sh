@@ -1,7 +1,8 @@
-#\!/bin/bash
+#!/bin/bash
 # UFW Firewall Setup für ASCII Sky Multi-Host Deployment
-# Führe dieses Skript NUR auf dem HAUPTSERVER aus\!
+# Führe dieses Skript NUR auf dem HAUPTSERVER aus!
 # Konfiguriert IP-basierte Zugriffsbeschränkungen für RabbitMQ/PostgreSQL
+# ADAPTED: Blockiert WAN-Netzwerke für Docker Services
 
 set -e
 
@@ -23,8 +24,8 @@ RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
 RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
 RABBITMQ_C="${RABBITMQ_C:-rabbit-c.example.org}"
 
-echo "🔥 ASCII Sky Firewall Setup (UFW)"
-echo "=================================="
+echo "🔥 ASCII Sky Firewall Setup (UFW) - WAN BLOCKIERT"
+echo "===================================================="
 echo ""
 
 # Farben
@@ -43,7 +44,7 @@ success() {
 }
 
 warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
+    echo -e "${YELLOW}⚠  $1${NC}"
 }
 
 # ===== SERVER IPs AUTOMATISCH ERMITTELN (IPv4 + IPv6) =====
@@ -116,7 +117,7 @@ fi
 echo ""
 
 # Prüfe ob UFW installiert ist
-if \! command -v ufw &> /dev/null; then
+if ! command -v ufw &> /dev/null; then
     echo "📦 UFW nicht installiert. Installiere..."
     sudo apt-get update
     sudo apt-get install -y ufw || error_exit "UFW Installation fehlgeschlagen"
@@ -124,16 +125,17 @@ fi
 
 # Hostname ermitteln
 HOSTNAME=$(hostname -f)
-echo "🖥️  Server: $HOSTNAME"
+echo "🖥  Server: $HOSTNAME"
 echo ""
 
 echo "📍 Konfiguriere Firewall für Hauptserver ($RABBITMQ_MAIN)"
-echo "   RabbitMQ und PostgreSQL werden auf Worker-IPs beschränkt"
+echo "   ⚠  WAN-Netzwerke werden BLOCKIERT"
+echo "   ✅ Docker Services nur von Worker-Servern erreichbar"
 echo ""
 
 warning "ACHTUNG: UFW wird konfiguriert!"
 warning "Nur auf dem Hauptserver ($RABBITMQ_MAIN) ausführen!"
-warning "Worker-Server (rabbit-b/c) benötigen KEINE Firewall-Änderungen!"
+warning "🌐 WAN-Zugriff auf Ports 5672, 5432, 15672 wird KOMPLETT BLOCKIERT!"
 echo ""
 read -p "Fortfahren? (y/N) " -n 1 -r
 echo
@@ -154,7 +156,7 @@ if grep -q "IPV6=no" /etc/default/ufw; then
 fi
 
 echo ""
-echo "🐳 Konfiguriere DOCKER-USER Chain (verhindert Docker-Bypass von UFW)..."
+echo "🐳 Konfiguriere DOCKER-USER Chain (blockiert WAN + verhindert Docker-Bypass)..."
 
 # Docker fügt automatisch Regeln in die DOCKER-USER Chain ein, die VOR UFW greifen
 # Wir müssen explizit DENY-Regeln in DOCKER-USER hinzufügen, um Docker-Container zu schützen
@@ -166,25 +168,14 @@ if [ ! -f /etc/docker/daemon.json ]; then
 fi
 
 # Füge DOCKER-USER Chain Regeln hinzu (werden VOR UFW ausgewertet!)
-echo "🔒 Setze DOCKER-USER Chain Regeln (blockiert alle außer Worker-IPs)..."
+echo "🔒 Setze DOCKER-USER Chain Regeln (blockiert WAN + erlaubt nur Worker-IPs)..."
 
 # Lösche alte DOCKER-USER Regeln (außer RETURN am Ende)
 sudo iptables -F DOCKER-USER 2>/dev/null || true
 sudo ip6tables -F DOCKER-USER 2>/dev/null || true
 
-# IPv4: Erlaube Worker-B und Worker-C auf RabbitMQ (5672) und PostgreSQL (5432)
-sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"
-sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"
-sudo iptables -I DOCKER-USER -s $WORKER_B_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"
-sudo iptables -I DOCKER-USER -s $WORKER_C_IP -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"
-
-# IPv4: Erlaube localhost auf RabbitMQ Management UI (15672)
-sudo iptables -I DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"
-
-# IPv4: BLOCKIERE alle anderen auf RabbitMQ, PostgreSQL und Management UI
-sudo iptables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"
-sudo iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"
-sudo iptables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"
+# IPv4-Regeln für DOCKER-USER werden über /etc/ufw/after.rules gesetzt (siehe weiter unten).
+# Hier keine direkten iptables-Regeln, um doppelte Regeln zu vermeiden.
 
 # IPv6: Gleiche Regeln für IPv6 (falls vorhanden)
 if [ -n "$WORKER_B_IP6" ] || [ -n "$WORKER_C_IP6" ]; then
@@ -197,16 +188,15 @@ if [ -n "$WORKER_B_IP6" ] || [ -n "$WORKER_C_IP6" ]; then
         sudo ip6tables -I DOCKER-USER -s $WORKER_C_IP6 -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C IPv6"
     fi
     sudo ip6tables -I DOCKER-USER -s ::1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN IPv6"
+    sudo ip6tables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN IPv6"
 fi
 
 # WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
-sudo iptables -A DOCKER-USER -j RETURN
 sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
 
-success "DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass!)"
+success "DOCKER-USER Chain konfiguriert (blockiert WAN!)"
 
 # Mache DOCKER-USER Regeln persistent via UFW after.rules
 echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules hinzu..."
@@ -224,7 +214,7 @@ sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/,/# ASCII Sky DOCKER-USER ru
 # WICHTIG: Keine *filter oder :DOCKER-USER - Chain existiert bereits!
 sudo sed -i '/^COMMIT$/i \
 # ASCII Sky DOCKER-USER rules - START\
-# Diese Regeln verhindern dass Docker die UFW-Firewall umgeht\
+# Diese Regeln blockieren WAN-Zugriff auf Docker Services\
 # Erlaube Worker-B und Worker-C auf RabbitMQ und PostgreSQL\
 -A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"\
 -A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"\
@@ -232,10 +222,10 @@ sudo sed -i '/^COMMIT$/i \
 -A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"\
 # Erlaube localhost auf RabbitMQ Management UI\
 -A DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"\
-# BLOCKIERE alle anderen auf diesen Ports\
--A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from others"\
--A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from others"\
--A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from others"\
+# BLOCKIERE ALLE anderen (WAN) auf diesen Ports\
+-A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN and others"\
+-A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN and others"\
+-A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN and others"\
 # RETURN (lässt andere Verbindungen durch)\
 -A DOCKER-USER -j RETURN\
 # ASCII Sky DOCKER-USER rules - END\
@@ -244,7 +234,7 @@ sudo sed -i '/^COMMIT$/i \
 success "DOCKER-USER Regeln zu /etc/ufw/after.rules hinzugefügt"
 
 echo ""
-echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz)..."
+echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz gegen WAN)..."
 
 # UFW-Regeln als zusätzliche Sicherheitsebene (werden NACH DOCKER-USER ausgewertet)
 # RabbitMQ AMQP (nur von Worker-Servern) - IPv4
@@ -299,19 +289,19 @@ echo "✅ Firewall Setup abgeschlossen!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-echo "🌐 Hauptserver - Neue Firewall-Regeln:"
+echo "🌐 Hauptserver - Neue Firewall-Regeln (WAN BLOCKIERT):"
 echo "   🔒 5672  - RabbitMQ AMQP (NUR Worker-B: $WORKER_B_IP, Worker-C: $WORKER_C_IP)"
 echo "   🔒 5432  - PostgreSQL (NUR Worker-B: $WORKER_B_IP, Worker-C: $WORKER_C_IP)"
 echo "   🔒 15672 - RabbitMQ Management UI (NUR localhost/SSH-Tunnel)"
 echo ""
 echo "🔒 Sicherheit:"
-echo "   ✅ DOCKER-USER Chain konfiguriert (verhindert Docker-Bypass!)"
+echo "   ✅ DOCKER-USER Chain konfiguriert (blockiert Docker-Bypass UND WAN!)"
 echo "   ✅ RabbitMQ (5672) und PostgreSQL (5432) NUR von Worker-Servern erreichbar"
 echo "   ✅ RabbitMQ UI (15672) NUR via SSH-Tunnel erreichbar"
-echo "   ✅ Alle anderen IPs werden auf Ports 5672, 5432, 15672 blockiert"
+echo "   ✅ WAN-Zugriff auf Ports 5672, 5432, 15672 wird KOMPLETT BLOCKIERT"
 echo "   ✅ iptables-Regeln persistent gespeichert (überleben Neustart)"
-
 echo ""
+
 echo "📝 Nützliche Befehle:"
 echo "   sudo ufw status verbose                    # UFW Status anzeigen"
 echo "   sudo iptables -L DOCKER-USER -n -v         # DOCKER-USER Chain anzeigen"
