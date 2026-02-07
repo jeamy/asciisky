@@ -47,7 +47,7 @@ services:
     build: .
     pull_policy: never
     ports:
-      - "8000:8000"
+      - "localhost:8000:8000"
     volumes:
       - .:/app
       - /var/run/docker.sock:/var/run/docker.sock
@@ -188,31 +188,31 @@ services:
   
   # ===== Worker Monitor =====
   # Real-time Performance Dashboard
-  worker_monitor:
-    image: asciisky-web:latest
-    build: .
-    pull_policy: never
-    command: ["python", "workers/monitor_dashboard.py"]
-    extra_hosts:
-      - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
-    volumes:
-      - ./cache:/app/cache
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Europe/Berlin
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
-      - MONITOR_HOST=0.0.0.0
-      - MONITOR_PORT=${MONITOR_PORT:-8080}
-      - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
-    ports:
-      - "127.0.0.1:${MONITOR_PORT:-8080}:8080"  # Dashboard Port
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${MONITOR_PORT:-8080}/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+  # worker_monitor:
+  #   image: asciisky-web:latest
+  #   build: .
+  #   pull_policy: never
+  #   command: ["python", "workers/monitor_dashboard.py"]
+  #   extra_hosts:
+  #     - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
+  #   volumes:
+  #     - ./cache:/app/cache
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #     - TZ=Europe/Berlin
+  #     - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
+  #     - MONITOR_HOST=0.0.0.0
+  #     - MONITOR_PORT=${MONITOR_PORT:-8080}
+  #     - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
+  #   ports:
+  #     - "127.0.0.1:${MONITOR_PORT:-8080}:8080"  # Dashboard Port
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:${MONITOR_PORT:-8080}/api/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
 
 volumes:
   postgres_data:

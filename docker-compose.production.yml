@@ -75,7 +75,7 @@ services:
     build: .
     pull_policy: never
     ports:
-      - "8000:8000"
+      - "localhost:8000:8000"
     volumes:
       - ./cache:/app/cache
       - ./user_settings.json:/app/user_settings.json
