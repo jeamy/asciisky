@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 def get_rabbitmq_connection():
     """Erstelle RabbitMQ-Verbindung"""
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@127.0.0.1:5672/')
     
     try:
         params = pika.URLParameters(rabbitmq_url)

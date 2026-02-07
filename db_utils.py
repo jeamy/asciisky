@@ -25,7 +25,7 @@ except Exception:  # pragma: no cover - defensive fallback if computation import
 logger = logging.getLogger(__name__)
 
 # PostgreSQL configuration from environment
-POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
+POSTGRES_HOST = os.environ.get('POSTGRES_HOST', '127.0.0.1')
 POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', '5432'))
 POSTGRES_DB = os.environ.get('POSTGRES_DB', 'asciisky')
 POSTGRES_USER = os.environ.get('POSTGRES_USER', 'asciisky')
