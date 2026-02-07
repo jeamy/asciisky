@@ -161,8 +161,9 @@ setup_host() {
             # UNIFIED_WORKERS können ALLE Tasks übernehmen (Precompute + Asteroids + Comets)
             # NICHT addieren! Ein Unified Worker kann alles!
             ssh "$HOST" "cd ~/asciisky && source .env && docker compose -f $COMPOSE_FILE up -d \
-                --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} \
-                --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Startup failed on $HOST"
+                --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}}" \
+                || error_exit "Startup failed on $HOST"
+            #   --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Startup failed on $HOST"
             echo "✅ Remote Unified Workers started with Smart Interpolation + Monitoring"
         else
             ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE up -d" || error_exit "Startup failed on $HOST"
