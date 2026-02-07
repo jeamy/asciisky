@@ -83,7 +83,8 @@ setup_host() {
             # NICHT addieren! Ein Unified Worker kann alles!
             docker compose -f "$COMPOSE_FILE" up -d \
                 --scale unified_worker=${UNIFIED_WORKERS:-${PRECOMPUTE_WORKERS:-8}} \
-                --scale worker_monitor=${WORKER_MONITOR:-1} || error_exit "Startup failed on $HOST"
+                || error_exit "Startup failed on $HOST"
+            #   --scale worker_monitor=${WORKER_MONITOR:-1} || error_exit "Startup failed on $HOST"
             echo "✅ Unified Workers started with Smart Interpolation + Monitoring"
         else
             docker compose -f "$COMPOSE_FILE" up -d || error_exit "Startup failed on $HOST"
