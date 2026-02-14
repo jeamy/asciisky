@@ -5,7 +5,7 @@
 services:
   # ===== PostgreSQL Database =====
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     container_name: asciisky-postgres
     ports:
       - "5432:5432"
@@ -45,7 +45,7 @@ services:
 
   # ===== RabbitMQ Service =====
   rabbitmq:
-    image: rabbitmq:4.1-management
+    image: rabbitmq:4.1.3-management
     container_name: asciisky-rabbitmq
     hostname: rabbitmq-asciisky
     ports:
