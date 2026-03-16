@@ -51,10 +51,10 @@ download() {
   tmp="${out}.part"
 
   log "Download: ${url} -> ${out}"
-  # curl -fL --retry 5 --retry-delay 2 --connect-timeout 30 --max-time 1800 \
-  #  -o "${tmp}" "${url}"
-  #mv "${tmp}" "${out}"
-  #log "Downloaded $(basename "${out}") ($(du -h "${out}" | awk '{print $1}'))"
+  curl -fL --retry 5 --retry-delay 2 --connect-timeout 30 --max-time 1800 \
+    -o "${tmp}" "${url}"
+  mv "${tmp}" "${out}"
+  log "Downloaded $(basename "${out}") ($(du -h "${out}" | awk '{print $1}'))"
 }
 
 upload_ftp() {
