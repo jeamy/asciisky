@@ -68,6 +68,7 @@ cache/
 .env
 .env.b
 .env.c
+.env.ftp
 
 # Data files (große Pickle-Dateien, werden zur Laufzeit generiert)
 data/asteroid_dataframe.pkl

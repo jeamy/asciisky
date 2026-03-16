@@ -142,6 +142,13 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
       - ASCII_SKY_UPDATE_HOUR=2
+      - FTP_DISABLED=${FTP_DISABLED:-true}
+      - FTP_SERVER=${FTP_SERVER:-}
+      - FTP_PORT=${FTP_PORT:-21}
+      - FTP_SCHEME=${FTP_SCHEME:-ftp}
+      - FTP_USER=${FTP_USER:-}
+      - FTP_PASSWD=${FTP_PASSWD:-}
+      - FTP_UPLOAD=${FTP_UPLOAD:-}
       
       # PostgreSQL Configuration
       - POSTGRES_HOST=postgres

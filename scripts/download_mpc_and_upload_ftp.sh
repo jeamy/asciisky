@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env.ftp"
+
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+fi
+
 # Required environment variables:
 #   FTP_SERVER   (e.g. ftp.example.com)
 #   FTP_USER
@@ -41,16 +51,15 @@ download() {
   tmp="${out}.part"
 
   log "Download: ${url} -> ${out}"
-  curl -fL --retry 5 --retry-delay 2 --connect-timeout 30 --max-time 1800 \
-    -o "${tmp}" "${url}"
-  mv "${tmp}" "${out}"
-  log "Downloaded $(basename "${out}") ($(du -h "${out}" | awk '{print $1}'))"
+  # curl -fL --retry 5 --retry-delay 2 --connect-timeout 30 --max-time 1800 \
+  #  -o "${tmp}" "${url}"
+  #mv "${tmp}" "${out}"
+  #log "Downloaded $(basename "${out}") ($(du -h "${out}" | awk '{print $1}'))"
 }
 
 upload_ftp() {
   local file="$1"
-  local remote_name
-  remote_name="$(basename "${file}")"
+  local remote_name="${2:-$(basename "${file}")}"
   local remote_url="${FTP_SCHEME}://${FTP_SERVER}:${FTP_PORT}/${REMOTE_DIR}/${remote_name}"
 
   log "Upload: ${file} -> ${remote_url}"
@@ -63,7 +72,7 @@ main() {
   download "${COMET_URL}" "${COMET_FILE}"
   download "${MPCORB_URL}" "${MPCORB_FILE}"
 
-  upload_ftp "${COMET_FILE}"
+  upload_ftp "${COMET_FILE}" "COMET_ELEMENTS.txt"
   upload_ftp "${MPCORB_FILE}"
 
   log "All done"

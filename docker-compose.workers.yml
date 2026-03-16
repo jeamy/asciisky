@@ -38,6 +38,13 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - FTP_DISABLED=${FTP_DISABLED:-false}
+      - FTP_SERVER=${FTP_SERVER:-}
+      - FTP_PORT=${FTP_PORT:-21}
+      - FTP_SCHEME=${FTP_SCHEME:-ftp}
+      - FTP_USER=${FTP_USER:-}
+      - FTP_PASSWD=${FTP_PASSWD:-}
+      - FTP_UPLOAD=${FTP_UPLOAD:-}
     restart: unless-stopped
     networks:
       - worker-net

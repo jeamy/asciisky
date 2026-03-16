@@ -9,6 +9,9 @@ import time
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from ftplib import FTP, FTP_TLS
+
+from data_paths import COMET_ELEMENTS_PATH, MPCORB_PATH, ensure_data_dirs
 
 # Setup logging
 logging.basicConfig(
@@ -24,6 +27,61 @@ CHECK_INTERVAL_SECONDS = 60 * 30  # Check every 30 minutes
 
 # Track last update date
 LAST_UPDATE_FILE = Path('cache/last_data_update.txt')
+
+
+def env_flag(name, default=False):
+    """Parse common truthy/falsey env flag values."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def get_env_value(*names, default=None):
+    """Return the first non-empty environment value from the provided names."""
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value != '':
+            return value
+    return default
+
+
+def ftp_download_enabled():
+    """FTP is enabled by default and can be disabled per host via FTP_DISABLED=true."""
+    return not env_flag('FTP_DISABLED', default=False)
+
+
+def download_file_from_ftp(remote_name, local_path):
+    """Download a single file from the configured FTP/FTPS server."""
+    ftp_host = get_env_value('FTP_SERVER', 'FTP_HOST')
+    ftp_user = get_env_value('FTP_USER', 'FTP_USERNAME', default='anonymous')
+    ftp_password = get_env_value('FTP_PASSWD', 'FTP_PASSWORD', default='')
+    ftp_port = int(get_env_value('FTP_PORT', default='21'))
+    ftp_scheme = get_env_value('FTP_SCHEME', default='ftp').strip().lower()
+    ftp_upload = get_env_value('FTP_UPLOAD', default='').strip().strip('/')
+
+    if not ftp_host:
+        raise RuntimeError("FTP download is enabled, but FTP_SERVER is not configured")
+
+    remote_path = f"{ftp_upload}/{remote_name}" if ftp_upload else remote_name
+    local_target = Path(local_path)
+    local_target.parent.mkdir(parents=True, exist_ok=True)
+    temp_target = local_target.with_suffix(local_target.suffix + '.part')
+
+    ftp_class = FTP_TLS if ftp_scheme == 'ftps' else FTP
+    logger.info(f"Downloading {remote_name} from {ftp_scheme}://{ftp_host}:{ftp_port}/{remote_path}")
+
+    with ftp_class() as ftp:
+        ftp.connect(ftp_host, ftp_port, timeout=300)
+        ftp.login(ftp_user, ftp_password)
+        if ftp_scheme == 'ftps':
+            ftp.prot_p()
+        with temp_target.open('wb') as out_file:
+            ftp.retrbinary(f"RETR {remote_path}", out_file.write)
+
+    temp_target.replace(local_target)
+    logger.info(f"✓ Downloaded {remote_name} to {local_target}")
+    return local_target
 
 
 def get_last_update_date():
@@ -75,8 +133,11 @@ def update_asteroid_data():
         import bright_asteroids
         
         # Download latest data
-        mpcorb_file = Path('data/cache/MPCORB.DAT.gz')
-        if bright_asteroids.download_mpcorb_file():
+        ensure_data_dirs()
+        mpcorb_file = Path(MPCORB_PATH)
+        if ftp_download_enabled():
+            download_file_from_ftp('MPCORB.DAT.gz', mpcorb_file)
+        elif bright_asteroids.download_mpcorb_file():
             logger.info("✓ Downloaded latest MPCORB.DAT")
         else:
             logger.error("✗ Failed to download asteroid data")
@@ -124,8 +185,12 @@ def update_comet_data():
         import pickle
         from db_utils import get_database_stats, store_comet_dataframe
         import comets
-        
-        # Load from file (comets.py handles download automatically)
+
+        ensure_data_dirs()
+        if ftp_download_enabled():
+            download_file_from_ftp('COMET_ELEMENTS.txt', COMET_ELEMENTS_PATH)
+
+        # Load from file (comets.py handles direct MPC download when FTP is disabled)
         df = comets.load_comet_dataframe(use_cache=False)
         
         if df is not None and not df.empty:
