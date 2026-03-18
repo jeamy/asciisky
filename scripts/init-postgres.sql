@@ -103,11 +103,11 @@ CREATE TABLE IF NOT EXISTS user_settings (
 CREATE INDEX IF NOT EXISTS idx_user_settings_updated ON user_settings(last_updated);
 
 -- Cleanup old entries periodically
-CREATE OR REPLACE FUNCTION cleanup_old_positions()
+CREATE OR REPLACE FUNCTION cleanup_old_positions(retention_days INTEGER DEFAULT 60)
 RETURNS void AS $$
 BEGIN
     DELETE FROM cached_positions 
-    WHERE computed_at < NOW() - INTERVAL '60 days';
+    WHERE computed_at < NOW() - (GREATEST(retention_days, 0) * INTERVAL '1 day');
 END;
 $$ LANGUAGE plpgsql;
 

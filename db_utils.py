@@ -349,6 +349,62 @@ def get_comet_positions(location_key: str, time_bucket: str,
     finally:
         conn.close()
 
+# ===== Cache Maintenance Functions =====
+
+def cleanup_cached_positions(retention_days: int, object_types: Optional[List[str]] = None) -> int:
+    """Delete cached position rows older than retention_days.
+
+    Args:
+        retention_days: Number of days to keep. Values < 0 are treated as 0.
+        object_types: Optional list of object types to restrict the cleanup to.
+
+    Returns:
+        Number of deleted rows.
+    """
+    retention_days = max(int(retention_days), 0)
+
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+
+        if object_types:
+            cursor.execute("""
+                DELETE FROM cached_positions
+                WHERE computed_at < NOW() - (%s * INTERVAL '1 day')
+                  AND object_type = ANY(%s)
+            """, (retention_days, object_types))
+        else:
+            cursor.execute("""
+                DELETE FROM cached_positions
+                WHERE computed_at < NOW() - (%s * INTERVAL '1 day')
+            """, (retention_days,))
+
+        deleted_rows = cursor.rowcount if cursor.rowcount is not None else 0
+
+    logger.info(
+        "Deleted %s cached_positions rows older than %s days%s",
+        deleted_rows,
+        retention_days,
+        f" for {object_types}" if object_types else "",
+    )
+    return deleted_rows
+
+
+def invalidate_cached_positions(object_types: List[str]) -> int:
+    """Delete cached position rows for the provided object types."""
+    if not object_types:
+        return 0
+
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM cached_positions
+            WHERE object_type = ANY(%s)
+        """, (object_types,))
+        deleted_rows = cursor.rowcount if cursor.rowcount is not None else 0
+
+    logger.info("Invalidated %s cached_positions rows for %s", deleted_rows, object_types)
+    return deleted_rows
+
 # ===== Data Update Tracking =====
 
 def record_data_update(update_type: str, status: str, message: str = None) -> None:
@@ -536,4 +592,3 @@ def computation_lock(computation_key: str, ttl_seconds: int = 300):
 
 # Advisory Locks cleanup automatically on connection close
 # No manual cleanup needed!
-

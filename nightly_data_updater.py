@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 UPDATE_HOUR = int(os.environ.get('ASCII_SKY_UPDATE_HOUR', '2'))  # 2:00 AM default
 CHECK_INTERVAL_SECONDS = 60 * 30  # Check every 30 minutes
+RETENTION_DAYS = int(os.environ.get('ASCII_SKY_RETENTION_DAYS', '60'))
 
 # Track last update date
 LAST_UPDATE_FILE = Path('cache/last_data_update.txt')
@@ -120,6 +121,38 @@ def should_update_now():
     return True
 
 
+def cleanup_old_cached_positions():
+    """Delete cached positions older than the configured retention window."""
+    try:
+        from db_utils import cleanup_cached_positions
+
+        deleted = cleanup_cached_positions(RETENTION_DAYS)
+        logger.info(
+            f"✓ Cleaned up {deleted} cached position rows older than {RETENTION_DAYS} days"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"✗ Error cleaning up cached positions: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+def invalidate_object_cache(object_type: str):
+    """Invalidate cached asteroid/comet positions after orbital data refresh."""
+    try:
+        from db_utils import invalidate_cached_positions
+
+        deleted = invalidate_cached_positions([object_type])
+        logger.info(f"✓ Invalidated {deleted} cached {object_type} position rows")
+        return True
+    except Exception as e:
+        logger.error(f"✗ Error invalidating {object_type} cache: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
 def update_asteroid_data():
     """Download and process asteroid data"""
     logger.info("Updating asteroid data...")
@@ -165,6 +198,9 @@ def update_asteroid_data():
         df_pickle = pickle.dumps(df)
         store_asteroid_dataframe(df_pickle)
         logger.info(f"✓ Stored asteroid DataFrame in PostgreSQL")
+
+        # Drop cached asteroid positions so they are rebuilt from fresh orbital elements
+        invalidate_object_cache('asteroid')
         
         # Verify
         stats = get_database_stats()
@@ -200,6 +236,9 @@ def update_comet_data():
             df_pickle = pickle.dumps(df)
             store_comet_dataframe(df_pickle)
             logger.info(f"✓ Stored comet DataFrame in PostgreSQL")
+
+            # Drop cached comet positions so they are rebuilt from fresh orbital elements
+            invalidate_object_cache('comet')
             
             # Verify
             stats = get_database_stats()
@@ -223,6 +262,10 @@ def perform_nightly_update():
     logger.info("=" * 80)
     
     success = True
+
+    # Retention-based cleanup for stale cached positions
+    if not cleanup_old_cached_positions():
+        success = False
     
     # Update asteroids
     if not update_asteroid_data():
