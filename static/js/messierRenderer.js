@@ -6,6 +6,8 @@ export class MessierRenderer {
     constructor(skyRenderer) {
         this.skyRenderer = skyRenderer;
         this.objects = [];
+        this.detailsCache = new Map();
+        this.lastDataTimeISO = null;
         this.visible = true;
         this.svgLayer = null;
         this.toggleButton = null;
@@ -55,20 +57,62 @@ export class MessierRenderer {
         }
     }
 
-    async fetchMessierData(location, timeISO = null) {
-        if (!location || location.latitude === undefined || location.longitude === undefined) return;
+    buildQueryParams(location, timeISO = null) {
         const params = new URLSearchParams({
             lat: location.latitude,
             lon: location.longitude,
             elevation: location.elevation || 0
         });
         if (timeISO) params.append('time', timeISO);
+        return params;
+    }
+
+    buildDetailsCacheKey(objectId, location, timeISO = null) {
+        const resolvedTimeISO = timeISO || this.lastDataTimeISO || '';
+        return [
+            objectId || '',
+            location?.latitude ?? '',
+            location?.longitude ?? '',
+            location?.elevation ?? 0,
+            resolvedTimeISO
+        ].join('|');
+    }
+
+    async fetchMessierData(location, timeISO = null) {
+        if (!location || location.latitude === undefined || location.longitude === undefined) return;
+        const params = this.buildQueryParams(location, timeISO);
 
         const resp = await fetch(`${API_ENDPOINTS.MESSIER}?${params.toString()}`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         this.objects = data.objects || [];
+        this.lastDataTimeISO = timeISO || new Date().toISOString();
         if (this.visible) this.render();
+    }
+
+    async fetchMessierDetails(objectId, location, timeISO = null) {
+        if (!objectId || !location || location.latitude === undefined || location.longitude === undefined) {
+            return null;
+        }
+
+        const cacheKey = this.buildDetailsCacheKey(objectId, location, timeISO);
+        if (this.detailsCache.has(cacheKey)) {
+            return this.detailsCache.get(cacheKey);
+        }
+
+        const params = this.buildQueryParams(location, timeISO);
+        params.append('object_id', objectId);
+        params.append('details', '1');
+
+        const resp = await fetch(`${API_ENDPOINTS.MESSIER}?${params.toString()}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const data = await resp.json();
+        const detail = Array.isArray(data.objects) ? data.objects[0] : null;
+        if (detail) {
+            this.detailsCache.set(cacheKey, detail);
+        }
+        return detail;
     }
 
     toggleVisibility() {
@@ -126,7 +170,7 @@ export class MessierRenderer {
         this.svgLayer.setAttribute('width', `${skyWidth}`);
         this.svgLayer.setAttribute('height', `${skyHeight}`);
 
-        this.svgLayer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
 
         const cellW = skyWidth / CONFIG.SKY_WIDTH;
         const cellH = skyHeight / CONFIG.SKY_HEIGHT;
@@ -165,16 +209,39 @@ export class MessierRenderer {
                     ...obj,
                     name: obj.name || obj.id,
                     symbol: obj.symbol || '✦',
+                    isMessier: true,
                 };
                 try {
                     this.skyRenderer.selectedObject = data;
                     this.skyRenderer.showObjectDialog(data);
+                    const location = this.skyRenderer.location || settingsManager.getLocation();
+                    const timeISO = (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO()) || this.lastDataTimeISO;
+                    this.fetchMessierDetails(obj.id, location, timeISO)
+                        .then((detail) => {
+                            if (!detail) return;
+                            Object.assign(obj, detail);
+                            const current = this.skyRenderer.selectedObject;
+                            if (!current || (current.id !== obj.id && current.name !== data.name)) return;
+                            this.skyRenderer.selectedObject = {
+                                ...current,
+                                ...detail,
+                                name: detail.name || current.name,
+                                symbol: detail.symbol || current.symbol || '✦',
+                                isMessier: true,
+                            };
+                            this.skyRenderer.refreshDialogIfVisible();
+                        })
+                        .catch((err) => {
+                            console.error(`Failed to load Messier details for ${obj.id}`, err);
+                        });
                 } catch (err) {
                     console.error('Failed to show Messier dialog', err);
                 }
             });
 
-            this.svgLayer.appendChild(g);
+            fragment.appendChild(g);
         }
+
+        this.svgLayer.replaceChildren(fragment);
     }
 }

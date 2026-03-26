@@ -2318,7 +2318,7 @@ export class SkyRenderer {
                 tasks.push(this.loadZodiacData(token, this.location, timeISO));
             }
             // Load Messier overlay
-            if (this.messierRenderer) {
+            if (this.messierRenderer && (this.messierRenderer.visible || this.messierRenderer.objects.length > 0)) {
                 tasks.push(this.loadMessierData(token, this.location, timeISO));
             }
 

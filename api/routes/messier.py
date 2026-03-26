@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
 import threading
+import time as time_module
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -14,6 +16,7 @@ from skyfield.api import Star, wgs84
 
 from api.computation import ts, eph
 from api.helpers import get_location_params, parse_time_param
+from cache_utils import normalize_location, location_key
 from data_paths import DATA_DIR
 from timezone_utils import get_tzinfo
 
@@ -27,6 +30,13 @@ CATALOG_PATH = DATA_DIR / "messier_catalog.txt"
 
 _catalog_lock = threading.Lock()
 _catalog = None
+_catalog_by_id = None
+_response_cache_lock = threading.Lock()
+_response_cache = {}
+
+MESSIER_CACHE_TTL_SECONDS = max(0, int(os.getenv("MESSIER_CACHE_TTL_SECONDS", "300")))
+MESSIER_CACHE_BUCKET_MINUTES = max(1, int(os.getenv("MESSIER_CACHE_BUCKET_MINUTES", "5")))
+MESSIER_CACHE_MAX_ENTRIES = max(16, int(os.getenv("MESSIER_CACHE_MAX_ENTRIES", "256")))
 
 _TYPE_MAP = {
     "1": "Open Cluster",
@@ -217,7 +227,7 @@ def _parse_json_catalog(raw: list) -> list:
 
 
 def _load_catalog() -> list:
-    global _catalog
+    global _catalog, _catalog_by_id
     with _catalog_lock:
         if _catalog is not None:
             return _catalog
@@ -235,7 +245,130 @@ def _load_catalog() -> list:
             raise RuntimeError(f"Failed to read Messier catalog: {e}") from e
 
         _catalog = parsed
+        _catalog_by_id = {str(item["id"]).strip().upper(): item for item in parsed if item.get("id")}
         return _catalog
+
+
+def _get_catalog_object(object_id: Optional[str]) -> Optional[dict]:
+    if not object_id:
+        return None
+    _load_catalog()
+    try:
+        return _catalog_by_id.get(str(object_id).strip().upper())
+    except Exception:
+        return None
+
+
+def _time_bucket_utc_minutes(dt: datetime, bucket_minutes: int) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt_utc = dt.astimezone(timezone.utc)
+    bucket_seconds = max(60, int(bucket_minutes) * 60)
+    floored_timestamp = int(dt_utc.timestamp()) // bucket_seconds * bucket_seconds
+    bucket_dt = datetime.fromtimestamp(floored_timestamp, tz=timezone.utc)
+    return bucket_dt.strftime("%Y%m%dT%H%M")
+
+
+def _make_response_cache_key(
+    lat: float,
+    lon: float,
+    elevation: float,
+    dt_utc: datetime,
+    details: bool,
+    object_id: Optional[str],
+) -> str:
+    lat_n, lon_n, elev_n = normalize_location(lat, lon, elevation)
+    loc_key = location_key(lat_n, lon_n, elev_n)
+    time_key = _time_bucket_utc_minutes(dt_utc, MESSIER_CACHE_BUCKET_MINUTES)
+    object_key = str(object_id).strip().upper() if object_id else "ALL"
+    detail_key = "DETAILS" if details else "POSITIONS"
+    return f"{loc_key}|{time_key}|{detail_key}|{object_key}"
+
+
+def _cleanup_response_cache(now_mono: float) -> None:
+    expired = [key for key, entry in _response_cache.items() if entry["expires_at"] <= now_mono]
+    for key in expired:
+        _response_cache.pop(key, None)
+
+    while len(_response_cache) > MESSIER_CACHE_MAX_ENTRIES:
+        oldest_key = next(iter(_response_cache), None)
+        if oldest_key is None:
+            break
+        _response_cache.pop(oldest_key, None)
+
+
+def _get_cached_response(cache_key: str) -> Optional[dict]:
+    if MESSIER_CACHE_TTL_SECONDS <= 0:
+        return None
+
+    now_mono = time_module.monotonic()
+    with _response_cache_lock:
+        entry = _response_cache.get(cache_key)
+        if not entry:
+            _cleanup_response_cache(now_mono)
+            return None
+        if entry["expires_at"] <= now_mono:
+            _response_cache.pop(cache_key, None)
+            _cleanup_response_cache(now_mono)
+            return None
+        return copy.deepcopy(entry["payload"])
+
+
+def _store_cached_response(cache_key: str, payload: dict) -> None:
+    if MESSIER_CACHE_TTL_SECONDS <= 0:
+        return
+
+    now_mono = time_module.monotonic()
+    with _response_cache_lock:
+        _cleanup_response_cache(now_mono)
+        _response_cache[cache_key] = {
+            "expires_at": now_mono + MESSIER_CACHE_TTL_SECONDS,
+            "payload": copy.deepcopy(payload),
+        }
+        _cleanup_response_cache(now_mono)
+
+
+def _compute_daily_events(observer, location, star, tz, dt_utc: datetime) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    rise_time = None
+    set_time = None
+    transit_time = None
+
+    local_dt = dt_utc.astimezone(tz)
+    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_midnight = local_midnight.astimezone(timezone.utc)
+    start_time = ts.from_datetime(utc_midnight)
+    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
+
+    try:
+        f = almanac.risings_and_settings(eph, star, location)
+        times, events = almanac.find_discrete(start_time, end_time, f)
+        for ti, ev in zip(times, events):
+            ev_local = ti.utc_datetime().astimezone(tz)
+            if ev_local.date() != local_dt.date():
+                continue
+            if ev == 1 and rise_time is None:
+                rise_time = ev_local.isoformat()
+            elif ev == 0 and set_time is None:
+                set_time = ev_local.isoformat()
+
+        transit_f = almanac.meridian_transits(eph, star, location)
+        t_times, t_events = almanac.find_discrete(start_time, end_time, transit_f)
+        best_transit = None
+        best_alt = float("-inf")
+        for ti, _ev in zip(t_times, t_events):
+            ev_local = ti.utc_datetime().astimezone(tz)
+            if ev_local.date() != local_dt.date():
+                continue
+            alt_deg = observer.at(ti).observe(star).apparent().altaz()[0].degrees
+            if alt_deg > best_alt:
+                best_alt = alt_deg
+                best_transit = ev_local
+        if best_transit:
+            transit_time = best_transit.isoformat()
+    except Exception:
+        pass
+
+    return rise_time, set_time, transit_time
 
 
 @router.get("/messier")
@@ -245,84 +378,70 @@ async def get_messier_objects(
     lon: float = None,
     elevation: float = None,
     time: Optional[str] = None,
+    object_id: Optional[str] = None,
+    details: Optional[bool] = False,
     nocache: Optional[bool] = False,
 ):
     """Compute Messier object positions in real time (no precompute needed)."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
+        cache_key = None
+
+        if not nocache:
+            cache_key = _make_response_cache_key(lat, lon, elevation, dt_utc, bool(details), object_id)
+            cached_payload = _get_cached_response(cache_key)
+            if cached_payload is not None:
+                return cached_payload
 
         catalog = _load_catalog()
         if not catalog:
             raise HTTPException(status_code=500, detail="Messier catalog is empty")
 
         tz = get_tzinfo(lat, lon)
-        observer = eph["earth"] + wgs84.latlon(lat, lon, elevation_m=elevation)
+        location = wgs84.latlon(lat, lon, elevation_m=elevation)
+        observer = eph["earth"] + location
         t = ts.from_datetime(dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc))
+        observer_at_t = observer.at(t)
+
+        if object_id:
+            selected = _get_catalog_object(object_id)
+            if not selected:
+                raise HTTPException(status_code=404, detail=f"Unknown Messier object: {object_id}")
+            catalog = [selected]
 
         results = []
         for obj in catalog:
             try:
                 star = obj["star"]
-                app = observer.at(t).observe(star).apparent()
+                app = observer_at_t.observe(star).apparent()
                 alt, az, _ = app.altaz()
+                payload = {
+                    "id": obj["id"],
+                    "name": obj["name"],
+                    "type": obj.get("type"),
+                    "magnitude": obj.get("mag"),
+                    "ra": obj["ra_hours"] * 15.0,
+                    "dec": obj["dec_deg"],
+                    "altitude": alt.degrees,
+                    "azimuth": az.degrees,
+                    "symbol": "✦",
+                }
 
-                rise_time = set_time = transit_time = None
-                try:
-                    f = almanac.risings_and_settings(eph, star, wgs84.latlon(lat, lon, elevation_m=elevation))
-                    transit_f = almanac.meridian_transits(eph, star, wgs84.latlon(lat, lon, elevation_m=elevation))
+                if details:
+                    rise_time, set_time, transit_time = _compute_daily_events(observer, location, star, tz, dt_utc)
+                    payload["rise_time"] = rise_time
+                    payload["set_time"] = set_time
+                    payload["transit_time"] = transit_time
 
-                    local_dt = dt_utc.astimezone(tz)
-                    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                    utc_midnight = local_midnight.astimezone(timezone.utc)
-                    start_time = ts.from_datetime(utc_midnight)
-                    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
-
-                    times, events = almanac.find_discrete(start_time, end_time, f)
-                    for ti, ev in zip(times, events):
-                        ev_local = ti.utc_datetime().astimezone(tz)
-                        if ev_local.date() == local_dt.date():
-                            if ev == 1 and rise_time is None:
-                                rise_time = ev_local.isoformat()
-                            elif ev == 0 and set_time is None:
-                                set_time = ev_local.isoformat()
-
-                    t_times, t_events = almanac.find_discrete(start_time, end_time, transit_f)
-                    best_transit = None
-                    best_alt = float("-inf")
-                    for ti, ev in zip(t_times, t_events):
-                        ev_local = ti.utc_datetime().astimezone(tz)
-                        if ev_local.date() != local_dt.date():
-                            continue
-                        alt_deg = (wgs84.latlon(lat, lon, elevation_m=elevation).at(ti).observe(star).apparent().altaz()[0].degrees)
-                        if alt_deg > best_alt:
-                            best_alt = alt_deg
-                            best_transit = ev_local
-                    if best_transit:
-                        transit_time = best_transit.isoformat()
-                except Exception:
-                    pass
-
-                results.append(
-                    {
-                        "id": obj["id"],
-                        "name": obj["name"],
-                        "type": obj.get("type"),
-                        "magnitude": obj.get("mag"),
-                        "ra": obj["ra_hours"] * 15.0,
-                        "dec": obj["dec_deg"],
-                        "altitude": alt.degrees,
-                        "azimuth": az.degrees,
-                        "rise_time": rise_time,
-                        "set_time": set_time,
-                        "transit_time": transit_time,
-                        "symbol": "✦",
-                    }
-                )
+                results.append(payload)
             except Exception:
                 continue
 
-        return {"objects": results, "catalog_size": len(catalog)}
+        response_payload = {"objects": results, "catalog_size": len(catalog), "details": bool(details)}
+        if cache_key is not None:
+            _store_cached_response(cache_key, response_payload)
+        return response_payload
     except HTTPException:
         raise
     except Exception as e:
