@@ -348,21 +348,29 @@ def run_update_loop():
 
 
 def check_initial_data():
-    """Check if database has data, if not perform initial update"""
+    """On startup: update if data is missing or today's update has not run yet."""
     try:
         from db_utils import get_asteroid_dataframe, get_comet_dataframe
-        
+
         asteroid_df = get_asteroid_dataframe()
         comet_df = get_comet_dataframe()
-        
+        last_update = get_last_update_date()
+        today = datetime.now().date()
+
         if not asteroid_df and not comet_df:
             logger.info("=" * 80)
             logger.info("Database is empty - performing initial data load")
             logger.info("=" * 80)
             perform_nightly_update()
             return True
+        elif last_update != today:
+            logger.info("=" * 80)
+            logger.info(f"Server restart detected – today's update has not run yet (last: {last_update}), updating now")
+            logger.info("=" * 80)
+            perform_nightly_update()
+            return True
         else:
-            logger.info("Database has data - skipping initial load")
+            logger.info(f"Database has data and already updated today ({last_update}) - skipping initial load")
             return False
     except Exception as e:
         logger.warning(f"Could not check database status: {e}")
