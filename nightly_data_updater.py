@@ -173,8 +173,23 @@ def update_asteroid_data():
         elif bright_asteroids.download_mpcorb_file():
             logger.info("✓ Downloaded latest MPCORB.DAT")
         else:
-            logger.error("✗ Failed to download asteroid data")
-            return False
+            logger.warning("✗ Failed to download asteroid data via HTTP")
+            # Fallback: use existing file if it is newer than the current asteroid_dataframe.pkl
+            from data_paths import DATA_DIR
+            pkl_path = Path(DATA_DIR) / 'asteroid_dataframe.pkl'
+            if mpcorb_file.exists():
+                pkl_mtime = pkl_path.stat().st_mtime if pkl_path.exists() else 0
+                if mpcorb_file.stat().st_mtime > pkl_mtime:
+                    logger.info(
+                        f"✓ Falling back to existing {mpcorb_file} "
+                        f"(newer than current asteroid_dataframe.pkl)"
+                    )
+                else:
+                    logger.error("✗ Existing MPCORB file is not newer than current pkl – skipping")
+                    return False
+            else:
+                logger.error("✗ No MPCORB file available – skipping asteroid update")
+                return False
         
         # Load and parse
         with gzip.open(mpcorb_file, 'rb') as f:
@@ -223,8 +238,24 @@ def update_comet_data():
         import comets
 
         ensure_data_dirs()
+        comet_file = Path(COMET_ELEMENTS_PATH)
         if ftp_download_enabled():
             download_file_from_ftp('COMET_ELEMENTS.txt', COMET_ELEMENTS_PATH)
+        else:
+            # No FTP: check if local file is newer than current comet_dataframe.pkl
+            from data_paths import DATA_DIR
+            pkl_path = Path(DATA_DIR) / 'comet_dataframe.pkl'
+            if comet_file.exists():
+                pkl_mtime = pkl_path.stat().st_mtime if pkl_path.exists() else 0
+                if comet_file.stat().st_mtime > pkl_mtime:
+                    logger.info(
+                        f"✓ FTP disabled – using existing {comet_file} "
+                        f"(newer than current comet_dataframe.pkl)"
+                    )
+                else:
+                    logger.info("FTP disabled – comet file not newer than current pkl, proceeding anyway")
+            else:
+                logger.info("FTP disabled – comet file not found, comets.py will attempt download")
 
         # Load from file (comets.py handles direct MPC download when FTP is disabled)
         df = comets.load_comet_dataframe(use_cache=False)
