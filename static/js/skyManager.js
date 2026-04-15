@@ -1,5 +1,6 @@
 import { SkyRenderer } from './skyRenderer.js';
 import { CONFIG, ASTRO_CONSTANTS } from './constants.js';
+import { settingsManager } from './settings.js';
 
 // Deklariere skyRenderer als exportierte Variable
 export let skyRenderer;
@@ -56,7 +57,17 @@ export async function updateSky() {
 
 function updateLastUpdated() {
     const now = new Date();
-    document.getElementById('last-updated').textContent = `Last updated: ${now.toLocaleTimeString()}`;
+    let timeStr;
+    try {
+        const loc = settingsManager.getLocation && settingsManager.getLocation();
+        const tz = loc && typeof loc.timezone === 'string' ? loc.timezone : null;
+        timeStr = tz
+            ? now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: tz })
+            : now.toLocaleTimeString();
+    } catch (_) {
+        timeStr = now.toLocaleTimeString();
+    }
+    document.getElementById('last-updated').textContent = `Last updated: ${timeStr}`;
 }
 
 // skyRenderer wird bereits oben exportiert

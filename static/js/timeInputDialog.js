@@ -1,6 +1,53 @@
 import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
 
+function getLocationTimezone() {
+    try {
+        const loc = settingsManager.getLocation && settingsManager.getLocation();
+        if (loc && typeof loc.timezone === 'string' && loc.timezone) return loc.timezone;
+    } catch (_) { /* noop */ }
+    return null;
+}
+
+function getZonedParts(date, timeZone) {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+    const parts = fmt.formatToParts(date);
+    const get = (type) => {
+        const p = parts.find(x => x.type === type);
+        return p ? Number(p.value) : NaN;
+    };
+    return {
+        year: get('year'),
+        month: get('month'),
+        day: get('day'),
+        hour: get('hour'),
+        minute: get('minute')
+    };
+}
+
+function zonedDateTimeToUtcMillis({ year, month, day, hour, minute }, timeZone) {
+    // Convert a wall-clock time in `timeZone` into UTC milliseconds.
+    // Uses a small fixed-point iteration to handle DST transitions.
+    const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+    let guessUtc = targetAsUtc;
+    for (let i = 0; i < 3; i++) {
+        const zp = getZonedParts(new Date(guessUtc), timeZone);
+        const guessAsUtc = Date.UTC(zp.year, zp.month - 1, zp.day, zp.hour, zp.minute, 0);
+        const diff = guessAsUtc - targetAsUtc;
+        guessUtc = guessUtc - diff;
+        if (diff === 0) break;
+    }
+    return guessUtc;
+}
+
 export class TimeInputDialog {
     constructor(onTimeChange) {
         this.onTimeChange = onTimeChange;
@@ -15,14 +62,33 @@ export class TimeInputDialog {
 
         // Hole aktuelle Zeit-Einstellungen
         const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
+        const tz = getLocationTimezone();
         const currentDate = new Date(Date.now() + offsetMinutes * 60000);
-        
-        // Formatiere Datum und Zeit für die Eingabefelder
-        const year = currentDate.getFullYear();
-        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-        const day = String(currentDate.getDate()).padStart(2, '0');
-        const hours = String(currentDate.getHours()).padStart(2, '0');
-        const minutes = String(currentDate.getMinutes()).padStart(2, '0');
+
+        // Formatiere Datum und Zeit für die Eingabefelder (in Standort-Zeitzone, falls vorhanden)
+        let year, month, day, hours, minutes;
+        try {
+            if (tz) {
+                const p = getZonedParts(currentDate, tz);
+                year = p.year;
+                month = String(p.month).padStart(2, '0');
+                day = String(p.day).padStart(2, '0');
+                hours = String(p.hour).padStart(2, '0');
+                minutes = String(p.minute).padStart(2, '0');
+            } else {
+                year = currentDate.getFullYear();
+                month = String(currentDate.getMonth() + 1).padStart(2, '0');
+                day = String(currentDate.getDate()).padStart(2, '0');
+                hours = String(currentDate.getHours()).padStart(2, '0');
+                minutes = String(currentDate.getMinutes()).padStart(2, '0');
+            }
+        } catch (_) {
+            year = currentDate.getFullYear();
+            month = String(currentDate.getMonth() + 1).padStart(2, '0');
+            day = String(currentDate.getDate()).padStart(2, '0');
+            hours = String(currentDate.getHours()).padStart(2, '0');
+            minutes = String(currentDate.getMinutes()).padStart(2, '0');
+        }
         
         // Erstelle Dialog-Element
         this.dialogElement = document.createElement('div');
@@ -98,13 +164,23 @@ export class TimeInputDialog {
                 return;
             }
             
-            // Erstelle ein lokales Datum-Objekt aus den Eingaben
-            // Das Datum soll als lokale Zeit interpretiert werden, nicht als UTC
-            const selectedDate = new Date(`${dateValue}T${timeValue}`);
-            
-            // Berechne den Offset in Minuten zur aktuellen Zeit
-            const now = new Date();
-            const offsetMinutes = Math.round((selectedDate - now) / 60000);
+            const tz = getLocationTimezone();
+
+            // Erstelle ein Datum-Objekt aus den Eingaben
+            // Die Eingabe soll in der Standort-Zeitzone interpretiert werden (nicht Browser-Zone)
+            let selectedMillis;
+            if (tz) {
+                const [y, m, d] = dateValue.split('-').map(Number);
+                const [hh, mm] = timeValue.split(':').map(Number);
+                selectedMillis = zonedDateTimeToUtcMillis({ year: y, month: m, day: d, hour: hh, minute: mm }, tz);
+            } else {
+                // Fallback: Browser-lokal
+                selectedMillis = new Date(`${dateValue}T${timeValue}`).getTime();
+            }
+
+            // Berechne den Offset in Minuten zur aktuellen Zeit (epoch-basiert)
+            const nowMillis = Date.now();
+            const offsetMinutes = Math.round((selectedMillis - nowMillis) / 60000);
             
             // Wende den Offset an
             this.applyTime(offsetMinutes);

@@ -569,8 +569,12 @@
                 // Format date and time using current UI language
                 const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'de';
                 const locale = lang === 'en' ? 'en-US' : 'de-DE';
-                const dateStr = dt.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
-                const timeStr = dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                // Use selected location's timezone (IANA), fall back to browser timezone
+                const loc = settingsManager.getLocation && settingsManager.getLocation();
+                const tz = (loc && typeof loc.timezone === 'string' && loc.timezone) ? loc.timezone : undefined;
+                const tzOpts = tz ? { timeZone: tz } : {};
+                const dateStr = dt.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', ...tzOpts });
+                const timeStr = dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, ...tzOpts });
                 el.textContent = `${dateStr} ${timeStr}`;
             } catch (_) { /* noop */ }
         }
@@ -679,6 +683,11 @@
             }
         }
         
+        // Zeitzone nach Standortänderung aktualisieren (nach Server-Response)
+        window.addEventListener('locationTimezoneUpdated', () => {
+            try { updateSimPreview(); } catch (_) { /* noop */ }
+        });
+
         // Funktion zum Speichern des Standorts im localStorage
         function saveLocationToLocalStorage(location) {
             try {

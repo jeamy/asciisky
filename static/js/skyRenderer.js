@@ -1859,8 +1859,11 @@ export class SkyRenderer {
             // Wenn es ein ISO-Zeitstring ist
             if (timeString && timeString.includes('T')) {
                 const date = new Date(timeString);
-                // Lokale Zeit im Format HH:MM
-                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                const tz = this.location && typeof this.location.timezone === 'string' ? this.location.timezone : null;
+                // Zeit im Format HH:MM (in Standort-Zeitzone, falls vorhanden)
+                return tz
+                    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz })
+                    : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             }
             // Wenn es bereits ein formatierter String ist, gib ihn unverändert zurück
             return timeString;

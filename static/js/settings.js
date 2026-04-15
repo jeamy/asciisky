@@ -26,7 +26,8 @@ export class SettingsManager {
                 latitude: 48.2082,  // Wien
                 longitude: 16.3738,
                 elevation: 171.0,
-                name: "Wien"
+                name: "Wien",
+                timezone: 'Europe/Vienna'
             },
             display: {
                 horizontalShift: 0,
@@ -63,7 +64,8 @@ export class SettingsManager {
             latitude: 48.2082,  // Wien
             longitude: 16.3738,
             elevation: 171.0,
-            name: "Wien"
+            name: "Wien",
+            timezone: 'Europe/Vienna'
         };
     }
 
@@ -347,7 +349,8 @@ export class SettingsManager {
                     latitude: parseFloat(loc.latitude),
                     longitude: parseFloat(loc.longitude),
                     elevation: typeof loc.elevation === 'number' ? parseFloat(loc.elevation) : (this.settings.location?.elevation ?? ASTRO_CONSTANTS.VIENNA_ELEVATION),
-                    name: loc.name || this.settings.location?.name || 'Unbekannt'
+                    name: loc.name || this.settings.location?.name || 'Unbekannt',
+                    timezone: loc.timezone || this.settings.location?.timezone
                 };
                 this.saveSettings();
                 return this.settings.location;
@@ -376,6 +379,14 @@ export class SettingsManager {
                 body: JSON.stringify(payload)
             });
             if (resp.ok) {
+                try {
+                    const data = await resp.json();
+                    const loc = data && data.location ? data.location : null;
+                    if (loc && typeof loc === 'object' && loc.timezone && this.settings?.location) {
+                        this.settings.location.timezone = loc.timezone;
+                        this.saveSettings();
+                    }
+                } catch (_) { /* noop */ }
                 this.serverSynced = true;
                 return true;
             } else {
@@ -394,13 +405,15 @@ export class SettingsManager {
             latitude: parseFloat(latitude),
             longitude: parseFloat(longitude),
             elevation: parseFloat(elevation),
-            name: locationName || "Unbekannt"
+            name: locationName || "Unbekannt",
+            timezone: this.settings.location?.timezone
         };
         this.saveSettings();
 
         // Sofort mit dem Server synchronisieren
         try {
             // 1) Session sofort aktualisieren (Cookie-basierte Session)
+            // saveSessionLocation liest die Server-Response aus und setzt this.settings.location.timezone
             await this.saveSessionLocation(this.settings.location);
 
             // Legacy precompute trigger - disabled after RabbitMQ migration
@@ -409,6 +422,13 @@ export class SettingsManager {
         } catch (error) {
             console.error('Error syncing location with server:', error);
         }
+
+        // Informiere UI-Komponenten, dass sich die Zeitzone des Standorts geändert haben könnte
+        try {
+            window.dispatchEvent(new CustomEvent('locationTimezoneUpdated', {
+                detail: { location: this.settings.location }
+            }));
+        } catch (_) { /* noop */ }
 
         return this.settings.location;
     }

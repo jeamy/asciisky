@@ -6,6 +6,7 @@ from api.models import LocationPayload
 from cache_utils import normalize_location, location_key
 from db_utils import store_sunpath_year
 from api.computation import compute_sunpath_year
+from timezone_utils import get_timezone_name
 
 router = APIRouter()
 
@@ -38,6 +39,15 @@ async def _precompute_sunpath_for_location(lat: float, lon: float, elevation: fl
 @router.get("/session/location")
 async def get_session_location(request: Request):
     loc = request.session.get("location")
+    try:
+        if isinstance(loc, dict) and "timezone" not in loc:
+            lat = loc.get("latitude")
+            lon = loc.get("longitude")
+            if lat is not None and lon is not None:
+                loc = {**loc, "timezone": get_timezone_name(float(lat), float(lon))}
+                request.session["location"] = loc
+    except Exception:
+        pass
     return {"location": loc}
 
 
@@ -50,6 +60,11 @@ async def set_session_location(payload: LocationPayload, request: Request):
     }
     if payload.name:
         loc["name"] = payload.name
+
+    try:
+        loc["timezone"] = get_timezone_name(loc["latitude"], loc["longitude"])
+    except Exception:
+        loc["timezone"] = "UTC"
     request.session["location"] = loc
 
     # Pre-compute sunpath data for the current year in the background
