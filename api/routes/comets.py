@@ -1,8 +1,9 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from api.helpers import parse_time_param
+from api.helpers import parse_time_param, get_location_params, resolve_magnitude_filter
 from api.cache_interpolation import load_comets_with_interpolation
 from api.computation import ts, eph
+from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
 import comets
 import settings
 import os
@@ -13,10 +14,6 @@ import logging
 import uuid
 import time
 from datetime import datetime, timedelta
-
-# RabbitMQ Integration
-from config.feature_flags import use_rabbitmq_for
-from api.rabbitmq.task_publisher import get_task_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -92,104 +89,24 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
         logger.error(f"❌ Failed to trigger comet worker: {e}", exc_info=True)
 
 
-async def compute_comets_rabbitmq(location_dict, dt_utc, max_magnitude):
-    """
-    Berechnet Kometen über RabbitMQ (neue Architektur)
-    
-    Args:
-        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
-        dt_utc: datetime object
-        max_magnitude: float
-        
-    Returns:
-        Liste von Kometen-Daten
-    """
-    client = get_rabbitmq_client()
-    if not client:
-        raise Exception("RabbitMQ client not available")
-    
-    task_id = f"comet_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    
-    request_data = {
-        'task_id': task_id,
-        'location': location_dict,
-        'time_bucket': dt_utc.isoformat(),
-        'magnitude': max_magnitude
-    }
-    
-    logger.info(f"Sending comet computation to RabbitMQ: {task_id}")
-    
-    # Synchroner RPC-Call mit Timeout
-    result = await asyncio.to_thread(
-        client.call,
-        'compute.comet',
-        request_data,
-        timeout=settings.RABBITMQ_TIMEOUT
-    )
-    
-    if result and 'comets' in result:
-        logger.info(f"Received {len(result['comets'])} comets from RabbitMQ")
-        return result['comets']
-    else:
-        raise Exception("Invalid response from RabbitMQ worker")
-
-
-async def compute_comets_old(location_dict, dt_utc, max_comets):
-    """
-    Berechnet Kometen mit alter Architektur (Fallback)
-    
-    Args:
-        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
-        dt_utc: datetime object
-        max_comets: int
-        
-    Returns:
-        Liste von Kometen-Daten
-    """
-    return await asyncio.to_thread(
-        lambda: comets.load_comets(ts, eph, location_dict, max_comets=max_comets, current_dt=dt_utc)
-    )
-
 @router.get("/comets")
-async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, max_comets: int = 1000, time: Optional[str] = None, max_magnitude: float = None):
+async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Get comets with real MPC data and rise/set/transit times."""
     try:
-        location_settings = settings.get_location()
-        session_loc = request.session.get("location", {}) if hasattr(request, "session") else {}
-        if lat is None: lat = session_loc.get("latitude", location_settings["latitude"])
-        if lon is None: lon = session_loc.get("longitude", location_settings["longitude"])
-        if elevation is None: elevation = session_loc.get("elevation", location_settings["elevation"])
+        lat, lon, elevation = get_location_params(request, lat, lon, elevation)
 
         if save_location and lat is not None and lon is not None and elevation is not None:
             settings.set_location(lat, lon, elevation, location_name)
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:
-            # Check if user is logged in
-            user_id = request.session.get('user_id')
-            
-            if user_id:
-                # Load from database
-                from api.routes.filters import get_user_filters_from_db
-                filters = get_user_filters_from_db(user_id)
-                if filters:
-                    max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
-                else:
-                    max_magnitude = comets.MAX_APPARENT_MAGNITUDE
-            else:
-                # Load from file
-                filters = settings.get_magnitude_filters()
-                max_magnitude = filters.get("cometMaxMagnitude", comets.MAX_APPARENT_MAGNITUDE)
+            max_magnitude = resolve_magnitude_filter(request, 'cometMaxMagnitude', comets.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
-        # Feature Flag: RabbitMQ oder alte Architektur?
-        user_id = request.session.get('user_id', 'anonymous')
-        use_rabbitmq_flag = use_rabbitmq_for('comets', user_id)
-        
         # Feature Flag: Smart Interpolation aktivieren?
-        from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
+        user_id = request.session.get('user_id', 'anonymous')
         use_smart_interpolation = is_smart_interpolation_enabled(user_id)
         interpolation_strategy = get_interpolation_strategy(user_id)
         
@@ -200,7 +117,6 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
             logger.info(f"Checking cache for comets: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
             
             # Berechne Bucket-Zeit (gleiche Logik wie Worker!)
-            from cache_utils import time_bucket_utc
             bucket_dt = dt_utc.replace(minute=0, second=0, microsecond=0)
             bucket_key = time_bucket_utc(bucket_dt, comets.COMET_CACHE_BUCKET_HOURS)
             
@@ -226,14 +142,13 @@ async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: f
                 logger.info(f"✅ Cache HIT for comets: {len(comet_list)} found")
             else:
                 # Cache-Miss: Prüfe ob Berechnung bereits läuft
-                from cache_utils import normalize_location, location_key
                 lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
                 loc_key = location_key(lat_norm, lon_norm, elev_norm)
                 
                 computation_key = f"computing:comet:{loc_key}:{bucket_key}"
                 
                 # Prüfe ob bereits in Berechnung
-                from db_utils import is_computation_in_progress, computation_lock
+                from db_utils import is_computation_in_progress, computation_lock  # noqa: PLC0415
                 if is_computation_in_progress(computation_key):
                     logger.info(f"⏳ Computation already in progress for bucket {bucket_key}")
                     comet_list = []  # Warte auf laufende Berechnung

@@ -166,7 +166,10 @@ class OnDemandComputationService:
         Core computation logic with caching and error handling.
         """
         start_time = time.time()
-        cache_key = self._get_cache_key(object_type, lat, lon, elevation, dt_utc)
+        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
+        loc_key = location_key(lat_norm, lon_norm, elev_norm)
+        bucket = time_bucket_utc(dt_utc, 1)
+        cache_key = f"{object_type}:{loc_key}:{bucket}"
         
         try:
             # Check in-memory cache first
@@ -202,7 +205,7 @@ class OnDemandComputationService:
             
             # Store in persistent cache
             if self.config.cache_ttl > 0:
-                self._store_bucket_persistent(object_type, lat, lon, elevation, dt_utc, objects)
+                self._store_bucket_persistent(object_type, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)
             
             # Trigger background task for future caching
             if self.config.trigger_background_tasks:
@@ -287,23 +290,6 @@ class OnDemandComputationService:
         
         return comets_data if comets_data else []
     
-    def _get_cache_key(
-        self,
-        object_type: str,
-        lat: float,
-        lon: float,
-        elevation: float,
-        dt_utc: datetime
-    ) -> str:
-        """
-        Generate cache key for computation result.
-        """
-        # Normalize location for consistent cache keys
-        lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-        loc_key = location_key(lat_norm, lon_norm, elev_norm)
-        time_bucket = time_bucket_utc(dt_utc, 1)
-        
-        return f"{object_type}:{loc_key}:{time_bucket}"
     
     def _is_cached(self, cache_key: str) -> bool:
         """
@@ -350,20 +336,17 @@ class OnDemandComputationService:
     def _store_bucket_persistent(
         self,
         object_type: str,
-        lat: float,
-        lon: float,
-        elevation: float,
-        dt_utc: datetime,
+        loc_key: str,
+        bucket: str,
+        lat_norm: float,
+        lon_norm: float,
+        elev_norm: float,
         objects: List[Dict[str, Any]]
     ) -> None:
         """
         Store computed bucket in persistent cache.
         """
         try:
-            lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-            loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            bucket = time_bucket_utc(dt_utc, 1)
-            
             if object_type == 'asteroids':
                 store_asteroid_positions(0, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)
             else:

@@ -5,11 +5,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 import settings
-import os
-import shutil
-from pathlib import Path
-from datetime import datetime
-import json
 
 router = APIRouter()
 
@@ -57,47 +52,6 @@ def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
     except Exception as e:
         print(f"Error saving user filters to DB: {e}")
         return False
-
-def invalidate_cache():
-    """Invalidate asteroid and comet caches when filters change"""
-    try:
-        # Clear in-memory DataFrame caches first
-        try:
-            import comets
-            import bright_asteroids
-            comets.clear_in_memory_cache()
-            bright_asteroids.clear_in_memory_cache()
-            print("Cleared in-memory DataFrame caches")
-        except Exception as e:
-            print(f"Error clearing in-memory caches: {e}")
-        
-        # Clear PostgreSQL cache tables (positions AND dataframes)
-        try:
-            from db_utils import get_db_connection
-            conn = get_db_connection()
-            try:
-                cursor = conn.cursor()
-                
-                # NOTE: We do NOT delete ANY PostgreSQL caches!
-                # All caches contain unfiltered data:
-                # - asteroid_positions/comet_positions: All computed positions (unfiltered)
-                # - asteroids/comets: All objects up to Mag 20.0 (unfiltered)
-                # Filtering happens in API routes based on user_settings.json.
-                # All caches are reusable for any filter setting!
-                
-                conn.commit()
-                
-                print(f"Cache invalidation:")
-                print(f"  - In-memory caches: Cleared")
-                print(f"  - PostgreSQL caches: NOT deleted (all unfiltered, reusable)")
-                print(f"  - Filtering: Happens in API routes based on user_settings.json")
-            finally:
-                conn.close()
-        except Exception as e:
-            print(f"Error clearing PostgreSQL cache: {e}")
-            
-    except Exception as e:
-        print(f"Error invalidating cache: {e}")
 
 @router.get("/filters")
 async def get_filters(request: Request):

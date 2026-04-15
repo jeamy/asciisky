@@ -33,6 +33,10 @@ from pathlib import Path
 from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
 
+# Configuration
+COMETS_FILE = Path(COMET_ELEMENTS_PATH)
+
+
 def should_update_comet_file() -> bool:
     """Prueft, ob die Kometen-Elemente-Datei taeglich aktualisiert werden sollte.
     
@@ -47,15 +51,13 @@ def should_update_comet_file() -> bool:
     # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
     return file_age > 86400
 
-# Configuration
-COMETS_FILE = Path(COMET_ELEMENTS_PATH)
+
 COMET_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days (longer than 30-day precompute window)
 COMET_CACHE_BUCKET_HOURS = 1
 COMET_DF_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 MAX_COMETS_DEFAULT = 1000
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
-GM_SUN_Pitjeva_2005_km3_s2 = 1.32712442099e11
 COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '300'))
 
 

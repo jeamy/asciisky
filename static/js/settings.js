@@ -435,23 +435,8 @@ export class SettingsManager {
 
     // Synchronisiere Standorteinstellungen mit dem Server
     async syncSettingsToServer() {
-        try {
-            const location = this.getLocation();
-
-            // Standortdaten zum Server senden
-            const response = await fetch(`${API_ENDPOINTS.CELESTIAL}?lat=${location.latitude}&lon=${location.longitude}&elevation=${location.elevation}&location_name=${encodeURIComponent(location.name || "Unbekannt")}&save_location=true&nocache=1`);
-
-            if (response.ok) {
-                this.serverSynced = true;
-                return true;
-            } else {
-                console.error('Error syncing location with server');
-                return false;
-            }
-        } catch (error) {
-            console.error('Error syncing location with server:', error);
-            return false;
-        }
+        if (this.serverSynced) return true;
+        return await this.saveSessionLocation(this.getLocation());
     }
 
     // Initialisiere Einstellungen und synchronisiere mit dem Server

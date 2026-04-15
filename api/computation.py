@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timedelta, timezone
 from skyfield import almanac
 from skyfield.api import wgs84, Loader
@@ -69,7 +70,6 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
             elif name == 'moon':
                 moon_phase = almanac.moon_phase(eph, t)
                 moon_phase_angle = float(moon_phase.radians)
-                import math
                 phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
                 mag = -12.7 + 2.5 * math.log10(phase_factor) if phase_factor > 0 else -12.7
             elif name in ['mercury', 'venus', 'mars', 'jupiter', 'saturn']:
@@ -109,8 +109,16 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
                 transit_time = None
                 if rise_time and set_time:
-                    rise_dt = datetime.strptime(rise_time, '%H:%M').replace(year=local_dt.year, month=local_dt.month, day=local_dt.day, tzinfo=tz)
-                    set_dt = datetime.strptime(set_time, '%H:%M').replace(year=local_dt.year, month=local_dt.month, day=local_dt.day, tzinfo=tz)
+                    def _localize(naive_dt, timezone_obj):
+                        if hasattr(timezone_obj, 'localize'):
+                            return timezone_obj.localize(naive_dt)
+                        return naive_dt.replace(tzinfo=timezone_obj)
+                    rise_naive = datetime.strptime(rise_time, '%H:%M').replace(
+                        year=local_dt.year, month=local_dt.month, day=local_dt.day)
+                    set_naive = datetime.strptime(set_time, '%H:%M').replace(
+                        year=local_dt.year, month=local_dt.month, day=local_dt.day)
+                    rise_dt = _localize(rise_naive, tz)
+                    set_dt = _localize(set_naive, tz)
                     if set_dt < rise_dt:
                         set_dt += timedelta(days=1)
                     transit_dt = rise_dt + (set_dt - rise_dt) / 2

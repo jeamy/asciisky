@@ -1,8 +1,9 @@
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from api.helpers import parse_time_param, get_location_params
+from api.helpers import parse_time_param, get_location_params, resolve_magnitude_filter
 from api.cache_interpolation import load_asteroids_with_interpolation
 from api.computation import LOADER, ts, eph
+from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
 import bright_asteroids
 import settings
 import asyncio
@@ -13,10 +14,6 @@ import logging
 from datetime import datetime, timedelta
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import get_asteroid_positions
-
-# RabbitMQ Integration (für Migration)
-from config.feature_flags import use_rabbitmq_for
-from api.rabbitmq.task_publisher import get_task_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -92,63 +89,6 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
         logger.error(f"❌ Failed to trigger asteroid worker: {e}", exc_info=True)
 
 
-async def compute_asteroids_rabbitmq(location_dict, dt_utc, max_magnitude):
-    """
-    Berechnet Asteroiden über RabbitMQ (neue Architektur)
-    
-    Args:
-        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
-        dt_utc: datetime object
-        max_magnitude: float
-        
-    Returns:
-        Liste von Asteroiden-Daten
-    """
-    client = get_rabbitmq_client()
-    if client is None:
-        raise ConnectionError("RabbitMQ client not available")
-    
-    request_data = {
-        'task_id': f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}",
-        'type': 'asteroid',
-        'location': location_dict,
-        'time_bucket': dt_utc.isoformat(),
-        'magnitude': max_magnitude
-    }
-    
-    # RPC Call mit Timeout
-    result = await asyncio.to_thread(
-        client.call,
-        queue='asteroid',
-        request=request_data,
-        priority=10,
-        timeout=settings.RABBITMQ_TIMEOUT
-    )
-    
-    return result.get('asteroids', [])
-
-
-async def compute_asteroids_old(location_dict, dt_utc, max_magnitude):
-    """
-    Berechnet Asteroiden mit alter Architektur (Fallback)
-    
-    Args:
-        location_dict: {'latitude': float, 'longitude': float, 'elevation': float}
-        dt_utc: datetime object
-        max_magnitude: float
-        
-    Returns:
-        Liste von Asteroiden-Daten
-    """
-    return await asyncio.to_thread(
-        lambda: bright_asteroids.load_bright_asteroids(
-            LOADER, ts, eph, location_dict,
-            max_magnitude=max_magnitude,
-            current_dt=dt_utc
-        )
-    )
-
-
 @router.get("/bright_asteroids")
 async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Get positions of the brightest minor planets (asteroids)."""
@@ -160,31 +100,13 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:
-            # Check if user is logged in
-            user_id = request.session.get('user_id')
-            
-            if user_id:
-                # Load from database
-                from api.routes.filters import get_user_filters_from_db
-                filters = get_user_filters_from_db(user_id)
-                if filters:
-                    max_magnitude = filters.get("asteroidMaxMagnitude", bright_asteroids.MAX_APPARENT_MAGNITUDE)
-                else:
-                    max_magnitude = bright_asteroids.MAX_APPARENT_MAGNITUDE
-            else:
-                # Load from file
-                filters = settings.get_magnitude_filters()
-                max_magnitude = filters.get("asteroidMaxMagnitude", bright_asteroids.MAX_APPARENT_MAGNITUDE)
+            max_magnitude = resolve_magnitude_filter(request, 'asteroidMaxMagnitude', bright_asteroids.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
-        # Feature Flag: RabbitMQ oder alte Architektur?
-        user_id = request.session.get('user_id', 'anonymous')
-        use_rabbitmq_flag = use_rabbitmq_for('asteroids', user_id)
-        
         # Feature Flag: Smart Interpolation aktivieren?
-        from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
+        user_id = request.session.get('user_id', 'anonymous')
         use_smart_interpolation = is_smart_interpolation_enabled(user_id)
         interpolation_strategy = get_interpolation_strategy(user_id)
         
@@ -195,7 +117,6 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
             logger.info(f"Checking cache for asteroids: lat={lat}, lon={lon}, time={dt_utc.isoformat()}")
             
             # Berechne Bucket-Zeit (gleiche Logik wie Worker!)
-            from cache_utils import time_bucket_utc
             bucket_dt = dt_utc.replace(minute=0, second=0, microsecond=0)
             bucket_key = time_bucket_utc(bucket_dt, bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS)
             
@@ -221,14 +142,13 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
                 logger.info(f"✅ Cache HIT for asteroids: {len(asteroid_list)} found")
             else:
                 # Cache-Miss: Prüfe ob Berechnung bereits läuft
-                from cache_utils import normalize_location, location_key
                 lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
                 loc_key = location_key(lat_norm, lon_norm, elev_norm)
                 
                 computation_key = f"computing:asteroid:{loc_key}:{bucket_key}"
                 
                 # Prüfe ob bereits in Berechnung
-                from db_utils import is_computation_in_progress, computation_lock
+                from db_utils import is_computation_in_progress, computation_lock  # noqa: PLC0415
                 if is_computation_in_progress(computation_key):
                     logger.info(f"⏳ Computation already in progress for bucket {bucket_key}")
                     asteroid_list = []  # Warte auf laufende Berechnung
@@ -260,6 +180,6 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
 
 # Add back /asteroids endpoint for backward compatibility
 @router.get("/asteroids")
-async def get_asteroids(request: Request, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
+async def get_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
     """Alias for /bright_asteroids endpoint for backward compatibility."""
-    return await get_bright_asteroids(request, lat, lon, elevation, location_name, save_location, time, max_magnitude)
+    return await get_bright_asteroids(request, background_tasks, lat, lon, elevation, location_name, save_location, time, max_magnitude)
