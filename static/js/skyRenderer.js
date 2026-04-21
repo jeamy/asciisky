@@ -110,87 +110,126 @@ export class SkyRenderer {
         // Don't call render() here to avoid recursion
     }
 
+    // Debounced Persistierung von Drag-basierten Werten (vermeidet I/O pro Step)
+    _schedulePersist(delayMs = 250) {
+        if (this._persistTimer) clearTimeout(this._persistTimer);
+        this._persistTimer = setTimeout(() => {
+            try {
+                if (this.viewMode === 'horizon' && settingsManager.setHorizontalShift) {
+                    settingsManager.setHorizontalShift(this.horizontalShift);
+                } else if (this.viewMode === 'planisphere' && settingsManager.setPlanisphereRotation) {
+                    settingsManager.setPlanisphereRotation(this.planisphereRotation);
+                }
+            } catch (_) { /* noop */ }
+            this._persistTimer = null;
+        }, delayMs);
+    }
+
+    // Synchronisiert Sternbild- und Messier-Overlays nach Layout-Änderung
+    _syncOverlays() {
+        try {
+            requestAnimationFrame(() => {
+                try { if (this.zodiacRenderer && this.zodiacRenderer.visible) this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ }
+                try { if (this.messierRenderer && this.messierRenderer.visible) this.messierRenderer.updatePositions(); } catch (_) { /* noop */ }
+            });
+        } catch (_) { /* noop */ }
+    }
+
+    // Wendet einen horizontalen Shift (Grad) an und triggert Re-Render. Persistenz ist debounced.
+    _applyHorizontalShiftDelta(deltaDeg, persist = true) {
+        if (this.viewMode !== 'horizon' || !deltaDeg) return;
+        this.horizontalShift += deltaDeg;
+        this.render();
+        this._syncOverlays();
+        if (persist) this._schedulePersist();
+    }
+
+    // Wendet eine Planisphären-Rotation (Grad) an und triggert Re-Render. Persistenz ist debounced.
+    _applyPlanisphereRotationDelta(deltaDeg, persist = true) {
+        if (this.viewMode !== 'planisphere' || !deltaDeg) return;
+        this.planisphereRotation += deltaDeg;
+        this.render();
+        this._syncOverlays();
+        if (persist) this._schedulePersist();
+    }
+
     // Methode zum Verschieben des Horizonts nach links
     shiftHorizonLeft() {
-        if (this.viewMode !== 'horizon') {
-            return;
-        }
-        // Verschiebe um 5 Grad nach links
-        this.horizontalShift -= 5;
-
-        // Speichere die aktuelle Verschiebung
-        settingsManager.setHorizontalShift(this.horizontalShift);
-
-        // Aktualisiere die Anzeige
-        this.render();
-        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
-        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
-            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
-        }
-        if (this.messierRenderer && this.messierRenderer.visible) {
-            try { requestAnimationFrame(() => { try { this.messierRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
-        }
+        this._applyHorizontalShiftDelta(-5, true);
     }
 
     // Methode zum Verschieben des Horizonts nach rechts
     shiftHorizonRight() {
-        if (this.viewMode !== 'horizon') {
-            return;
-        }
-        // Verschiebe um 5 Grad nach rechts
-        this.horizontalShift += 5;
-
-        // Speichere die aktuelle Verschiebung
-        settingsManager.setHorizontalShift(this.horizontalShift);
-
-        // Aktualisiere die Anzeige
-        this.render();
-        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
-        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
-            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
-        }
+        this._applyHorizontalShiftDelta(+5, true);
     }
 
     // Methode zum Rotieren der Planisphäre nach links (gegen den Uhrzeigersinn)
     rotatePlanisphereLeft() {
-        if (this.viewMode !== 'planisphere') {
-            return;
-        }
-        // Rotiere um 5 Grad nach links (gegen den Uhrzeigersinn)
-        this.planisphereRotation -= 5;
-
-        // Speichere die aktuelle Rotation
-        if (settingsManager.setPlanisphereRotation) {
-            settingsManager.setPlanisphereRotation(this.planisphereRotation);
-        }
-
-        // Aktualisiere die Anzeige
-        this.render();
-        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
-        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
-            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
-        }
+        this._applyPlanisphereRotationDelta(-5, true);
     }
 
     // Methode zum Rotieren der Planisphäre nach rechts (im Uhrzeigersinn)
     rotatePlanisphereRight() {
-        if (this.viewMode !== 'planisphere') {
-            return;
-        }
-        // Rotiere um 5 Grad nach rechts (im Uhrzeigersinn)
-        this.planisphereRotation += 5;
+        this._applyPlanisphereRotationDelta(+5, true);
+    }
 
-        // Speichere die aktuelle Rotation
-        if (settingsManager.setPlanisphereRotation) {
-            settingsManager.setPlanisphereRotation(this.planisphereRotation);
+    // P7: Commit des aktuellen Horizon-Drag-Transforms auf horizontalShift (snap-to-5°)
+    _commitHorizonDragShift() {
+        if (this.viewMode !== 'horizon') return;
+        const px = this._dragVisualShiftPx || 0;
+        if (!px) return;
+        const skyEl = this.container.querySelector('.sky-text');
+        const rect = skyEl ? skyEl.getBoundingClientRect() : null;
+        if (!rect || rect.width <= 0) { this._dragVisualShiftPx = 0; return; }
+        const stepPx = rect.width * (5 / 360);
+        const rawDeg = -(px / stepPx) * 5; // +px -> shift DECREASE
+        const snapDeg = Math.round(rawDeg / 5) * 5;
+        this._dragVisualShiftPx = 0;
+        if (snapDeg) {
+            this._applyHorizontalShiftDelta(snapDeg, false);
+            this._schedulePersist(0);
+        } else {
+            // Kein Commit -> Transform zuruecksetzen
+            this.applyVerticalOffset();
         }
+    }
 
-        // Aktualisiere die Anzeige
-        this.render();
-        // Halte Sternbild-SVG synchron (im nächsten Frame nach Layout)
-        if (this.zodiacRenderer && this.zodiacRenderer.visible) {
-            try { requestAnimationFrame(() => { try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ } }); } catch (_) { /* noop */ }
-        }
+    // P7: Flick-Inertia Loop fuer Horizon-Mode. Friction 0.92 pro Frame, stoppt bei Minimal-Velocity.
+    _startHorizonInertia(initialVelocity) {
+        if (this.viewMode !== 'horizon') return;
+        if (this._inertiaRafId) cancelAnimationFrame(this._inertiaRafId);
+        let velocity = initialVelocity; // px/ms
+        let lastTs = performance.now();
+        const friction = 0.92; // pro 16ms Frame
+        const minVelocity = 0.05; // px/ms
+        const maxIdlePx = 1500; // Safety
+
+        const step = (ts) => {
+            const dt = Math.min(32, ts - lastTs);
+            lastTs = ts;
+            // Frame-normierter Friction-Faktor
+            const frames = dt / 16.67;
+            velocity *= Math.pow(friction, frames);
+            const deltaPx = velocity * dt;
+            this._dragVisualShiftPx = (this._dragVisualShiftPx || 0) + deltaPx;
+
+            // Safety-Clamp damit wir nicht wegfliegen
+            if (Math.abs(this._dragVisualShiftPx) > maxIdlePx) {
+                this._dragVisualShiftPx = Math.sign(this._dragVisualShiftPx) * maxIdlePx;
+                velocity = 0;
+            }
+
+            // Transform anwenden (keine Re-Renders)
+            this.applyVerticalOffset();
+
+            if (Math.abs(velocity) > minVelocity) {
+                this._inertiaRafId = requestAnimationFrame(step);
+            } else {
+                this._inertiaRafId = 0;
+                this._commitHorizonDragShift();
+            }
+        };
+        this._inertiaRafId = requestAnimationFrame(step);
     }
 
     setViewMode(mode) {
@@ -242,6 +281,12 @@ export class SkyRenderer {
         this.verticalOffset = 0;
         this.isDragging = false;
         this._suppressNextClick = false;
+        // P7: Laufende Inertia abbrechen, Drag-Preview nullen
+        if (this._inertiaRafId) { cancelAnimationFrame(this._inertiaRafId); this._inertiaRafId = 0; }
+        this._dragVisualShiftPx = 0;
+        this._dragTransformScheduled = false;
+        this._pendingShiftDeg = 0;
+        this._dragScheduled = false;
         this.initSky();
         this.render();
         return this.viewMode;
@@ -619,59 +664,76 @@ export class SkyRenderer {
     }
 
     toggleZoom() {
+        // Button nur auf Desktop (bleibt wie gehabt)
+        if (this.isMobileDevice()) return;
+        this._stepZoom(+1, null, null, true);
+    }
+
+    // P4/P5: Schritt-Zoom in Richtung (+1 = rein, -1 = raus). Optional Cursor-Pivot fuer Zoom-to-Cursor.
+    //     cycle=true laesst den Index bei Ende umschlagen (fuer Button); cycle=false clampt (fuer Wheel/Pinch).
+    //     Hinweis: Auf Mobile nur via Pinch aufrufen (Button/Wheel haben eigene Mobile-Guards).
+    _stepZoom(direction, clientX = null, clientY = null, cycle = false) {
         try {
-            // Zoom nur auf Desktop-Geräten erlauben
-            if (this.isMobileDevice()) {
-                return;
+            const len = this.zoomLevels.length;
+            let newIndex;
+            if (cycle) {
+                newIndex = (this.zoomIndex + 1) % len; // Button-Verhalten: nur vorwärts, rollt um
+            } else {
+                newIndex = Math.max(0, Math.min(len - 1, this.zoomIndex + direction));
+                if (newIndex === this.zoomIndex) return;
             }
 
-            // Zyklisch auf nächste Zoomstufe schalten
-            this.zoomIndex = (this.zoomIndex + 1) % this.zoomLevels.length;
+            const oldFactor = this.zoomLevels[this.zoomIndex] || 1;
+            this.zoomIndex = newIndex;
             const factor = this.zoomLevels[this.zoomIndex] || 1;
 
             if (this.viewMode === 'planisphere') {
-                // Planisphäre: Quadratisches Raster skalieren
-                const baseSize = this._savedHorizonConfigForPlanisphere 
-                    ? this._savedHorizonConfigForPlanisphere.width 
+                const baseSize = this._savedHorizonConfigForPlanisphere
+                    ? this._savedHorizonConfigForPlanisphere.width
                     : this.originalSkyConfig.width;
                 const size = Math.max(1, Math.round(baseSize * factor));
                 CONFIG.SKY_WIDTH = size;
                 CONFIG.SKY_HEIGHT = size;
                 CONFIG.HORIZON_ROW = Math.floor(size * 0.5);
 
-                // Bei Zoom-Reset auch Pan-Offset zurücksetzen
                 if (factor === 1) {
+                    // Zoom-Reset: Pan zuruecksetzen
                     this.planispherePanX = 0;
                     this.planispherePanY = 0;
+                } else if (clientX !== null && clientY !== null) {
+                    // Zoom-to-Cursor: Punkt unter Cursor bleibt (anteilig) stabil
+                    const rect = this.container.getBoundingClientRect();
+                    const cx = clientX - rect.left - rect.width / 2;
+                    const cy = clientY - rect.top - rect.height / 2;
+                    const ratio = factor / oldFactor;
+                    this.planispherePanX = (this.planispherePanX - cx) * ratio + cx;
+                    this.planispherePanY = (this.planispherePanY - cy) * ratio + cy;
+                    // Bounds reapply
+                    const maxPan = CONFIG.SKY_WIDTH * 2 * factor;
+                    this.planispherePanX = Math.max(-maxPan, Math.min(maxPan, this.planispherePanX));
+                    this.planispherePanY = Math.max(-maxPan, Math.min(maxPan, this.planispherePanY));
                 }
             } else {
-                // Horizontansicht: Skalierte Rastergröße setzen
                 CONFIG.SKY_WIDTH = Math.max(1, Math.round(this.originalSkyConfig.width * factor));
                 CONFIG.SKY_HEIGHT = Math.max(1, Math.round(this.originalSkyConfig.height * factor));
                 CONFIG.HORIZON_ROW = Math.floor(CONFIG.SKY_HEIGHT * 0.5);
 
-                // Berechne vertikalen Offset, damit die Horizontlinie an derselben Position bleibt
                 if (factor === 1) {
-                    // Zurück auf 1x: Offset zurücksetzen, Linie ist wieder zentriert
                     this.verticalOffset = 0;
-                } else if (factor === 2) {
-                    // Wechsel auf 2x: Offset setzen, damit Horizontlinie an Position bleibt
+                } else if (factor === 2 && oldFactor === 1) {
+                    // Wechsel 1x -> 2x: Horizontlinie halten
                     const originalHorizonRow = this.originalSkyConfig.horizonRow;
                     const newHorizonRow = CONFIG.HORIZON_ROW;
                     const estimatedRowHeight = 16;
                     this.verticalOffset = -((newHorizonRow - originalHorizonRow) * estimatedRowHeight);
                 }
-                // Bei 4x: Offset beibehalten
             }
 
-            // Cursor-Stil aktualisieren
             this.updateCursorStyle();
-
-            // Raster neu aufbauen und rendern
             this.initSky();
             this.render();
         } catch (e) {
-            console.error('Error toggling zoom:', e);
+            console.error('Error in _stepZoom:', e);
         }
     }
 
@@ -786,21 +848,27 @@ export class SkyRenderer {
             });
         }
 
-        // Hole Magnitude-Werte aus der Filters-API (benutzerdefinierte Einstellungen)
-        let asteroidMag = 10.0; // Fallback
-        let cometMag = 14.0;    // Fallback
+        // Hole Magnitude-Werte aus der Filters-API (Instanz-Cache mit 60s TTL)
+        // Ohne Cache: Ein Fetch pro render() -> blockiert Pan/Rotate spuerbar
+        let asteroidMag = (this._magCache && this._magCache.asteroidMag) ?? 10.0;
+        let cometMag = (this._magCache && this._magCache.cometMag) ?? 14.0;
 
-        try {
-            const response = await fetch(`${API_ENDPOINTS.FILTERS_GET}?nocache=1`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.success && data.filters) {
-                    asteroidMag = data.filters.asteroidMaxMagnitude || 10.0;
-                    cometMag = data.filters.cometMaxMagnitude || 14.0;
+        const now = Date.now();
+        const cacheValid = this._magCache && (now - this._magCache.ts) < 60_000;
+        if (!cacheValid) {
+            try {
+                const response = await fetch(`${API_ENDPOINTS.FILTERS_GET}?nocache=1`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.filters) {
+                        asteroidMag = data.filters.asteroidMaxMagnitude || 10.0;
+                        cometMag = data.filters.cometMaxMagnitude || 14.0;
+                        this._magCache = { asteroidMag, cometMag, ts: now };
+                    }
                 }
+            } catch (error) {
+                console.warn('Could not fetch magnitude filters:', error);
             }
-        } catch (error) {
-            console.warn('Could not fetch magnitude filters:', error);
         }
 
         // Erstelle Count-Display
@@ -1309,6 +1377,32 @@ export class SkyRenderer {
 
         // Keyboard controls for horizon panning
         this.setupKeyboardControls();
+
+        // P4: Wheel-Zoom (stufig, mit Zoom-to-Cursor)
+        this.setupWheelZoom();
+    }
+
+    // P4: Wheel-Zoom am Container; verhindert Page-Scroll waehrend Zoom
+    setupWheelZoom() {
+        if (this._wheelZoomBound) return;
+        this._wheelZoomBound = true;
+
+        this.container.addEventListener('wheel', (e) => {
+            if (this.isMobileDevice()) return;
+            // Nur zoomen wenn innerhalb des Sky-Bereichs
+            const skyEl = this.container.querySelector('.sky-text');
+            if (!skyEl) return;
+
+            e.preventDefault();
+
+            // Throttle: pro 80ms maximal ein Step (verhindert ueberschiessen auf Precision-Trackpads)
+            const now = Date.now();
+            if (this._lastWheelTs && (now - this._lastWheelTs) < 80) return;
+            this._lastWheelTs = now;
+
+            const direction = e.deltaY > 0 ? -1 : +1; // Wheel nach unten = rauszoomen
+            this._stepZoom(direction, e.clientX, e.clientY, false);
+        }, { passive: false });
     }
 
     // Keyboard navigation: ArrowLeft/ArrowRight pan the horizon in 5° steps
@@ -1350,225 +1444,209 @@ export class SkyRenderer {
         const skyEl = this.container.querySelector('.sky-text');
         if (!skyEl) return;
 
-        // Throttle-Mechanismus für flüssigeres Rendering
-        this._horizDragPending = false;
-        this._horizDragScheduled = false;
-        this._horizDragDirection = 0; // -1=links, 0=keine, 1=rechts
+        // Pan nur auf Desktop-Geräten aktivieren
+        if (this.isMobileDevice()) return;
 
-        // Hilfsfunktion für throttled horizon shift
-        const throttledHorizonShift = () => {
-            if (!this._horizDragPending) return;
+        // Drag-State (per instance)
+        this._horizDragAccumPx = 0;
+        this._pendingShiftDeg = 0;   // Akkumulierte 5°-Steps (Planisphäre-Rotation)
+        this._dragScheduled = false; // rAF geplant
+        // P1: Visueller Transform-Offset fuer Horizon-Drag (kein Re-Render waehrend Drag)
+        this._dragVisualShiftPx = 0;
+        this._dragTransformScheduled = false;
+        // P7: Velocity-Tracking fuer Flick-Pan-Inertia
+        this._velocitySamples = this._velocitySamples || []; // {t, x}
+        this._inertiaRafId = this._inertiaRafId || 0;
 
-            // Führe den anstehenden Shift aus
-            if (this._horizDragDirection < 0) {
-                this.shiftHorizonLeft();
-            } else if (this._horizDragDirection > 0) {
-                this.shiftHorizonRight();
+        // rAF-Flush fuer Planisphaeren-Rotation (Horizon nutzt jetzt Transform-Preview)
+        const flushDrag = () => {
+            this._dragScheduled = false;
+            const deg = this._pendingShiftDeg;
+            if (!deg) return;
+            this._pendingShiftDeg = 0;
+            if (this.viewMode === 'planisphere') {
+                this._applyPlanisphereRotationDelta(deg, false);
             }
-
-            // Markiere als erledigt
-            this._horizDragPending = false;
-            this._horizDragScheduled = false;
         };
 
-        // Pan nur auf Desktop-Geräten aktivieren
-        if (this.isMobileDevice()) {
-            return;
-        }
-
-        // Mouse events for panning
+        // skyEl-spezifische Listener (neues Element bei jedem render()): immer neu binden
         skyEl.addEventListener('mousedown', (e) => {
-            // Start dragging always (vertical pan only when zoomed, horizontal pan always)
+            // P7: Laufende Inertia abbrechen + ggf. committen
+            if (this._inertiaRafId) {
+                cancelAnimationFrame(this._inertiaRafId);
+                this._inertiaRafId = 0;
+                // Zwischenstand committen, damit click nicht 'reisst'
+                this._commitHorizonDragShift();
+            }
             this.isDragging = true;
             this.lastMouseY = e.clientY;
             this.lastMouseX = e.clientX;
             this._dragStartX = e.clientX;
             this._dragStartY = e.clientY;
             this._didDrag = false;
-            // Accumulator for horizontal drag in pixels -> convert to 5° steps
             this._horizDragAccumPx = 0;
-            // Reset throttling state
-            this._horizDragPending = false;
-            this._horizDragScheduled = false;
-            this._horizDragDirection = 0;
+            this._pendingShiftDeg = 0;
+            this._dragScheduled = false;
+            this._dragVisualShiftPx = 0;
+            this._dragTransformScheduled = false;
+            // P7: Velocity-Samples zuruecksetzen
+            this._velocitySamples = [{ t: Date.now(), x: e.clientX }];
             skyEl.style.cursor = 'grabbing';
             e.preventDefault();
         });
+
+        skyEl.addEventListener('contextmenu', (e) => {
+            const factor = this.zoomLevels[this.zoomIndex] || 1;
+            if (factor > 1) e.preventDefault();
+        });
+
+        // Document-weite Listener NUR EINMAL pro Instanz binden (sonst Memory Leak + Mehrfachausführung)
+        if (this._documentPanBound) return;
+        this._documentPanBound = true;
 
         document.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
 
             const factor = this.zoomLevels[this.zoomIndex] || 1;
+            const skyEl = this.container.querySelector('.sky-text');
+            if (!skyEl) return;
+
+            // Small-movement threshold für Click-vs-Drag-Unterscheidung
+            if (!this._didDrag) {
+                const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
+                const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
+                if (totalDx > 3 || totalDy > 3) this._didDrag = true;
+            }
 
             // Vertical drag only when zoomed in HORIZON mode
             if (factor > 1 && this.viewMode === 'horizon') {
                 const deltaY = e.clientY - this.lastMouseY;
                 this.verticalOffset += deltaY;
-
-                // Limit vertical offset to reasonable bounds
-                const maxOffset = CONFIG.SKY_HEIGHT * 10; // Allow scrolling beyond visible area
+                const maxOffset = CONFIG.SKY_HEIGHT * 10;
                 this.verticalOffset = Math.max(-maxOffset, Math.min(maxOffset, this.verticalOffset));
-
                 this.lastMouseY = e.clientY;
             }
 
-            // Horizontal drag -> pan horizon in 5° steps (horizon mode) or rotate/pan planisphere (planisphere mode)
-            {
-                if (this.viewMode === 'horizon') {
+            if (this.viewMode === 'horizon') {
+                // P1: Reine Transform-Preview waehrend Drag (kein render() pro Frame)
+                const deltaX = e.clientX - this.lastMouseX;
+                this._dragVisualShiftPx += deltaX;
+                this.lastMouseX = e.clientX;
+
+                // P7: Velocity-Sample hinzufuegen, alte (>100ms) verwerfen
+                const nowTs = Date.now();
+                this._velocitySamples.push({ t: nowTs, x: e.clientX });
+                while (this._velocitySamples.length > 0 && (nowTs - this._velocitySamples[0].t) > 100) {
+                    this._velocitySamples.shift();
+                }
+
+                // rAF-Coalesce der Style-Writes
+                if (!this._dragTransformScheduled) {
+                    this._dragTransformScheduled = true;
+                    requestAnimationFrame(() => {
+                        this._dragTransformScheduled = false;
+                        this.applyVerticalOffset();
+                    });
+                }
+            } else if (this.viewMode === 'planisphere') {
+                if (factor > 1) {
+                    // Gezoomt: X/Y-Panning (CSS-Transform, kein Re-Render)
+                    const deltaX = e.clientX - this.lastMouseX;
+                    const deltaY = e.clientY - this.lastMouseY;
+                    this.planispherePanX += deltaX;
+                    this.planispherePanY += deltaY;
+                    this.lastMouseX = e.clientX;
+                    this.lastMouseY = e.clientY;
+                    // Zoom-abhängige Panning-Grenzen: ~2x sichtbare Fläche pro Zoom-Stufe
+                    const maxPan = CONFIG.SKY_WIDTH * 2 * factor;
+                    this.planispherePanX = Math.max(-maxPan, Math.min(maxPan, this.planispherePanX));
+                    this.planispherePanY = Math.max(-maxPan, Math.min(maxPan, this.planispherePanY));
+                    // rAF-Coalesce der Transform-Writes
+                    if (!this._dragTransformScheduled) {
+                        this._dragTransformScheduled = true;
+                        requestAnimationFrame(() => {
+                            this._dragTransformScheduled = false;
+                            this.applyVerticalOffset();
+                        });
+                    }
+                } else {
+                    // Nicht gezoomt: Rotation in 5°-Steps (Transform-basierte Rotation erfordert shared wrapper)
                     const deltaX = e.clientX - this.lastMouseX;
                     this._horizDragAccumPx += deltaX;
                     this.lastMouseX = e.clientX;
-                    // Mark as drag if movement exceeds small threshold
-                    if (!this._didDrag) {
-                        const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
-                        const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
-                        if (totalDx > 3 || totalDy > 3) this._didDrag = true;
-                    }
 
-                    // Convert pixels to degrees based on current sky element width
                     const rect = skyEl.getBoundingClientRect();
-                    const stepPx = rect.width * (5 / 360); // 5° step size in pixels
+                    const stepPx = rect.width * (5 / 360);
                     if (stepPx > 0) {
-                        // Apply as many 5° steps as accumulated, but throttle to animation frames
                         while (Math.abs(this._horizDragAccumPx) >= stepPx) {
-                            // Bestimme die Richtung für den nächsten Shift
-                            const direction = this._horizDragAccumPx > 0 ? -1 : 1; // -1=links, 1=rechts
-
-                            // Reduziere den Akkumulator
-                            if (this._horizDragAccumPx > 0) {
-                                this._horizDragAccumPx -= stepPx;
-                            } else {
-                                this._horizDragAccumPx += stepPx;
-                            }
-
-                            // Merke die letzte Richtung und markiere als anstehend
-                            this._horizDragDirection = direction;
-                            this._horizDragPending = true;
-
-                            // Schedule nur einmal pro Frame
-                            if (!this._horizDragScheduled) {
-                                this._horizDragScheduled = true;
-                                requestAnimationFrame(throttledHorizonShift);
-                            }
+                            // Maus nach rechts -> Rotation im Uhrzeigersinn (+5°)
+                            const signedStep = this._horizDragAccumPx > 0 ? +5 : -5;
+                            if (this._horizDragAccumPx > 0) this._horizDragAccumPx -= stepPx;
+                            else this._horizDragAccumPx += stepPx;
+                            this._pendingShiftDeg += signedStep;
+                        }
+                        if (this._pendingShiftDeg && !this._dragScheduled) {
+                            this._dragScheduled = true;
+                            requestAnimationFrame(flushDrag);
                         }
                     }
-                } else if (this.viewMode === 'planisphere') {
-                    const factor = this.zoomLevels[this.zoomIndex] || 1;
-                    
-                    // Mark as drag if movement exceeds small threshold
-                    if (!this._didDrag) {
-                        const totalDx = Math.abs(e.clientX - (this._dragStartX || e.clientX));
-                        const totalDy = Math.abs(e.clientY - (this._dragStartY || e.clientY));
-                        if (totalDx > 3 || totalDy > 3) this._didDrag = true;
-                    }
-
-                    if (factor > 1) {
-                        // Gezoomt: X/Y-Panning der Ansicht
-                        const deltaX = e.clientX - this.lastMouseX;
-                        const deltaY = e.clientY - this.lastMouseY;
-                        this.planispherePanX += deltaX;
-                        this.planispherePanY += deltaY;
-                        this.lastMouseX = e.clientX;
-                        this.lastMouseY = e.clientY;
-
-                        // Limit pan offset to reasonable bounds
-                        const maxPan = CONFIG.SKY_WIDTH * 10;
-                        this.planispherePanX = Math.max(-maxPan, Math.min(maxPan, this.planispherePanX));
-                        this.planispherePanY = Math.max(-maxPan, Math.min(maxPan, this.planispherePanY));
-                    } else {
-                        // Nicht gezoomt: Rotation wie bisher
-                        const deltaX = e.clientX - this.lastMouseX;
-                        this._horizDragAccumPx += deltaX;
-                        this.lastMouseX = e.clientX;
-
-                        // Convert pixels to degrees based on current sky element width
-                        const rect = skyEl.getBoundingClientRect();
-                        const stepPx = rect.width * (5 / 360); // 5° step size in pixels
-                        if (stepPx > 0) {
-                            // Apply as many 5° steps as accumulated
-                            while (Math.abs(this._horizDragAccumPx) >= stepPx) {
-                                // Bestimme die Richtung für die nächste Rotation
-                                const direction = this._horizDragAccumPx > 0 ? 1 : -1; // 1=rechts, -1=links
-
-                                // Reduziere den Akkumulator
-                                if (this._horizDragAccumPx > 0) {
-                                    this._horizDragAccumPx -= stepPx;
-                                } else {
-                                    this._horizDragAccumPx += stepPx;
-                                }
-
-                                // Merke die letzte Richtung und markiere als anstehend
-                                this._horizDragDirection = direction;
-                                this._horizDragPending = true;
-
-                                // Schedule nur einmal pro Frame
-                                if (!this._horizDragScheduled) {
-                                    this._horizDragScheduled = true;
-                                    requestAnimationFrame(() => {
-                                        if (!this._horizDragPending) return;
-
-                                        // Führe die Rotation aus
-                                        if (this._horizDragDirection > 0) {
-                                            this.rotatePlanisphereRight();
-                                        } else if (this._horizDragDirection < 0) {
-                                            this.rotatePlanisphereLeft();
-                                        }
-
-                                        // Markiere als erledigt
-                                        this._horizDragPending = false;
-                                        this._horizDragScheduled = false;
-                                    });
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Unknown view mode: reset accumulators
-                    this._horizDragAccumPx = 0;
-                    this._horizDragPending = false;
-                    this._horizDragScheduled = false;
-                    this._horizDragDirection = 0;
-                    this._didDrag = true;
                 }
             }
 
-            this.applyVerticalOffset();
             e.preventDefault();
         });
 
         document.addEventListener('mouseup', () => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                const skyEl = this.container.querySelector('.sky-text');
-                if (skyEl) {
-                    const factor = this.zoomLevels[this.zoomIndex] || 1;
-                    // In Planisphäre immer grab (für Rotation), sonst nur wenn gezoomt
-                    if (this.viewMode === 'planisphere' || factor > 1) {
-                        skyEl.style.cursor = 'grab';
-                    } else {
-                        skyEl.style.cursor = 'default';
-                    }
+            if (!this.isDragging) return;
+            this.isDragging = false;
+
+            // P7: Horizon -> Velocity berechnen, ggf. Inertia starten, sonst direkt committen
+            if (this.viewMode === 'horizon' && this._dragVisualShiftPx) {
+                const samples = this._velocitySamples || [];
+                let velocity = 0;
+                if (samples.length >= 2) {
+                    const first = samples[0];
+                    const last = samples[samples.length - 1];
+                    const dt = Math.max(1, last.t - first.t);
+                    velocity = (last.x - first.x) / dt; // px/ms
                 }
-                // Reset horizontal accumulator
-                this._horizDragAccumPx = 0;
-                // Clear any pending drag operations
-                this._horizDragPending = false;
-                this._horizDragScheduled = false;
-                this._horizDragDirection = 0;
-                // Prevent click selection immediately after a drag
-                if (this._didDrag) {
-                    this._suppressNextClick = true;
-                    // Reset flag shortly after to only suppress the immediate click
-                    setTimeout(() => { this._suppressNextClick = false; }, 50);
+                const threshold = 0.35; // px/ms -> merklicher Flick
+                if (Math.abs(velocity) >= threshold) {
+                    this._startHorizonInertia(velocity);
+                } else {
+                    this._commitHorizonDragShift();
                 }
             }
-        });
 
-        // Prevent context menu on right click during pan
-        skyEl.addEventListener('contextmenu', (e) => {
-            const factor = this.zoomLevels[this.zoomIndex] || 1;
-            if (factor > 1) {
-                e.preventDefault();
+            // Planisphaere-Rotation: verbleibende akkumulierte Steps sofort anwenden
+            if (this._pendingShiftDeg) {
+                const deg = this._pendingShiftDeg;
+                this._pendingShiftDeg = 0;
+                this._dragScheduled = false;
+                if (this.viewMode === 'planisphere') this._applyPlanisphereRotationDelta(deg, false);
+            }
+
+            // Planisphaere-Pan (gezoomt): persistieren
+            if (this._didDrag && this.viewMode === 'planisphere') {
+                this._schedulePersist(0);
+            }
+
+            // Cursor zurücksetzen
+            const skyEl = this.container.querySelector('.sky-text');
+            if (skyEl) {
+                const factor = this.zoomLevels[this.zoomIndex] || 1;
+                if (this.viewMode === 'planisphere' || factor > 1) {
+                    skyEl.style.cursor = 'grab';
+                } else {
+                    skyEl.style.cursor = 'default';
+                }
+            }
+
+            this._horizDragAccumPx = 0;
+
+            if (this._didDrag) {
+                this._suppressNextClick = true;
+                setTimeout(() => { this._suppressNextClick = false; }, 50);
             }
         });
     }
@@ -1624,20 +1702,16 @@ export class SkyRenderer {
             return;
         }
 
-        // Horizontansicht: Vertikales Panning
-        if (skyEl) {
-            skyEl.style.transform = `translateY(${this.verticalOffset}px)`;
-        }
-        if (labelsLayer) {
-            labelsLayer.style.transform = `translateY(${this.verticalOffset}px)`;
-        }
-        if (constellationLayer) {
-            constellationLayer.style.transform = `translateY(${this.verticalOffset}px)`;
-        }
+        // Horizontansicht: Horizontale Drag-Preview (P1) + vertikales Panning
+        const dragX = this._dragVisualShiftPx || 0;
+        const vy = this.verticalOffset || 0;
+        const tf = `translate(${dragX}px, ${vy}px)`;
+        if (skyEl) skyEl.style.transform = tf;
+        if (labelsLayer) labelsLayer.style.transform = tf;
+        if (constellationLayer) constellationLayer.style.transform = tf;
         const messierLayer = this.container.querySelector('#messier-layer');
-        if (messierLayer) {
-            messierLayer.style.transform = `translateY(${this.verticalOffset}px)`;
-        }
+        if (messierLayer) messierLayer.style.transform = tf;
+        if (gridOverlay) gridOverlay.style.transform = tf;
     }
 
     renderGridOverlay() {
@@ -1799,54 +1873,90 @@ export class SkyRenderer {
         const minSwipeDistance = 50; // Minimum distance for a swipe in pixels
         const maxTapDuration = 300; // Maximum duration for a tap in milliseconds
 
+        // P5: Pinch-Zoom State
+        let pinchStartDist = 0;
+        let pinchCenter = { x: 0, y: 0 };
+        let pinchActive = false;
+        // Flag, damit der Swipe-Handler nach einem Pinch nicht als Single-Finger-Swipe fehlzündet
+        let pinchDidHappen = false;
+
+        const getPinchDist = (touches) => {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.hypot(dx, dy);
+        };
+
         this.container.addEventListener('touchstart', (e) => {
-            // Store the initial touch position and time
-            touchStartX = e.touches[0].clientX;
-            touchStartY = e.touches[0].clientY;
-            touchStartTime = Date.now();
+            if (e.touches.length === 2) {
+                // P5: Pinch-Gesture startet
+                pinchActive = true;
+                pinchDidHappen = true;
+                pinchStartDist = getPinchDist(e.touches);
+                pinchCenter = {
+                    x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                    y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+                };
+                return;
+            }
+            if (e.touches.length === 1) {
+                // Single-Finger: Swipe-Tracking starten
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchStartTime = Date.now();
+                pinchDidHappen = false;
+            }
         }, { passive: true });
 
         this.container.addEventListener('touchend', (e) => {
-            // Calculate touch duration
-            const touchDuration = Date.now() - touchStartTime;
+            // P5: Wenn gerade ein Pinch aktiv war, NICHT als Swipe auswerten
+            if (e.touches.length < 2) pinchActive = false;
+            if (pinchDidHappen && e.touches.length === 0) {
+                pinchDidHappen = false;
+                return;
+            }
+            if (!e.changedTouches || e.changedTouches.length === 0) return;
+            if (e.touches.length > 0) return; // Noch Finger aktiv -> kein Swipe-Commit
 
-            // Get the final touch position
+            const touchDuration = Date.now() - touchStartTime;
             const touchEndX = e.changedTouches[0].clientX;
             const touchEndY = e.changedTouches[0].clientY;
-
-            // Calculate the horizontal distance moved
             const touchDistanceX = touchEndX - touchStartX;
 
-            // If it's a short tap (not a swipe), let the click handler take care of it
             if (touchDuration < maxTapDuration && Math.abs(touchDistanceX) < minSwipeDistance) {
                 return;
             }
 
-            // If it's a horizontal swipe with enough distance
             if (Math.abs(touchDistanceX) >= minSwipeDistance) {
-                // Prevent the default behavior (page scrolling)
                 e.preventDefault();
-
                 if (touchDistanceX > 0) {
-                    // Swipe right -> shift horizon left
-                    if (this.viewMode === 'horizon') {
-                        this.shiftHorizonLeft();
-                    }
+                    if (this.viewMode === 'horizon') this.shiftHorizonLeft();
                 } else {
-                    // Swipe left -> shift horizon right
-                    if (this.viewMode === 'horizon') {
-                        this.shiftHorizonRight();
-                    }
+                    if (this.viewMode === 'horizon') this.shiftHorizonRight();
                 }
             }
         });
 
-        // Prevent default on touchmove to avoid page scrolling while swiping
         this.container.addEventListener('touchmove', (e) => {
+            // P5: 2-Finger -> Pinch-Zoom
+            if (pinchActive && e.touches.length === 2) {
+                e.preventDefault();
+                if (pinchStartDist <= 0) return;
+                const dist = getPinchDist(e.touches);
+                const ratio = dist / pinchStartDist;
+                if (ratio >= 1.3) {
+                    this._stepZoom(+1, pinchCenter.x, pinchCenter.y, false);
+                    pinchStartDist = dist;
+                } else if (ratio <= 0.77) {
+                    this._stepZoom(-1, pinchCenter.x, pinchCenter.y, false);
+                    pinchStartDist = dist;
+                }
+                return;
+            }
+
+            // 1-Finger Swipe: horizontal scroll verhindern
+            if (e.touches.length !== 1) return;
             const touchCurrentX = e.touches[0].clientX;
             const touchDistanceX = touchCurrentX - touchStartX;
-
-            // If it seems like a horizontal swipe, prevent default scrolling
             if (Math.abs(touchDistanceX) > Math.abs(e.touches[0].clientY - touchStartY)) {
                 e.preventDefault();
             }
