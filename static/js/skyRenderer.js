@@ -1836,16 +1836,9 @@ export class SkyRenderer {
                 // Vertical Azimuth Lines removed as per user request
                 // for (let az = 0; az < 360; az += 15) { ... }
 
-                // Horizon Line (Alt = 0) - distinct style?
-                const p0 = this.projectHorizonAltAzToGrid(0, 0);
-                const py0 = (p0.row + 0.5) * cellH;
-                const horizonLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                horizonLine.setAttribute('x1', 0);
-                horizonLine.setAttribute('y1', py0);
-                horizonLine.setAttribute('x2', width);
-                horizonLine.setAttribute('y2', py0);
-                horizonLine.setAttribute('class', 'planisphere-horizon-curve'); // Re-use class
-                svg.appendChild(horizonLine);
+                // Horizon-Linie (Alt = 0) im Horizon-Mode NICHT als SVG zeichnen:
+                // In dieser Ansicht wird sie bereits als ASCII-Zeichen in drawHorizon()
+                // dargestellt -> SVG wuerde sie verdoppeln.
             }
 
             const constellationLayer = document.getElementById('constellation-layer');
