@@ -1,55 +1,44 @@
 """
 Module for calculating positions of comets using real MPC data.
-- Loads MPC comet dataframe and caches it (~6h) to disk and memory
-- Builds comet orbits from pandas rows (not dict) to avoid attribute errors
-- Computes apparent position, optional magnitude estimate (M1/k1), and rise/set/transit times
+
+- Loads MPC comet dataframe (nightly_data_updater fetches it daily into
+  PostgreSQL; module-level in-memory cache holds the standardized frame for
+  up to 31 days).
+- Builds comet orbits from pandas rows via ``_RowProxy`` + ``mpc.comet_orbit``.
+- Computes apparent position, magnitude estimate (M1/k1) and rise/set/transit
+  times on a 5-minute grid (see ``astronomy_utils``).
 """
+import logging
+import os
+import pickle
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
+from typing import Optional, List
+
+import numpy as np
+import pandas as pd
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2
 from skyfield.data import mpc
-from skyfield import almanac
 
-import os
-import time
-import logging
-import pickle
-from datetime import datetime, timedelta, timezone
-import gzip
-import urllib.request
-import math
-from types import SimpleNamespace
-from typing import Optional, List
-from functools import lru_cache
-
-import pandas as pd
-import numpy as np
-from skyfield.magnitudelib import planetary_magnitude
-
-from cache_utils import normalize_location, location_key, time_bucket_utc
-from timezone_utils import get_tzinfo
-from bright_asteroids import format_time
-import logging
-from db_utils import get_db_connection, store_comet_dataframe, store_comet_positions, get_comet_positions, get_comet_dataframe
-from pathlib import Path
-from data_paths import COMET_ELEMENTS_PATH
 from api.computation import wgs84
+from astronomy_utils import (
+    build_event_time_grid,
+    compute_rise_set_transit_from_altitudes,
+)
+from bright_asteroids import format_time
+from cache_utils import normalize_location, location_key, time_bucket_utc
+from data_paths import COMET_ELEMENTS_PATH
+from db_utils import (
+    get_comet_dataframe,
+    get_comet_positions,
+    store_comet_positions,
+)
+from timezone_utils import get_tzinfo
 
 # Configuration
 COMETS_FILE = Path(COMET_ELEMENTS_PATH)
-
-
-def should_update_comet_file() -> bool:
-    """Prueft, ob die Kometen-Elemente-Datei taeglich aktualisiert werden sollte.
-    
-    NOTE: Daily updates are now handled by nightly_data_updater.py at 2:00 AM.
-    This function is kept for manual/utility purposes only.
-    """
-    if not COMETS_FILE.exists():
-        return True
-
-    # Prüfe Alter der Datei
-    file_age = time.time() - COMETS_FILE.stat().st_mtime
-    # Aktualisiere täglich (24 Stunden = 86400 Sekunden)
-    return file_age > 86400
 
 
 COMET_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days (longer than 30-day precompute window)
@@ -100,18 +89,6 @@ def vectorized_comet_apparent_magnitude(M1, n, delta, r):
     magnitude = M1 + 5.0 * np.log10(delta_safe) + 2.5 * n * np.log10(r_safe)
     return magnitude
 
-
-def _clear_comet_caches():
-    """Clear all comet-related cache files when new data is downloaded"""
-    import glob
-    import shutil
-    
-    logger.debug("Clearing comet caches")
-    
-    # Clear in-memory cache
-    global _comet_df_cache, _comet_df_timestamp
-    _comet_df_cache = None
-    _comet_df_timestamp = None
 
 def clear_in_memory_cache():
     """Clear in-memory DataFrame cache - called when filters change"""
@@ -330,7 +307,6 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
             logger.error("No comet data file available")
             return pd.DataFrame()
             
-        _comet_df_cache = df
         comets = _standardize_comet_df(df)
 
         # Debug: print columns and counts for essential fields
@@ -468,24 +444,22 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         # Use provided dataframe if available (Worker Optimization)
         if dataframe is not None:
             df = dataframe
-            # logger.debug(f"Using pre-loaded dataframe with {len(df)} comets")
         else:
             df_pickle = get_comet_dataframe()
             if df_pickle:
                 df = pickle.loads(df_pickle)
             if df is not None and not df.empty:
-                print(f"Loaded {len(df)} comets from PostgreSQL database")
+                logger.info(f"Loaded {len(df)} comets from PostgreSQL database")
             else:
-                print("ERROR: No comets in PostgreSQL database! Run data_updater first.")
+                logger.error("No comets in PostgreSQL database! Run data_updater first.")
                 return []
     except Exception as e:
-        print(f"ERROR: Cannot connect to PostgreSQL database: {e}")
-        print("Make sure POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD are set correctly.")
+        logger.error(f"Cannot load comet dataframe: {e}")
         return []
 
     # Prefilter by photometric parameters to reduce heavy computations
     try:
-        # Do not require k1; use default n=4.0 later if missing (align with example in c.py)
+        # Do not require k1; use default n=4.0 later if missing
         df_pref = df[(df['M1'].notna()) & (df['M1'] <= MAX_ABSOLUTE_MAGNITUDE)].copy()
         # Process intrinsically brighter comets first
         if 'M1' in df_pref.columns:
@@ -495,11 +469,8 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         logger.warning(f"Comet prefilter failed, processing all: {e}")
         df_pref = df
 
-    t = ts.from_datetime(dt_utc)
-    location = wgs84.latlon(lat, lon, elevation_m=elevation)
-    observer = eph['earth'] + location
-    sun = eph['sun']
-    # Determine observer timezone for formatting and local-day selection
+    # Determine observer timezone for formatting (Skyfield/observer are built inside
+    # _compute_comets_vectorized to avoid duplicate construction).
     tz = get_tzinfo(lat, lon)
 
     # Delegate main computation to vectorized helper (magnitude <= 20.0 cache)
@@ -515,18 +486,6 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         dt_utc=dt_utc,
         tz=tz,
     )
-
-
-def _timescale_from_datetimes(ts, times_dt):
-    if hasattr(ts, "from_datetimes"):
-        return ts.from_datetimes(times_dt)
-    years = [dt.year for dt in times_dt]
-    months = [dt.month for dt in times_dt]
-    days = [dt.day for dt in times_dt]
-    hours = [dt.hour for dt in times_dt]
-    minutes = [dt.minute for dt in times_dt]
-    seconds = [dt.second + dt.microsecond / 1e6 for dt in times_dt]
-    return ts.utc(years, months, days, hours, minutes, seconds)
 
 
 def _compute_comets_vectorized(
@@ -561,6 +520,9 @@ def _compute_comets_vectorized(
     location = wgs84.latlon(lat, lon, elevation_m=elevation)
     observer = eph['earth'] + location
     sun = eph['sun']
+
+    # Cache observer.at(t) once; reused for every comet.
+    observer_at_t = observer.at(t)
 
     processed_rows = []  # (designation, row2, target, astrometric)
     M1_list = []
@@ -713,7 +675,7 @@ def _compute_comets_vectorized(
             target = (sun + orbit) if center_code != 0 else orbit
 
             # Geometry for magnitude and position
-            astrometric = observer.at(t).observe(target)
+            astrometric = observer_at_t.observe(target)
 
             # Heliocentric and geocentric distances
             comet_helio = target.at(t)
@@ -765,24 +727,8 @@ def _compute_comets_vectorized(
         selected_idx = bright_idx[order][:max_comets]
 
         # --- Vectorized Event Finding Setup (Grid Search) ---
-        # Create a time grid for the next 48 hours (5 minute steps)
-        # Start/end window anchored at simulated day's UTC midnight
-        start_time_ts = ts.utc(t.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0))
-        end_time_ts = ts.utc(start_time_ts.utc_datetime() + timedelta(days=2))
-        
-        start_dt = start_time_ts.utc_datetime()
-        end_dt = end_time_ts.utc_datetime()
-        
-        minutes_step = 5
-        total_minutes = int((end_dt - start_dt).total_seconds() / 60)
-        steps = total_minutes // minutes_step
-        
-        # Create time array
-        times_dt = [start_dt + timedelta(minutes=i*minutes_step) for i in range(steps + 1)]
-        t_grid = _timescale_from_datetimes(ts, times_dt)
-        
-        # Pre-calculate horizon for rise/set (standard refraction -0.5667 deg)
-        horizon = -0.5667
+        # 48h window, 5-min resolution, anchored at simulated day's UTC midnight.
+        t_grid, times_dt, minutes_step = build_event_time_grid(ts, t, days=2, minutes_step=5)
 
         for pos in selected_idx:
             try:
@@ -793,63 +739,22 @@ def _compute_comets_vectorized(
                 apparent = astrometric.apparent()
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
-                
-                # Event calculation with inner try-except
-                rise_time = None
-                set_time = None
-                transit_time = None
-                
+
+                # Rise/set/transit via shared grid helper
+                rise_time = set_time = transit_time = None
                 try:
-                    # Compute altitude over the grid
-                    grid_obs = observer.at(t_grid).observe(target)
-                    grid_alt, grid_az, _ = grid_obs.apparent().altaz()
-                    alt_deg = grid_alt.degrees
-                    
-                    # Find rise/set (zero crossings of alt - horizon)
-                    alt_shifted = alt_deg - horizon
-                    sign_change = (alt_shifted[:-1] * alt_shifted[1:]) < 0
-                    indices = np.where(sign_change)[0]
-                    
-                    # Process crossings to find first rise and set
-                    for i in indices:
-                        # Linear interpolation
-                        y0 = alt_shifted[i]
-                        y1 = alt_shifted[i+1]
-                        fraction = -y0 / (y1 - y0)
-                        event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
-                        
-                        # Rise: y0 < 0 (below horizon) -> y1 > 0 (above)
-                        if y0 < 0 and rise_time is None:
-                            rise_time = event_dt
-                        # Set: y0 > 0 (above) -> y1 < 0 (below)
-                        elif y0 > 0 and set_time is None:
-                            set_time = event_dt
-                            
-                        if rise_time and set_time:
-                            break
-                    
-                    # Transit (Max altitude)
-                    max_idx = np.argmax(alt_deg)
-                    transit_time = times_dt[max_idx]
+                    grid_alt, _grid_az, _ = observer.at(t_grid).observe(target).apparent().altaz()
+                    rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
+                        grid_alt.degrees, times_dt, minutes_step
+                    )
                 except Exception as e:
                     logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
-                    rise_time = None
-                    set_time = None
-                    transit_time = None
 
                 # Name or designation
                 if 'name' in row2 and pd.notna(row2['name']) and str(row2['name']).strip():
                     name = str(row2['name'])
                 else:
                     name = designation
-
-                # Format times for output
-                def format_time(dt, tz):
-                    if dt is None:
-                        return None
-                    if hasattr(dt, 'astimezone'):
-                        return dt.astimezone(tz).strftime('%H:%M')
-                    return None
 
                 comet_list.append({
                     'name': name,
