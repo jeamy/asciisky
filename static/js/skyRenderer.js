@@ -606,9 +606,8 @@ export class SkyRenderer {
         // requestAnimationFrame stellt sicher, dass getBoundingClientRect() valide Größen liefert
         requestAnimationFrame(() => {
             this.renderLabels();
-            // Update cursor style and apply vertical offset for pan functionality
+            // Update cursor style
             this.updateCursorStyle();
-            this.applyVerticalOffset();
             // Re-setup pan events since DOM element was recreated
             this.setupPanEvents();
             if (this.viewMode === 'planisphere') {
@@ -616,17 +615,24 @@ export class SkyRenderer {
             } else {
                 // this.removePlanisphereHorizonOverlay(); // now handled by renderGridOverlay
             }
-            // Reproject constellation overlay to match the new layout and horizon shift
+            // Reproject constellation overlay to match the new layout and horizon shift.
+            // Must run BEFORE applyVerticalOffset() so getBoundingClientRect() reads the
+            // un-transformed .sky-text position; otherwise the SVG left/top offset would
+            // already embed the pan translation and applyVerticalOffset() would double it.
             if (this.zodiacRenderer && this.zodiacRenderer.visible) {
                 this.zodiacRenderer.updatePositions();
             }
 
             // Render grid overlay (both for planisphere and horizon)
             this.renderGridOverlay();
-            // Reproject Messier overlay after layout
+            // Reproject Messier overlay after layout (also before applyVerticalOffset)
             if (this.messierRenderer && this.messierRenderer.visible) {
                 this.messierRenderer.updatePositions();
             }
+
+            // Apply vertical/pan offset LAST so all SVG layers have correct left/top
+            // before the transform is added on top.
+            this.applyVerticalOffset();
         });
     }
 
@@ -1651,6 +1657,18 @@ export class SkyRenderer {
         });
     }
 
+    // Returns the bounding rect of .sky-text WITHOUT its current CSS transform,
+    // so that SVG overlays can compute their left/top independently of pan state.
+    getSkyTextNaturalRect() {
+        const skyEl = this.container.querySelector('.sky-text');
+        if (!skyEl) return null;
+        const saved = skyEl.style.transform;
+        skyEl.style.transform = this.viewMode === 'planisphere' ? 'translate(-50%, -50%)' : 'none';
+        const rect = skyEl.getBoundingClientRect();
+        skyEl.style.transform = saved;
+        return rect;
+    }
+
     applyVerticalOffset() {
         const skyEl = this.container.querySelector('.sky-text');
         const labelsLayer = this.container.querySelector('.labels-layer');
@@ -1730,8 +1748,10 @@ export class SkyRenderer {
             const height = skyText.clientHeight;
             if (!width || !height) return;
 
-            // Align the SVG exactly with the ASCII sky area using getBoundingClientRect
-            const textRect = skyText.getBoundingClientRect();
+            // Use the natural (un-transformed) rect so the SVG left/top is computed
+            // without the current pan/zoom CSS transform. applyVerticalOffset() will
+            // then add the same transform to this layer, avoiding a double-offset.
+            const textRect = this.getSkyTextNaturalRect() || skyText.getBoundingClientRect();
             const containerRect = this.container.getBoundingClientRect();
 
             const offsetX = textRect.left - containerRect.left - this.container.clientLeft + this.container.scrollLeft;
@@ -2443,12 +2463,6 @@ export class SkyRenderer {
                 if (this.isActiveUpdate(token)) {
                     this.render();
                     this.refreshDialogIfVisible();
-                    if (this.messierRenderer && this.messierRenderer.visible) {
-                        try { this.messierRenderer.updatePositions(); } catch (_) { /* noop */ }
-                    }
-                    if (this.zodiacRenderer && this.zodiacRenderer.visible) {
-                        try { this.zodiacRenderer.updatePositions(); } catch (_) { /* noop */ }
-                    }
                 }
             }
 

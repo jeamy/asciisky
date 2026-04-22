@@ -196,9 +196,10 @@ export class ZodiacRenderer {
         const skyText = container.querySelector('.sky-text');
         if (!skyText) return;
 
-        // Use getBoundingClientRect to align inside flex-centered container reliably,
-        // accounting for transforms on sky-text
-        const textRect = skyText.getBoundingClientRect();
+        // Use the natural (un-transformed) rect so the SVG left/top is computed
+        // without the current pan/zoom CSS transform. applyVerticalOffset() will
+        // then add the same transform to the SVG layer, avoiding a double-offset.
+        const textRect = this.skyRenderer.getSkyTextNaturalRect() || skyText.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
 
         const offsetX = textRect.left - containerRect.left - container.clientLeft + container.scrollLeft;

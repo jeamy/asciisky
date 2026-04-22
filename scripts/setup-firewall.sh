@@ -168,70 +168,81 @@ if [ ! -f /etc/docker/daemon.json ]; then
 fi
 
 # Füge DOCKER-USER Chain Regeln hinzu (werden VOR UFW ausgewertet!)
-echo "🔒 Setze DOCKER-USER Chain Regeln (blockiert WAN + erlaubt nur Worker-IPs)..."
+echo "🔒 Bereite DOCKER-USER Chain vor (persistente Regeln via UFW-Dateien)..."
 
-# Lösche alte DOCKER-USER Regeln (außer RETURN am Ende)
-sudo iptables -F DOCKER-USER 2>/dev/null || true
-sudo ip6tables -F DOCKER-USER 2>/dev/null || true
+# Stelle sicher, dass DOCKER-USER Chain existiert (falls Docker noch nicht lief)
+sudo iptables -nL DOCKER-USER >/dev/null 2>&1 || sudo iptables -N DOCKER-USER
+sudo ip6tables -nL DOCKER-USER >/dev/null 2>&1 || sudo ip6tables -N DOCKER-USER
 
-# IPv4-Regeln für DOCKER-USER werden über /etc/ufw/after.rules gesetzt (siehe weiter unten).
-# Hier keine direkten iptables-Regeln, um doppelte Regeln zu vermeiden.
+# Stelle sicher, dass FORWARD in DOCKER-USER springt (IPv4 + IPv6)
+sudo iptables -C FORWARD -j DOCKER-USER 2>/dev/null || sudo iptables -I FORWARD 1 -j DOCKER-USER
+sudo ip6tables -C FORWARD -j DOCKER-USER 2>/dev/null || sudo ip6tables -I FORWARD 1 -j DOCKER-USER
 
-# IPv6: Gleiche Regeln für IPv6 (falls vorhanden)
-if [ -n "$WORKER_B_IP6" ] || [ -n "$WORKER_C_IP6" ]; then
-    if [ -n "$WORKER_B_IP6" ]; then
-        sudo ip6tables -I DOCKER-USER -s $WORKER_B_IP6 -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B IPv6"
-        sudo ip6tables -I DOCKER-USER -s $WORKER_B_IP6 -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B IPv6"
-    fi
-    if [ -n "$WORKER_C_IP6" ]; then
-        sudo ip6tables -I DOCKER-USER -s $WORKER_C_IP6 -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C IPv6"
-        sudo ip6tables -I DOCKER-USER -s $WORKER_C_IP6 -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C IPv6"
-    fi
-    sudo ip6tables -I DOCKER-USER -s ::1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN IPv6"
-    sudo ip6tables -A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN IPv6"
-fi
+# WICHTIG:
+# Die eigentlichen Allow/Deny-Regeln werden NUR über /etc/ufw/after.rules
+# und /etc/ufw/after6.rules gepflegt, um Duplikate zu vermeiden.
+success "DOCKER-USER Chain vorbereitet (Regeln werden zentral via UFW gepflegt)"
 
-# WICHTIG: RETURN am Ende (lässt andere Verbindungen durch)
-sudo ip6tables -A DOCKER-USER -j RETURN 2>/dev/null || true
+# Mache DOCKER-USER Regeln persistent via UFW after.rules + after6.rules
+echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules und /etc/ufw/after6.rules hinzu..."
 
-success "DOCKER-USER Chain konfiguriert (blockiert WAN!)"
-
-# Mache DOCKER-USER Regeln persistent via UFW after.rules
-echo "💾 Füge DOCKER-USER Regeln zu /etc/ufw/after.rules hinzu..."
-
-# Backup der originalen after.rules
+# Backups der originalen UFW-Dateien
 if [ ! -f /etc/ufw/after.rules.backup ]; then
     sudo cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
     success "Backup erstellt: /etc/ufw/after.rules.backup"
 fi
+if [ ! -f /etc/ufw/after6.rules.backup ]; then
+    sudo cp /etc/ufw/after6.rules /etc/ufw/after6.rules.backup
+    success "Backup erstellt: /etc/ufw/after6.rules.backup"
+fi
 
 # Entferne alte ASCII Sky DOCKER-USER Regeln falls vorhanden
 sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/,/# ASCII Sky DOCKER-USER rules - END/d' /etc/ufw/after.rules
+sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/,/# ASCII Sky DOCKER-USER rules - END/d' /etc/ufw/after6.rules
 
-# Füge neue DOCKER-USER Regeln am Ende hinzu (vor COMMIT)
-# WICHTIG: Keine *filter oder :DOCKER-USER - Chain existiert bereits!
+# Füge neue IPv4-DOCKER-USER Regeln vor COMMIT ein
 sudo sed -i '/^COMMIT$/i \
 # ASCII Sky DOCKER-USER rules - START\
-# Diese Regeln blockieren WAN-Zugriff auf Docker Services\
-# Erlaube Worker-B und Worker-C auf RabbitMQ und PostgreSQL\
--A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B"\
--A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C"\
--A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B"\
--A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C"\
-# Erlaube localhost auf RabbitMQ Management UI\
--A DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost"\
-# BLOCKIERE ALLE anderen (WAN) auf diesen Ports\
--A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN and others"\
--A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN and others"\
--A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN and others"\
-# RETURN (lässt andere Verbindungen durch)\
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT -m comment --comment "Allow established IPv4"\
+-A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B IPv4"\
+-A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C IPv4"\
+-A DOCKER-USER -s '"$WORKER_B_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B IPv4"\
+-A DOCKER-USER -s '"$WORKER_C_IP"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C IPv4"\
+-A DOCKER-USER -s 127.0.0.1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost IPv4"\
+-A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN IPv4"\
+-A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN IPv4"\
+-A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN IPv4"\
 -A DOCKER-USER -j RETURN\
 # ASCII Sky DOCKER-USER rules - END\
 ' /etc/ufw/after.rules
 
-success "DOCKER-USER Regeln zu /etc/ufw/after.rules hinzugefügt"
+# Füge neue IPv6-DOCKER-USER Regeln vor COMMIT ein
+sudo sed -i '/^COMMIT$/i \
+# ASCII Sky DOCKER-USER rules - START\
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT -m comment --comment "Allow established IPv6"\
+-A DOCKER-USER -s ::1 -p tcp --dport 15672 -j ACCEPT -m comment --comment "RabbitMQ UI localhost IPv6"\
+-A DOCKER-USER -p tcp --dport 5672 -j DROP -m comment --comment "Block RabbitMQ from WAN IPv6"\
+-A DOCKER-USER -p tcp --dport 5432 -j DROP -m comment --comment "Block PostgreSQL from WAN IPv6"\
+-A DOCKER-USER -p tcp --dport 15672 -j DROP -m comment --comment "Block RabbitMQ UI from WAN IPv6"\
+-A DOCKER-USER -j RETURN\
+# ASCII Sky DOCKER-USER rules - END\
+' /etc/ufw/after6.rules
+
+# Ergänze Worker-IPv6-Regeln nur wenn vorhanden
+if [ -n "$WORKER_B_IP6" ]; then
+    sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/a \
+-A DOCKER-USER -s '"$WORKER_B_IP6"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-B IPv6"\
+-A DOCKER-USER -s '"$WORKER_B_IP6"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-B IPv6"\
+' /etc/ufw/after6.rules
+fi
+if [ -n "$WORKER_C_IP6" ]; then
+    sudo sed -i '/# ASCII Sky DOCKER-USER rules - START/a \
+-A DOCKER-USER -s '"$WORKER_C_IP6"' -p tcp --dport 5672 -j ACCEPT -m comment --comment "RabbitMQ from Worker-C IPv6"\
+-A DOCKER-USER -s '"$WORKER_C_IP6"' -p tcp --dport 5432 -j ACCEPT -m comment --comment "PostgreSQL from Worker-C IPv6"\
+' /etc/ufw/after6.rules
+fi
+
+success "DOCKER-USER Regeln zu /etc/ufw/after.rules + /etc/ufw/after6.rules hinzugefügt"
 
 echo ""
 echo "📋 Setze zusätzliche UFW-Regeln (Backup-Schutz gegen WAN)..."
@@ -271,6 +282,10 @@ echo "   💡 Zugriff via SSH-Tunnel: ssh -L 15672:localhost:15672 $RABBITMQ_MAI
 
 # ===== UFW NEU LADEN =====
 echo ""
+echo "🧹 Bereinige DOCKER-USER Laufzeitregeln (entfernt Duplikate)..."
+sudo iptables -F DOCKER-USER
+sudo ip6tables -F DOCKER-USER
+
 echo "🔄 Lade UFW-Regeln neu..."
 sudo ufw reload || error_exit "UFW Reload fehlgeschlagen"
 
