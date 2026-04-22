@@ -30,7 +30,7 @@ services:
       - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U asciisky -d asciisky"]
-      interval: 10s
+      interval: 600s
       timeout: 5s
       retries: 5
     restart: unless-stopped
