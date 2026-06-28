@@ -335,6 +335,7 @@ class UnifiedWorker:
         # Create computation key for Advisory Locks
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         computation_key = f"precompute_{kind}:{loc_key}:{time_bucket_str}"
+        calculation_seconds = None
 
         # Use Advisory Locks for database operations (Hybrid approach)
         # RabbitMQ handles task deduplication, Advisory Locks protect DB operations
@@ -346,12 +347,14 @@ class UnifiedWorker:
                     # Nutze shared resources und globale Magnituden-Limits
                     max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
 
+                    calculation_started = time.perf_counter()
                     asteroids_data = bright_asteroids.load_bright_asteroids(
                         self.loader, self.ts, self.eph, observer_loc,
                         max_magnitude=max_mag,
                         current_dt=dt_utc,
                         dataframe=self.asteroid_df  # Pass pre-loaded dataframe
                     )
+                    calculation_seconds = time.perf_counter() - calculation_started
 
                     if asteroids_data:
                         tb = time_bucket_utc(dt_utc)
@@ -364,12 +367,14 @@ class UnifiedWorker:
                     # Nutze konfigurierbare Limits
                     max_comets = min(1000, self.config.max_comets)
 
+                    calculation_started = time.perf_counter()
                     comets_data = comets.load_comets(
                         self.ts, self.eph, observer_loc,
                         max_comets=max_comets,
                         current_dt=dt_utc,
                         dataframe=self.comet_df  # Pass pre-loaded dataframe
                     )
+                    calculation_seconds = time.perf_counter() - calculation_started
 
                     if comets_data:
                         tb = time_bucket_utc(dt_utc)
@@ -404,7 +409,15 @@ class UnifiedWorker:
         with self._task_state_lock:
             if self._current_task is not None:
                 self._current_task['objects'] = count
-        logger.info(f"✅ Precompute {kind} completed: {count} objects")
+        if calculation_seconds is None:
+            logger.info(f"✅ Precompute {kind} completed: {count} objects")
+        else:
+            logger.info(
+                "✅ Precompute %s completed: %d objects in %.2fs",
+                kind,
+                count,
+                calculation_seconds,
+            )
         return True
 
     def _process_on_demand_task(self, task: Dict[str, Any]) -> bool:

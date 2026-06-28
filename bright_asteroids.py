@@ -166,12 +166,12 @@ def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_
         r_typical = 2.5  # AU
         delta_typical = 1.5  # AU
         rough_apparent_mag = H_array + 5 * np.log10(r_typical * delta_typical)
-        # Keep only objects that could be brighter than max_magnitude + 3.0 margin
-        # (margin accounts for variation in actual distances)
-        bright_enough = rough_apparent_mag <= (max_magnitude + 3.0)
+        # A 1.5-mag margin retained every result in the local reference dataset
+        # while substantially reducing the expensive orbit-propagation workload.
+        bright_enough = rough_apparent_mag <= (max_magnitude + 1.5)
         df_filtered = df_filtered[bright_enough].copy()
         logger.debug("Step 2: NumPy pre-filter kept %d candidates (rough mag <= %s)",
-                     len(df_filtered), max_magnitude + 3.0)
+                     len(df_filtered), max_magnitude + 1.5)
 
         # Step 3: Sort by H and limit to a reasonable processing budget
         df_filtered = df_filtered.sort_values('magnitude_H').head(MAX_ASTEROIDS * 2)
@@ -229,14 +229,14 @@ def _compute_asteroids_vectorized(
     observer = eph['earth'] + location
     sun = eph['sun']
 
-    # Cache observer.at(t) and sun.at(t) once; same Time for every target.
+    # Barycentric reference positions (computed once, reused for all targets).
+    sun_xyz = sun.at(t).position.au  # (3,)
     observer_at_t = observer.at(t)
-    sun_at_t = sun.at(t)
+    observer_xyz = observer_at_t.position.au  # (3,)
 
-    # Build orbits and initial observations, skipping rows that fail
+    # --- Build orbits (serial — GIL prevents thread speedup here) ---
     orbits = []
     targets = []
-    observations = []
     index_map = {}
 
     for idx, row in df_filtered.iterrows():
@@ -244,28 +244,75 @@ def _compute_asteroids_vectorized(
             orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
             center_code = int(getattr(orbit, "center", 10))
             target = (sun + orbit) if center_code != 0 else orbit
-            astrometric = observer_at_t.observe(target)
-
             index_map[idx] = len(orbits)
             orbits.append(orbit)
             targets.append(target)
-            observations.append(astrometric)
         except Exception:
-            # Skip objects that fail during orbit or observation creation
             continue
 
     if not orbits:
         return []
 
-    # Restrict DataFrame to successfully processed rows and keep order stable
+    # Restrict DataFrame to successfully processed rows.
     valid_indices = list(index_map.keys())
     candidates_df = df_filtered.loc[valid_indices].copy()
 
-    # Extract distances and phase angles into NumPy arrays
-    deltas = np.array([obs.distance().au for obs in observations])
-    sun_observations = [sun_at_t.observe(target) for target in targets]
-    rs = np.array([obs.distance().au for obs in sun_observations])
-    phase_angles = np.array([obs.phase_angle(sun).degrees for obs in observations])
+    # Propagate all elliptical MPCORB elements in one NumPy batch. This follows
+    # the same two-body equations as Skyfield's per-object Kepler propagator,
+    # but avoids thousands of Python calls. Fall back for unexpected elements.
+    try:
+        a = candidates_df["semimajor_axis_au"].to_numpy(dtype=float)
+        e = candidates_df["eccentricity"].to_numpy(dtype=float)
+        if not (np.all(np.isfinite(a)) and np.all((e >= 0.0) & (e < 1.0))):
+            raise ValueError("batch propagation requires finite elliptical elements")
+
+        mean_anomaly = np.radians(candidates_df["mean_anomaly_degrees"].to_numpy(dtype=float))
+        epochs_tt = np.array([orbit.epoch.tt for orbit in orbits], dtype=float)
+        mean_motion = np.sqrt(orbits[0].mu_au3_d2 / (a ** 3))
+        mean_anomaly = (mean_anomaly + mean_motion * (t.tt - epochs_tt) + np.pi) % (2.0 * np.pi) - np.pi
+
+        # Robust vectorized Newton solve of M = E - e*sin(E).
+        eccentric_anomaly = mean_anomaly + 0.85 * e * np.sign(np.sin(mean_anomaly))
+        for _ in range(12):
+            correction = (
+                eccentric_anomaly - e * np.sin(eccentric_anomaly) - mean_anomaly
+            ) / (1.0 - e * np.cos(eccentric_anomaly))
+            eccentric_anomaly -= correction
+        if np.max(np.abs(correction)) > 1e-12:
+            raise ValueError("batch Kepler solver did not converge")
+
+        x_orbit = a * (np.cos(eccentric_anomaly) - e)
+        y_orbit = a * np.sqrt(1.0 - e * e) * np.sin(eccentric_anomaly)
+        inclination = np.radians(candidates_df["inclination_degrees"].to_numpy(dtype=float))
+        node = np.radians(candidates_df["longitude_of_ascending_node_degrees"].to_numpy(dtype=float))
+        periapsis = np.radians(candidates_df["argument_of_perihelion_degrees"].to_numpy(dtype=float))
+
+        cos_node, sin_node = np.cos(node), np.sin(node)
+        cos_peri, sin_peri = np.cos(periapsis), np.sin(periapsis)
+        cos_inc, sin_inc = np.cos(inclination), np.sin(inclination)
+        ecliptic_xyz = np.array([
+            (cos_node * cos_peri - sin_node * sin_peri * cos_inc) * x_orbit
+            + (-cos_node * sin_peri - sin_node * cos_peri * cos_inc) * y_orbit,
+            (sin_node * cos_peri + cos_node * sin_peri * cos_inc) * x_orbit
+            + (-sin_node * sin_peri + cos_node * cos_peri * cos_inc) * y_orbit,
+            sin_peri * sin_inc * x_orbit + cos_peri * sin_inc * y_orbit,
+        ])
+        tgt_xyz = orbits[0]._rotation @ ecliptic_xyz + sun_xyz[:, None]
+    except Exception as exc:
+        logger.debug("Falling back to per-object asteroid propagation: %s", exc)
+        tgt_xyz = np.array([target.at(t).position.au for target in targets]).T
+
+    diff_sun = tgt_xyz - sun_xyz[:, None]    # (3, N) heliocentric vectors
+    diff_observer = tgt_xyz - observer_xyz[:, None]  # (3, N) topocentric vectors
+
+    rs = np.sqrt(np.sum(diff_sun ** 2, axis=0))      # heliocentric distances (AU)
+    deltas = np.sqrt(np.sum(diff_observer ** 2, axis=0))  # topocentric distances (AU)
+
+    # Phase angle: angle at the asteroid between the sun-direction and the observer-direction.
+    # IAU definition: angle between vectors (target->sun) and (target->observer).
+    # target->sun = -diff_sun; target->observer = -diff_observer.
+    cos_phase = np.sum(diff_sun * diff_observer, axis=0) / (rs * deltas)
+    phase_angles = np.degrees(np.arccos(np.clip(cos_phase, -1.0, 1.0)))
 
     # Prepare H and G arrays
     H_values = candidates_df["magnitude_H"].to_numpy()

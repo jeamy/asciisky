@@ -515,17 +515,19 @@ def _compute_comets_vectorized(
     observer = eph['earth'] + location
     sun = eph['sun']
 
-    # Cache observer.at(t) once; reused for every comet.
+    # Barycentric reference positions (computed once for vectorized r/delta).
+    sun_xyz = sun.at(t).position.au  # (3,)
     observer_at_t = observer.at(t)
+    observer_xyz = observer_at_t.position.au  # (3,)
 
-    processed_rows = []  # (designation, row2, target, astrometric)
+    processed_rows = []  # (designation, row2, target)
+    orbits = []
     M1_list = []
     n_list = []
-    r_list = []
-    delta_list = []
 
-    # --- First pass: normalize rows, build orbits and geometry ---
-    for designation, row in df_pref.iterrows():
+    # --- Helper: normalise one row, build orbit + geometry ---
+    def _prepare_one_comet(args):
+        designation, row = args
         try:
             row2 = row.copy()
             row2['designation'] = designation
@@ -539,76 +541,45 @@ def _compute_comets_vectorized(
                 if col in row2.index:
                     val = row2.get(col)
                     try:
-                        if pd.notna(val):
-                            row2[col] = float(val)
-                        else:
-                            row2[col] = np.nan
+                        row2[col] = float(val) if pd.notna(val) else np.nan
                     except Exception:
                         row2[col] = np.nan
 
             # Backfill aliases in both directions for robustness
-            om_val = row2.get('om')
-            node_val = row2.get('node')
-            if pd.isna(node_val) and om_val is not None and pd.notna(om_val):
-                row2['node'] = om_val
-            if pd.isna(om_val) and node_val is not None and pd.notna(node_val):
-                row2['om'] = node_val
-
-            w_val = row2.get('w')
-            peri_val = row2.get('peri')
-            if pd.isna(peri_val) and w_val is not None and pd.notna(w_val):
-                row2['peri'] = w_val
-            if pd.isna(w_val) and peri_val is not None and pd.notna(peri_val):
-                row2['w'] = peri_val
-
-            i_val = row2.get('i')
-            incl_val = row2.get('incl')
-            if pd.isna(i_val) and incl_val is not None and pd.notna(incl_val):
-                row2['i'] = incl_val
-            if pd.isna(incl_val) and i_val is not None and pd.notna(i_val):
-                row2['incl'] = i_val
+            for src, dst in [('om', 'node'), ('node', 'om'), ('w', 'peri'),
+                              ('peri', 'w'), ('i', 'incl'), ('incl', 'i')]:
+                if pd.isna(row2.get(dst)) and pd.notna(row2.get(src)):
+                    row2[dst] = row2[src]
 
             # Map MPC raw names at row level if present
-            if pd.isna(row2.get('e')) and pd.notna(row2.get('eccentricity')):
-                row2['e'] = float(row2.get('eccentricity'))
-            if pd.isna(row2.get('q')) and pd.notna(row2.get('perihelion_distance_au')):
-                row2['q'] = float(row2.get('perihelion_distance_au'))
-            if pd.isna(row2.get('om')) and pd.notna(row2.get('longitude_of_ascending_node_degrees')):
-                row2['om'] = float(row2.get('longitude_of_ascending_node_degrees'))
-            if pd.isna(row2.get('w')) and pd.notna(row2.get('argument_of_perihelion_degrees')):
-                row2['w'] = float(row2.get('argument_of_perihelion_degrees'))
-            if pd.isna(row2.get('i')) and pd.notna(row2.get('inclination_degrees')):
-                row2['i'] = float(row2.get('inclination_degrees'))
-            if pd.isna(row2.get('M1')) and pd.notna(row2.get('magnitude_g')):
-                row2['M1'] = float(row2.get('magnitude_g'))
-            if pd.isna(row2.get('k1')) and pd.notna(row2.get('magnitude_k')):
-                row2['k1'] = float(row2.get('magnitude_k'))
+            raw_map = [
+                ('eccentricity', 'e'),
+                ('perihelion_distance_au', 'q'),
+                ('longitude_of_ascending_node_degrees', 'om'),
+                ('argument_of_perihelion_degrees', 'w'),
+                ('inclination_degrees', 'i'),
+                ('magnitude_g', 'M1'),
+                ('magnitude_k', 'k1'),
+            ]
+            for raw_col, alias in raw_map:
+                if pd.isna(row2.get(alias)) and pd.notna(row2.get(raw_col)):
+                    row2[alias] = float(row2.get(raw_col))
 
-            # If Tp missing but perihelion date provided, build Tp using TS
-            try:
-                if (('Tp' not in row2.index) or pd.isna(row2.get('Tp'))):
-                    if all(c in row2.index for c in ['perihelion_year', 'perihelion_month', 'perihelion_day']):
-                        y = row2.get('perihelion_year')
-                        m = row2.get('perihelion_month')
-                        d = row2.get('perihelion_day')
-                        if pd.notna(y) and pd.notna(m) and pd.notna(d):
-                            tt = ts.tt(int(y), int(m), int(d))
-                            row2['Tp'] = float(tt.tt)
-            except Exception:
-                pass
+            # Build Tp from perihelion date if missing (keep fractional day)
+            if pd.isna(row2.get('Tp')):
+                y = _float_or_none(row2.get('perihelion_year'))
+                m_p = _float_or_none(row2.get('perihelion_month'))
+                d_p = _float_or_none(row2.get('perihelion_day'))
+                if y is not None and m_p is not None and d_p is not None:
+                    row2['Tp'] = float(ts.tt(int(y), int(m_p), d_p).tt)
 
-            # If epoch_tt missing but epoch Y/M/D provided, build epoch_tt
-            try:
-                if (('epoch_tt' not in row2.index) or pd.isna(row2.get('epoch_tt'))):
-                    if all(c in row2.index for c in ['epoch_year', 'epoch_month', 'epoch_day']):
-                        y = row2.get('epoch_year')
-                        m = row2.get('epoch_month')
-                        d = row2.get('epoch_day')
-                        if pd.notna(y) and pd.notna(m) and pd.notna(d):
-                            tt = ts.tt(int(y), int(m), int(d))
-                            row2['epoch_tt'] = float(tt.tt)
-            except Exception:
-                pass
+            # Build epoch_tt from epoch Y/M/D if missing
+            if pd.isna(row2.get('epoch_tt')):
+                y = _float_or_none(row2.get('epoch_year'))
+                m_e = _float_or_none(row2.get('epoch_month'))
+                d_e = _float_or_none(row2.get('epoch_day'))
+                if y is not None and m_e is not None and d_e is not None:
+                    row2['epoch_tt'] = float(ts.tt(int(y), int(m_e), d_e).tt)
 
             # Validate essentials before orbit build
             essentials = ['e', 'q']
@@ -618,24 +589,13 @@ def _compute_comets_vectorized(
                     break
             essentials += [c for c in ['om', 'w'] if c in row2.index]
             if any(pd.isna(row2.get(c)) for c in essentials):
-                raise ValueError(
-                    f"Missing essential elements in row for {designation}: "
-                    f"{[c for c in essentials if pd.isna(row2.get(c))]}"
-                )
+                return None
 
-            # Build comet orbit using cached builder from essential elements
             i_val_for_orbit = float(row2.get('i')) if pd.notna(row2.get('i')) else float(row2.get('incl'))
             om_val_for_orbit = float(row2.get('om')) if pd.notna(row2.get('om')) else float(row2.get('node'))
             w_val_for_orbit = float(row2.get('w')) if pd.notna(row2.get('w')) else float(row2.get('peri'))
-            epoch_tt_val = float(row2.get('epoch_tt')) if ('epoch_tt' in row2.index and pd.notna(row2.get('epoch_tt'))) else None
-            tp_val = float(row2.get('Tp')) if ('Tp' in row2.index and pd.notna(row2.get('Tp'))) else None
-
-            peri_year = _float_or_none(row2.get('perihelion_year'))
-            peri_month = _float_or_none(row2.get('perihelion_month'))
-            peri_day = _float_or_none(row2.get('perihelion_day'))
-            epoch_year = _float_or_none(row2.get('epoch_year'))
-            epoch_month = _float_or_none(row2.get('epoch_month'))
-            epoch_day = _float_or_none(row2.get('epoch_day'))
+            epoch_tt_val = float(row2.get('epoch_tt')) if pd.notna(row2.get('epoch_tt')) else None
+            tp_val = float(row2.get('Tp')) if pd.notna(row2.get('Tp')) else None
 
             orbit_key = (
                 designation,
@@ -646,54 +606,129 @@ def _compute_comets_vectorized(
                 w_val_for_orbit,
                 epoch_tt_val,
                 tp_val,
-                peri_year,
-                peri_month,
-                peri_day,
-                epoch_year,
-                epoch_month,
-                epoch_day,
+                _float_or_none(row2.get('perihelion_year')),
+                _float_or_none(row2.get('perihelion_month')),
+                _float_or_none(row2.get('perihelion_day')),
+                _float_or_none(row2.get('epoch_year')),
+                _float_or_none(row2.get('epoch_month')),
+                _float_or_none(row2.get('epoch_day')),
             )
             orbit = _make_comet_orbit_cached(orbit_key)
 
-            # Ensure barycentric target like in c.py: if orbit is Sun-centered, shift to SSB by adding Sun
             try:
                 center_code = int(getattr(orbit, 'center', 10))
             except Exception:
                 center_code = 10
             target = (sun + orbit) if center_code != 0 else orbit
 
-            # Geometry for magnitude and position
-            astrometric = observer_at_t.observe(target)
-
-            # Heliocentric and geocentric distances
-            comet_helio = target.at(t)
-            r = comet_helio.distance().au  # Distance from Sun
-            delta = astrometric.distance().au  # Distance from Earth
-
             M1 = row2.get('M1')
             if M1 is None or pd.isna(M1):
-                continue
-            M1 = float(M1)
+                return None
             n_raw = row2.get('k1')
             n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
 
-            processed_rows.append((designation, row2, target, astrometric))
-            M1_list.append(M1)
-            n_list.append(n)
-            r_list.append(r)
-            delta_list.append(delta)
-        except Exception as e:
-            logger.debug(f"Error preparing comet {designation} for vectorized processing: {e}")
+            return designation, row2, target, orbit, float(M1), n
+        except Exception as exc:
+            logger.debug(f"Error preparing comet {designation}: {exc}")
+            return None
+
+    # Skyfield's Kepler propagation is CPU-bound here; thread pools add overhead
+    # without reducing wall time. Preserve input order with a plain serial pass.
+    comet_rows_list = list(df_pref.iterrows())
+    raw_results = [_prepare_one_comet(item) for item in comet_rows_list]
+
+    for res in raw_results:
+        if res is None:
             continue
+        designation, row2, target, orbit, M1, n = res
+        processed_rows.append((designation, row2, target))
+        orbits.append(orbit)
+        M1_list.append(M1)
+        n_list.append(n)
 
     if not processed_rows:
         return []
 
+    # Batch-propagate elliptic, hyperbolic, and parabolic two-body elements.
+    # This replaces one expensive target.at(t) call per comet. The fallback
+    # preserves compatibility with unusual future MPC data.
+    try:
+        eccentricity = np.array([row.e for _, row, _ in processed_rows], dtype=float)
+        perihelion = np.array([row.q for _, row, _ in processed_rows], dtype=float)
+        periapsis_tt = np.array([orbit.epoch.tt for orbit in orbits], dtype=float)
+        mu = orbits[0].mu_au3_d2
+        x_orbit = np.empty(len(orbits), dtype=float)
+        y_orbit = np.empty(len(orbits), dtype=float)
+
+        elliptic = eccentricity < 1.0
+        if np.any(elliptic):
+            e = eccentricity[elliptic]
+            a = perihelion[elliptic] / (1.0 - e)
+            mean_anomaly = np.sqrt(mu / a**3) * (t.tt - periapsis_tt[elliptic])
+            mean_anomaly = (mean_anomaly + np.pi) % (2.0 * np.pi) - np.pi
+            anomaly = mean_anomaly + 0.85 * e * np.sign(np.sin(mean_anomaly))
+            for _ in range(50):
+                anomaly -= (anomaly - e * np.sin(anomaly) - mean_anomaly) / (
+                    1.0 - e * np.cos(anomaly)
+                )
+            residual = anomaly - e * np.sin(anomaly) - mean_anomaly
+            if np.max(np.abs(residual)) > 1e-10:
+                raise ValueError("elliptical comet solver did not converge")
+            x_orbit[elliptic] = a * (np.cos(anomaly) - e)
+            y_orbit[elliptic] = a * np.sqrt(1.0 - e * e) * np.sin(anomaly)
+
+        hyperbolic = eccentricity > 1.0
+        if np.any(hyperbolic):
+            e = eccentricity[hyperbolic]
+            a = perihelion[hyperbolic] / (e - 1.0)
+            mean_anomaly = np.sqrt(mu / a**3) * (t.tt - periapsis_tt[hyperbolic])
+            anomaly = np.arcsinh(mean_anomaly / e)
+            for _ in range(50):
+                anomaly -= (e * np.sinh(anomaly) - anomaly - mean_anomaly) / (
+                    e * np.cosh(anomaly) - 1.0
+                )
+            residual = e * np.sinh(anomaly) - anomaly - mean_anomaly
+            if np.max(np.abs(residual)) > 1e-10:
+                raise ValueError("hyperbolic comet solver did not converge")
+            x_orbit[hyperbolic] = a * (e - np.cosh(anomaly))
+            y_orbit[hyperbolic] = a * np.sqrt(e * e - 1.0) * np.sinh(anomaly)
+
+        parabolic = eccentricity == 1.0
+        if np.any(parabolic):
+            q = perihelion[parabolic]
+            barker_time = (t.tt - periapsis_tt[parabolic]) / np.sqrt(2.0 * q**3 / mu)
+            anomaly = 2.0 * np.sinh(np.arcsinh(1.5 * barker_time) / 3.0)
+            x_orbit[parabolic] = q * (1.0 - anomaly * anomaly)
+            y_orbit[parabolic] = 2.0 * q * anomaly
+
+        inclination = np.radians([row.i for _, row, _ in processed_rows])
+        node = np.radians([row.om for _, row, _ in processed_rows])
+        argument = np.radians([row.w for _, row, _ in processed_rows])
+        cos_node, sin_node = np.cos(node), np.sin(node)
+        cos_arg, sin_arg = np.cos(argument), np.sin(argument)
+        cos_inc, sin_inc = np.cos(inclination), np.sin(inclination)
+        ecliptic_xyz = np.array([
+            (cos_node * cos_arg - sin_node * sin_arg * cos_inc) * x_orbit
+            + (-cos_node * sin_arg - sin_node * cos_arg * cos_inc) * y_orbit,
+            (sin_node * cos_arg + cos_node * sin_arg * cos_inc) * x_orbit
+            + (-sin_node * sin_arg + cos_node * cos_arg * cos_inc) * y_orbit,
+            sin_arg * sin_inc * x_orbit + cos_arg * sin_inc * y_orbit,
+        ])
+        tgt_xyz = orbits[0]._rotation @ ecliptic_xyz + sun_xyz[:, None]
+        if not np.all(np.isfinite(tgt_xyz)):
+            raise ValueError("non-finite comet positions")
+    except Exception as exc:
+        logger.debug("Falling back to per-object comet propagation: %s", exc)
+        tgt_xyz = np.array([target.at(t).position.au for _, _, target in processed_rows]).T
+
+    # These are genuinely heliocentric/topocentric distances. The old
+    # target.at(t).distance() value was measured from the system barycentre.
+    r_arr = np.linalg.norm(tgt_xyz - sun_xyz[:, None], axis=0)
+    delta_arr = np.linalg.norm(tgt_xyz - observer_xyz[:, None], axis=0)
+
     # --- Vectorized magnitude calculation ---
     M1_arr = np.array(M1_list, dtype=float)
     n_arr = np.array(n_list, dtype=float)
-    delta_arr = np.array(delta_list, dtype=float)
-    r_arr = np.array(r_list, dtype=float)
 
     apparent_magnitudes = vectorized_comet_apparent_magnitude(
         M1=M1_arr,
@@ -718,16 +753,16 @@ def _compute_comets_vectorized(
         # 48h window, 5-min resolution, anchored at simulated day's UTC midnight.
         t_grid, times_dt, minutes_step = build_event_time_grid(ts, t, days=2, minutes_step=5)
 
-        # Cache observer.at(t_grid) once; reused for every comet.
+        # Cache observer.at(t_grid) once for the final output set.
         observer_at_grid = observer.at(t_grid)
 
         for pos in selected_idx:
             try:
-                designation, row2, target, astrometric = processed_rows[pos]
+                designation, row2, target = processed_rows[pos]
                 apparent_mag = float(apparent_magnitudes[pos])
 
-                # Apparent position
-                apparent = astrometric.apparent()
+                # Apparent position (observe() only for the small final output set)
+                apparent = observer_at_t.observe(target).apparent()
                 ra, dec, distance = apparent.radec()
                 alt, az, _ = apparent.altaz()
 
