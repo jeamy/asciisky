@@ -26,8 +26,8 @@ from api.computation import wgs84
 from astronomy_utils import (
     build_event_time_grid,
     compute_rise_set_transit_from_altitudes,
+    format_time,
 )
-from bright_asteroids import format_time
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from data_paths import COMET_ELEMENTS_PATH
 from db_utils import (
@@ -65,27 +65,34 @@ logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
-    return datetime.now()
+    return datetime.now(timezone.utc)
+
+
+def _float_or_none(val):
+    try:
+        return float(val) if val is not None and not pd.isna(val) else None
+    except Exception:
+        return None
 
 
 def vectorized_comet_apparent_magnitude(M1, n, delta, r):
     """
     Vectorized apparent magnitude calculation for comets.
     Total magnitude = M1 + 5 * log10(delta) + 2.5 * n * log10(r)
-    
+
     Args:
         M1: Absolute magnitude (array)
         n: Photometric exponent (array)
         delta: Geocentric distance in AU (array)
         r: Heliocentric distance in AU (array)
-    
+
     Returns:
         Apparent magnitude (array)
     """
     # Ensure no log of zero or negative numbers
     delta_safe = np.maximum(delta, 1e-12)
     r_safe = np.maximum(r, 1e-12)
-    
+
     magnitude = M1 + 5.0 * np.log10(delta_safe) + 2.5 * n * np.log10(r_safe)
     return magnitude
 
@@ -187,14 +194,12 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
     # where both 'e' and 'q' are present (non-NaN). If no such row exists
     # for a designation, fall back to the last row by reference.
     if {'designation', 'reference'}.issubset(df.columns):
-        df = df.sort_values('reference')
-        def _pick_last_valid(g: pd.DataFrame) -> pd.DataFrame:
-            mask = g['e'].notna() & g['q'].notna()
-            if mask.any():
-                return g[mask].iloc[-1:]
-            else:
-                return g.iloc[-1:]
-        df = df.groupby('designation', group_keys=False).apply(_pick_last_valid)
+        # Valid rows must win even when a newer invalid row exists. Reference
+        # then selects the newest row within the preferred validity class.
+        df['_eq_valid'] = df['e'].notna() & df['q'].notna()
+        df = df.sort_values(['designation', '_eq_valid', 'reference'])
+        df = df.drop_duplicates(subset='designation', keep='last')
+        df = df.drop(columns=['_eq_valid'])
 
     # Ensure designation is index if present (do not keep it as a duplicate column)
     if 'designation' in df.columns:
@@ -238,7 +243,7 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"Filtered comets without any time reference (epoch/Tp/peri Y-M-D): {before - after} dropped, {after} remain")
     except Exception as e:
         logger.debug(f"Time-reference filtering failed (continuing without drop): {e}")
-    
+
     return df
 
 def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
@@ -252,32 +257,21 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
     # In-memory cache
     if use_cache and _comet_df_cache is not None and _comet_df_timestamp is not None:
         if (_now() - _comet_df_timestamp).total_seconds() < COMET_DF_CACHE_TTL_SECONDS:
-            logger.debug("Using cached comet dataframe (memory)")
+            # Validate cache has usable e/q columns
             try:
-                cols = list(_comet_df_cache.columns)
-                logger.debug(f"Comet DF (memory cache) columns: {cols}")
-                for c in ['e','q','i','incl','om','w','node','peri','epoch_tt','Tp']:
-                    if c in _comet_df_cache.columns:
-                        s = _comet_df_cache[c]
-                        logger.debug(f"mem col {c}: dtype={s.dtype}, nonnull={int(s.notna().sum())}")
-                logger.debug(f"Comet DF (memory cache) size: {len(_comet_df_cache)} rows")
-                # Invalidate empty/invalid cache (no usable e/q)
+                valid_eq = (
+                    ('e' in _comet_df_cache.columns and 'q' in _comet_df_cache.columns)
+                    and int(_comet_df_cache['e'].notna().sum()) > 0
+                    and int(_comet_df_cache['q'].notna().sum()) > 0
+                    and len(_comet_df_cache) > 0
+                )
+            except Exception:
                 valid_eq = False
-                try:
-                    valid_eq = (
-                        ('e' in _comet_df_cache.columns and 'q' in _comet_df_cache.columns)
-                        and int(_comet_df_cache['e'].notna().sum()) > 0
-                        and int(_comet_df_cache['q'].notna().sum()) > 0
-                        and len(_comet_df_cache) > 0
-                    )
-                except Exception:
-                    valid_eq = False
-                if not valid_eq:
-                    logger.debug("Memory comet cache invalid (empty or no valid e/q). Will refetch.")
-                else:
-                    return _comet_df_cache
-            except Exception as de:
-                logger.debug(f"Comet DF memory debug failed: {de}")
+            if valid_eq:
+                logger.debug("Using cached comet dataframe (memory)")
+                return _comet_df_cache
+            else:
+                logger.debug("Memory comet cache invalid (empty or no valid e/q). Will refetch.")
 
     # Fetch fresh (prefer local MPC file cache if available)
     try:
@@ -298,7 +292,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
                         logger.warning(f"Failed to write {COMETS_FILE}: {we}")
             except Exception as ne:
                 logger.error(f"Error downloading MPC comet elements: {ne}")
-        
+
         # Load from local file
         if COMETS_FILE.exists():
             with COMETS_FILE.open('rb') as f:
@@ -306,7 +300,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
         else:
             logger.error("No comet data file available")
             return pd.DataFrame()
-            
+
         comets = _standardize_comet_df(df)
 
         # Debug: print columns and counts for essential fields
@@ -323,7 +317,7 @@ def load_comet_dataframe(use_cache: bool = True) -> pd.DataFrame:
 
         _comet_df_cache = comets
         _comet_df_timestamp = _now()
-        
+
         logger.debug(f"Loaded {len(comets)} comets from MPC (stored in PostgreSQL).")
         return _comet_df_cache
     except Exception as e:
@@ -431,7 +425,7 @@ def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         time_bucket = time_bucket_utc(dt_utc, COMET_CACHE_BUCKET_HOURS)
         try:
-            cached_positions = get_comet_positions(loc_key, time_bucket, COMET_CACHE_TTL_SECONDS)
+            cached_positions = get_comet_positions(loc_key, time_bucket)
             if cached_positions:
                 logger.debug(f"Loading PostgreSQL comet cache for {loc_key}/{time_bucket}")
                 return cached_positions[:max_comets]
@@ -636,12 +630,6 @@ def _compute_comets_vectorized(
             epoch_tt_val = float(row2.get('epoch_tt')) if ('epoch_tt' in row2.index and pd.notna(row2.get('epoch_tt'))) else None
             tp_val = float(row2.get('Tp')) if ('Tp' in row2.index and pd.notna(row2.get('Tp'))) else None
 
-            def _float_or_none(val):
-                try:
-                    return float(val) if val is not None and not pd.isna(val) else None
-                except Exception:
-                    return None
-
             peri_year = _float_or_none(row2.get('perihelion_year'))
             peri_month = _float_or_none(row2.get('perihelion_month'))
             peri_day = _float_or_none(row2.get('perihelion_day'))
@@ -730,6 +718,9 @@ def _compute_comets_vectorized(
         # 48h window, 5-min resolution, anchored at simulated day's UTC midnight.
         t_grid, times_dt, minutes_step = build_event_time_grid(ts, t, days=2, minutes_step=5)
 
+        # Cache observer.at(t_grid) once; reused for every comet.
+        observer_at_grid = observer.at(t_grid)
+
         for pos in selected_idx:
             try:
                 designation, row2, target, astrometric = processed_rows[pos]
@@ -743,7 +734,7 @@ def _compute_comets_vectorized(
                 # Rise/set/transit via shared grid helper
                 rise_time = set_time = transit_time = None
                 try:
-                    grid_alt, _grid_az, _ = observer.at(t_grid).observe(target).apparent().altaz()
+                    grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
                     rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
                         grid_alt.degrees, times_dt, minutes_step
                     )

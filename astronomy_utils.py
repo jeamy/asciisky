@@ -4,7 +4,7 @@ Shared astronomy helpers used by bright_asteroids.py and comets.py.
 Keeps event-grid / rise-set-transit / timescale handling in one place so that
 the two modules don't drift apart.
 """
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import List, Optional, Tuple
 import numpy as np
 
@@ -13,21 +13,30 @@ import numpy as np
 DEFAULT_HORIZON_DEG = -0.5667
 
 
+def format_time(dt, tz=None):
+    """
+    Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM'.
+    Gibt None zurück, wenn dt None ist.
+    Wenn tz übergeben wird, wird in diese Zeitzone konvertiert. Naive dt
+    wird als UTC interpretiert.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if tz is None:
+        local_time = dt.astimezone()
+    else:
+        local_time = dt.astimezone(tz)
+    return f"{local_time.hour:02d}:{local_time.minute:02d}"
+
+
 def timescale_from_datetimes(ts, times_dt):
     """Convert a list of Python datetimes to a Skyfield Time array.
 
-    Skyfield >= 1.45 offers ``ts.from_datetimes`` (plural); fall back to the
-    classic ``ts.utc`` scalar-array API for older versions.
+    Uses ``ts.from_datetimes`` (plural) available since Skyfield 1.45.
     """
-    if hasattr(ts, "from_datetimes"):
-        return ts.from_datetimes(times_dt)
-    years = [dt.year for dt in times_dt]
-    months = [dt.month for dt in times_dt]
-    days = [dt.day for dt in times_dt]
-    hours = [dt.hour for dt in times_dt]
-    minutes = [dt.minute for dt in times_dt]
-    seconds = [dt.second + dt.microsecond / 1e6 for dt in times_dt]
-    return ts.utc(years, months, days, hours, minutes, seconds)
+    return ts.from_datetimes(times_dt)
 
 
 def build_event_time_grid(ts, anchor_time, days: int = 2, minutes_step: int = 5):
@@ -77,10 +86,8 @@ def compute_rise_set_transit_from_altitudes(
     for i in indices:
         y0 = alt_shifted[i]
         y1 = alt_shifted[i + 1]
-        # Guard against division by zero (shouldn't happen with strict sign
-        # change, but floats...)
         denom = (y1 - y0)
-        if denom == 0:
+        if abs(denom) < 1e-15:
             continue
         fraction = -y0 / denom
         event_dt = times_dt[i] + timedelta(minutes=minutes_step * fraction)
@@ -100,15 +107,3 @@ def compute_rise_set_transit_from_altitudes(
         transit_time = None
 
     return rise_time, set_time, transit_time
-
-
-def compute_rise_set_transit(observer, target, t_grid, times_dt, minutes_step,
-                             horizon_deg: float = DEFAULT_HORIZON_DEG):
-    """Convenience wrapper: sample altitude grid for a single target and
-    extract rise/set/transit. Returns ``(rise_time, set_time, transit_time)``.
-    """
-    grid_obs = observer.at(t_grid).observe(target)
-    grid_alt, _grid_az, _ = grid_obs.apparent().altaz()
-    return compute_rise_set_transit_from_altitudes(
-        grid_alt.degrees, times_dt, minutes_step, horizon_deg
-    )

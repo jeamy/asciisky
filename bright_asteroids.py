@@ -22,6 +22,7 @@ from skyfield.data import mpc
 from astronomy_utils import (
     build_event_time_grid,
     compute_rise_set_transit_from_altitudes,
+    format_time,
 )
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from data_paths import MPCORB_PATH
@@ -45,92 +46,37 @@ MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_APPARENT_M
 ASTEROID_CACHE_BUCKET_HOURS = 1
 ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
 
-# In-memory cache for asteroid DataFrame
-_asteroid_df_cache = None
-_asteroid_df_timestamp = None
-ASTEROID_DF_CACHE_TTL_SECONDS = 49 * 3600  # 49 hours (matches positions cache TTL)
-
-def clear_in_memory_cache():
-    """Clear in-memory DataFrame cache - called when filters change"""
-    global _asteroid_df_cache, _asteroid_df_timestamp
-    _asteroid_df_cache = None
-    _asteroid_df_timestamp = None
-    logger.info("Cleared asteroid in-memory DataFrame cache")
-
-
-def load_asteroid_dataframe(use_cache: bool = True) -> pd.DataFrame:
-    """Return cached asteroid DataFrame from filesystem (pickle).
-
-    Mirrors comets.load_comet_dataframe so workers can pre-load data reliably.
-    """
-    global _asteroid_df_cache, _asteroid_df_timestamp
-
-    if use_cache and _asteroid_df_cache is not None and _asteroid_df_timestamp is not None:
-        age_seconds = (datetime.now(timezone.utc) - _asteroid_df_timestamp).total_seconds()
-        if age_seconds < ASTEROID_DF_CACHE_TTL_SECONDS:
-            return _asteroid_df_cache
-
-    df_pickle = get_asteroid_dataframe()
-    if not df_pickle:
-        raise RuntimeError("Asteroid DataFrame cache missing. Run nightly_data_updater first.")
-
-    df = pickle.loads(df_pickle)
-    if not isinstance(df, pd.DataFrame):
-        raise ValueError("Asteroid DataFrame pickle did not contain a pandas DataFrame")
-
-    _asteroid_df_cache = df
-    _asteroid_df_timestamp = datetime.now(timezone.utc)
-    return df
-
-def format_time(dt, tz=None):
-    """
-    Formatiert ein datetime-Objekt als lokale Zeit im Format 'HH:MM'.
-    Gibt None zurück, wenn dt None ist.
-    Wenn tz übergeben wird, wird in diese Zeitzone konvertiert. Naive dt
-    wird als UTC interpretiert.
-    """
-    if dt is None:
-        return None
-    # Stelle sicher, dass dt tz-aware ist (interpretiere naive als UTC)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    if tz is None:
-        local_time = dt.astimezone()
-    else:
-        local_time = dt.astimezone(tz)
-    return f"{local_time.hour:02d}:{local_time.minute:02d}"
-
 # IAU H-G asteroid magnitude system
 def vectorized_asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
     """
     Compute apparent V magnitude using the IAU H-G phase function (vectorized).
     V = H + 5 log10(r * delta) - 2.5 log10((1 - G) * Phi1 + G * Phi2)
-    
+
     Args:
         H: Absolute magnitude (array)
         G: Slope parameter (array)
         r: Heliocentric distance in AU (array)
         delta: Geocentric distance in AU (array)
         phase_angle_deg: Phase angle in degrees (array)
-    
+
     Returns:
         Apparent magnitude (array)
     """
     alpha = np.radians(phase_angle_deg)
     tan_half = np.tan(alpha / 2.0)
-    
+
     # Phase functions (ensure base is non-negative)
     tan_half_safe = np.maximum(tan_half, 0)
     phi1 = np.exp(-3.33 * (tan_half_safe ** 0.63))
     phi2 = np.exp(-1.87 * (tan_half_safe ** 1.22))
-    
+
     # Flux term
     flux_term = (1.0 - G) * phi1 + G * phi2
-    
+
     # Avoid log of zero
     flux_term = np.maximum(flux_term, 1e-12)
     distance_term = np.maximum(r * delta, 1e-12)
-    
+
     value = H + 5.0 * np.log10(distance_term) - 2.5 * np.log10(flux_term)
     return value
 
@@ -359,6 +305,9 @@ def _compute_asteroids_vectorized(
     # 48h window with 5-min resolution anchored at simulated day's UTC midnight.
     t_grid, times_dt, minutes_step = build_event_time_grid(ts, t, days=2, minutes_step=5)
 
+    # Cache observer.at(t_grid) once; reused for every asteroid.
+    observer_at_grid = observer.at(t_grid)
+
     asteroid_list = []
     for idx, row in top_df.iterrows():
         try:
@@ -374,7 +323,7 @@ def _compute_asteroids_vectorized(
             alt, az, _ = apparent.altaz()
 
             # 2. Grid-based rise/set/transit (linear interpolation of alt - horizon)
-            grid_alt, _grid_az, _ = observer.at(t_grid).observe(target).apparent().altaz()
+            grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
             rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
                 grid_alt.degrees, times_dt, minutes_step
             )
@@ -405,7 +354,7 @@ def _compute_asteroids_vectorized(
         try:
             lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
             loc_key = location_key(lat_norm, lon_norm, elev_norm)
-            time_bucket = time_bucket_utc(current_dt, ASTEROID_CACHE_BUCKET_HOURS)
+            time_bucket = time_bucket_utc(dt_utc, ASTEROID_CACHE_BUCKET_HOURS)
 
             # Use 0 as representative ID (all asteroids share same location/time)
             representative_id = 0

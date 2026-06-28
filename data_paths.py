@@ -26,7 +26,3 @@ def ensure_data_dirs() -> None:
     """Create data directories if they do not already exist."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# Make sure the directories exist at import time
-ensure_data_dirs()

@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import json
+import signal
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
@@ -40,6 +41,7 @@ from api.computation import compute_sunpath_year
 # Worker Utils (same directory)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import worker_utils
+from worker_utils import SharedSkyfieldResources
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,94 +58,35 @@ if '{{' in _worker_id_env or _worker_id_env == '':
 else:
     WORKER_ID = _worker_id_env
 
-
-# Removed: get_rabbitmq_connection() - now using worker_utils.setup_rabbitmq_connection()
-
-import threading
-
-class SharedSkyfieldResources:
-    """Shared Skyfield Resources für alle Worker-Instanzen"""
-    
-    _instance = None
-    _initialized = False
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    def __init__(self):
-        if not self._initialized:
-            with self._lock:
-                if not self._initialized:
-                    self._initialize_resources()
-                    SharedSkyfieldResources._initialized = True
-    
-    def _initialize_resources(self):
-        """Initialisiere Skyfield Resources einmalig mit Memory-Optimierung"""
-        try:
-            from data_paths import DATA_DIR
-            from skyfield.api import Loader
-            
-            logger.info("Initializing shared Skyfield resources...")
-            start_time = time.time()
-            
-            # Memory-optimierte Loader Konfiguration
-            self.loader = Loader(str(DATA_DIR))
-            self.loader.verbose = False  # Reduziere Logging Overhead
-            
-            # Timescale mit optimierter Konfiguration
-            self.ts = self.loader.timescale()
-            
-            # Ephemeriden mit Caching
-            self.eph = self.loader('de421.bsp')
-            
-            load_time = time.time() - start_time
-            logger.info(f"Skyfield resources loaded in {load_time:.2f}s")
-            
-            # Pre-load asteroid/comet dataframes mit Error Handling
-            try:
-                import pickle
-                from db_utils import get_asteroid_dataframe, get_comet_dataframe
-                
-                asteroid_pickle = get_asteroid_dataframe()
-                comet_pickle = get_comet_dataframe()
-                
-                self.asteroid_df = pickle.loads(asteroid_pickle) if asteroid_pickle else None
-                self.comet_df = pickle.loads(comet_pickle) if comet_pickle else None
-                
-                if self.asteroid_df is not None and self.comet_df is not None:
-                    logger.info(f"Pre-loaded {len(self.asteroid_df)} asteroids, {len(self.comet_df)} comets")
-                else:
-                    logger.warning("Could not pre-load dataframes from database")
-            except Exception as e:
-                logger.warning(f"Could not pre-load dataframes: {e}")
-                self.asteroid_df = None
-                self.comet_df = None
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize shared resources: {e}")
-            raise
-    
-    def get_resources(self):
-        """Gibt die shared Resources zurück"""
-        return self.loader, self.ts, self.eph, self.asteroid_df, self.comet_df
-
 # Global resources instance
 shared_resources = None
+
+# Graceful shutdown flag
+_shutdown_requested = False
+_active_connection = None
+_active_channel = None
+
+
+def _signal_handler(signum, frame):
+    """Handler für graceful shutdown bei SIGTERM/SIGINT"""
+    global _shutdown_requested
+    logger.info(f"[{WORKER_ID}] Received signal {signum}, shutting down gracefully...")
+    _shutdown_requested = True
+    try:
+        if _active_connection and _active_connection.is_open and _active_channel and _active_channel.is_open:
+            _active_connection.add_callback_threadsafe(_active_channel.stop_consuming)
+    except Exception as e:
+        logger.debug(f"[{WORKER_ID}] Could not schedule consumer shutdown: {e}")
 
 
 
 def process_task(task: Dict[str, Any]) -> bool:
     """
     Bearbeite einen Precompute-Task.
-    
+
     Args:
         task: Task-Dict mit kind, location, time_bucket, magnitude
-    
+
     Returns:
         True wenn erfolgreich, False bei Fehler
     """
@@ -159,24 +102,24 @@ def process_task(task: Dict[str, Any]) -> bool:
         else:
             # Default wie im Coordinator für Asteroiden; für Kometen/Sunpath wird es aktuell nicht verwendet
             magnitude = 20.0
-        
+
         lat = location['latitude']
         lon = location['longitude']
         elevation = location['elevation']
         name = location.get('name', 'Unknown')
-        
+
         # Parse Zeit (robust für verschiedene Formate)
         time_str = time_bucket_str.replace('Z', '+00:00')
         dt_utc = datetime.fromisoformat(time_str)
         # Stelle sicher dass Timezone gesetzt ist
         if dt_utc.tzinfo is None:
             dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-        
+
         logger.info(f"[{WORKER_ID}] Processing {kind} for {name} ({lat:.4f}, {lon:.4f}) at {time_bucket_str}")
-        
+
         # Berechne Positionen
         start_time = time.time()
-        
+
         # Normalisierte Location nur einmal berechnen
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
@@ -272,11 +215,11 @@ def process_task(task: Dict[str, Any]) -> bool:
         except Exception as e:
             logger.error(f"[{WORKER_ID}] Failed to acquire advisory lock for {computation_key}: {e}")
             return False
-        
+
         elapsed = time.time() - start_time
         logger.info(f"[{WORKER_ID}] ✅ Completed {kind} for {name}: {count} objects in {elapsed:.2f}s")
         return True
-    
+
     except Exception as e:
         logger.error(f"[{WORKER_ID}] ❌ Task failed: {e}", exc_info=True)
         return False
@@ -287,17 +230,17 @@ def callback(ch, method, properties, body):
     try:
         # Parse Task
         task = json.loads(body)
-        
+
         # Bearbeite Task
         success = process_task(task)
-        
+
         if success:
             # ACK (Task erfolgreich)
             ch.basic_ack(delivery_tag=method.delivery_tag)
         else:
             # NACK (Task fehlgeschlagen, zurück in Queue)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-    
+
     except Exception as e:
         logger.error(f"Callback error: {e}", exc_info=True)
         # NACK bei Fehler
@@ -309,39 +252,45 @@ def main():
     logger.info("=" * 60)
     logger.info(f"Precompute Worker [{WORKER_ID}] - Starting")
     logger.info("=" * 60)
-    
+
     # Konfiguration
     prefetch_count = int(os.getenv('RABBITMQ_PREFETCH_COUNT', '1'))
-    
+
     logger.info(f"Configuration:")
     logger.info(f"  - Worker ID: {WORKER_ID}")
     logger.info(f"  - Prefetch Count: {prefetch_count}")
-    
+
     # Initialize Shared Resources
-    global shared_resources
+    global shared_resources, _active_connection, _active_channel
     shared_resources = SharedSkyfieldResources()
-    
+
     rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
-    
-    while True:
+
+    # Signal Handler für graceful shutdown
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    while not _shutdown_requested:
         try:
             # Verbinde zu RabbitMQ
             connection = worker_utils.setup_rabbitmq_connection(rabbitmq_url, heartbeat=0)
             if not connection:
                 logger.error("Cannot connect to RabbitMQ - retrying in 10s...")
-                time.sleep(10)
+                _wait_for_shutdown(10)
                 continue
-            
+
             channel = connection.channel()
-            
+            _active_connection = connection
+            _active_channel = channel
+
             # Deklariere alle Queues
             logger.info(f"[{WORKER_ID}] Declaring queues...")
             worker_utils.declare_computation_queues(channel)
             logger.info(f"[{WORKER_ID}] ✅ All queues declared")
-            
+
             # Fair Dispatch (nur 1 Task gleichzeitig pro Worker)
             channel.basic_qos(prefetch_count=prefetch_count)
-            
+
             # Starte Consumer
             logger.info(f"[{WORKER_ID}] 🎧 Listening for tasks on queue 'precompute.tasks'...")
             channel.basic_consume(
@@ -349,18 +298,45 @@ def main():
                 on_message_callback=callback,
                 auto_ack=False  # Manuelles ACK
             )
-            
+
             # Blocking Loop
             channel.start_consuming()
-        
+
+            if _shutdown_requested:
+                logger.info(f"[{WORKER_ID}] Shutdown requested, stopping consumer...")
+                try:
+                    channel.stop_consuming()
+                except Exception:
+                    pass
+                break
+
         except KeyboardInterrupt:
             logger.info(f"[{WORKER_ID}] Worker stopped by user")
             break
-        
+
         except Exception as e:
+            if _shutdown_requested:
+                break
             logger.error(f"[{WORKER_ID}] Worker error: {e}", exc_info=True)
             logger.info("Reconnecting in 10 seconds...")
-            time.sleep(10)
+            _wait_for_shutdown(10)
+        finally:
+            try:
+                if _active_connection and _active_connection.is_open:
+                    _active_connection.close()
+            except Exception:
+                pass
+            _active_channel = None
+            _active_connection = None
+
+    logger.info(f"[{WORKER_ID}] Worker stopped")
+
+
+def _wait_for_shutdown(seconds):
+    """Interruptible retry delay."""
+    deadline = time.monotonic() + seconds
+    while not _shutdown_requested and time.monotonic() < deadline:
+        time.sleep(max(0.0, min(0.25, deadline - time.monotonic())))
 
 
 # Removed: wait_for_database() - now using worker_utils.wait_for_database()
@@ -370,6 +346,6 @@ if __name__ == '__main__':
     # Warte bis Daten vorhanden sind
     if not worker_utils.wait_for_database(WORKER_ID, check_both=True):
         sys.exit(1)
-    
+
     # Starte Worker
     main()

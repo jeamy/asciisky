@@ -6,7 +6,9 @@ Downloads and processes asteroid/comet data once per day at 2:00 AM
 import os
 import sys
 import time
+import signal
 import logging
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from ftplib import FTP, FTP_TLS
@@ -28,6 +30,23 @@ RETENTION_DAYS = int(os.environ.get('ASCII_SKY_RETENTION_DAYS', '60'))
 
 # Track last update date
 LAST_UPDATE_FILE = Path('cache/last_data_update.txt')
+
+# Graceful shutdown flag
+_shutdown_requested = False
+
+
+def _signal_handler(signum, frame):
+    """Handler für graceful shutdown bei SIGTERM/SIGINT"""
+    global _shutdown_requested
+    logger.info(f"Received signal {signum}, shutting down gracefully...")
+    _shutdown_requested = True
+
+
+def _wait_for_shutdown(seconds):
+    """Interruptible update-loop delay."""
+    deadline = time.monotonic() + seconds
+    while not _shutdown_requested and time.monotonic() < deadline:
+        time.sleep(max(0.0, min(0.25, deadline - time.monotonic())))
 
 
 def env_flag(name, default=False):
@@ -108,16 +127,16 @@ def should_update_now():
     """Check if it's time to update (2 AM and not updated today)"""
     now = datetime.now()
     today = now.date()
-    
+
     # Check if already updated today
     last_update = get_last_update_date()
     if last_update == today:
         return False
-    
+
     # Check if it's the right hour (2 AM by default)
     if now.hour != UPDATE_HOUR:
         return False
-    
+
     return True
 
 
@@ -133,7 +152,6 @@ def cleanup_old_cached_positions():
         return True
     except Exception as e:
         logger.error(f"✗ Error cleaning up cached positions: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
@@ -148,7 +166,6 @@ def invalidate_object_cache(object_type: str):
         return True
     except Exception as e:
         logger.error(f"✗ Error invalidating {object_type} cache: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
@@ -164,7 +181,7 @@ def update_asteroid_data():
         from skyfield.data import mpc
         from db_utils import store_asteroid_dataframe, get_database_stats
         import bright_asteroids
-        
+
         # Download latest data
         ensure_data_dirs()
         mpcorb_file = Path(MPCORB_PATH)
@@ -190,13 +207,13 @@ def update_asteroid_data():
             else:
                 logger.error("✗ No MPCORB file available – skipping asteroid update")
                 return False
-        
+
         # Load and parse
         with gzip.open(mpcorb_file, 'rb') as f:
             df = mpc.load_mpcorb_dataframe(f)
-        
+
         logger.info(f"✓ Loaded {len(df)} asteroids from MPCORB.DAT")
-        
+
         # Convert types
         numeric_cols = [
             'magnitude_H', 'magnitude_G', 'mean_anomaly_degrees', 'argument_of_perihelion_degrees',
@@ -206,9 +223,9 @@ def update_asteroid_data():
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        
+
         df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-        
+
         # Store in database (as pickle)
         df_pickle = pickle.dumps(df)
         store_asteroid_dataframe(df_pickle)
@@ -216,15 +233,14 @@ def update_asteroid_data():
 
         # Drop cached asteroid positions so they are rebuilt from fresh orbital elements
         invalidate_object_cache('asteroid')
-        
+
         # Verify
         stats = get_database_stats()
         logger.info(f"✓ Database now contains {stats['asteroids_count']} asteroids")
         return True
-            
+
     except Exception as e:
         logger.error(f"✗ Error updating asteroid data: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
@@ -259,10 +275,10 @@ def update_comet_data():
 
         # Load from file (comets.py handles direct MPC download when FTP is disabled)
         df = comets.load_comet_dataframe(use_cache=False)
-        
+
         if df is not None and not df.empty:
             logger.info(f"✓ Loaded {len(df)} comets from CometEls.txt")
-            
+
             # Store in database (as pickle)
             df_pickle = pickle.dumps(df)
             store_comet_dataframe(df_pickle)
@@ -270,7 +286,7 @@ def update_comet_data():
 
             # Drop cached comet positions so they are rebuilt from fresh orbital elements
             invalidate_object_cache('comet')
-            
+
             # Verify
             stats = get_database_stats()
             logger.info(f"✓ Database now contains {stats['comets_count']} comets")
@@ -278,10 +294,9 @@ def update_comet_data():
         else:
             logger.error("✗ Failed to load comet data")
             return False
-            
+
     except Exception as e:
         logger.error(f"✗ Error updating comet data: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         return False
 
@@ -291,21 +306,21 @@ def perform_nightly_update():
     logger.info("=" * 80)
     logger.info(f"Starting nightly data update at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 80)
-    
+
     success = True
 
     # Retention-based cleanup for stale cached positions
     if not cleanup_old_cached_positions():
         success = False
-    
+
     # Update asteroids
     if not update_asteroid_data():
         success = False
-    
+
     # Update comets
     if not update_comet_data():
         success = False
-    
+
     if success:
         # Record successful update
         set_last_update_date(datetime.now().date())
@@ -316,18 +331,22 @@ def perform_nightly_update():
         logger.error("=" * 80)
         logger.error("✗ Nightly update completed with errors")
         logger.error("=" * 80)
-    
+
     return success
 
 
 def run_update_loop():
     """Main loop: check every 30 minutes if update is needed"""
+    # Signal Handler für graceful shutdown
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
     logger.info("Nightly Data Updater started")
     logger.info(f"Update time: {UPDATE_HOUR}:00 (local time)")
     logger.info(f"Check interval: {CHECK_INTERVAL_SECONDS}s")
     logger.info("=" * 80)
-    
-    while True:
+
+    while not _shutdown_requested:
         try:
             if should_update_now():
                 perform_nightly_update()
@@ -335,16 +354,20 @@ def run_update_loop():
                 now = datetime.now()
                 last_update = get_last_update_date()
                 logger.debug(f"Check at {now.strftime('%H:%M')} - No update needed (last: {last_update})")
-            
+
             # Wait before next check
-            time.sleep(CHECK_INTERVAL_SECONDS)
-            
+            _wait_for_shutdown(CHECK_INTERVAL_SECONDS)
+
         except KeyboardInterrupt:
             logger.info("Shutting down nightly updater...")
             break
         except Exception as e:
+            if _shutdown_requested:
+                break
             logger.error(f"Error in update loop: {e}")
-            time.sleep(CHECK_INTERVAL_SECONDS)
+            _wait_for_shutdown(CHECK_INTERVAL_SECONDS)
+
+    logger.info("Nightly Data Updater stopped")
 
 
 def check_initial_data():

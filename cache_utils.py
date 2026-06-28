@@ -6,6 +6,7 @@ Shared utilities for per-location and time-bucketed caching.
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -18,7 +19,6 @@ def normalize_location(lat: float, lon: float, elevation: float,
     """Round lat/lon to 4 decimals (~11 m) and elevation to next higher 10 m step.
     Returns (lat_norm, lon_norm, elev_norm_int).
     """
-    import math
     try:
         lat_f = float(lat)
         lon_f = float(lon)
@@ -54,11 +54,3 @@ def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_B
         dt = dt.replace(tzinfo=timezone.utc)
     bucket_hour = (dt.hour // bucket_hours) * bucket_hours
     return f"{dt:%Y%m%d}T{bucket_hour:02d}"
-
-
-# Legacy stub functions (no longer used):
-
-def build_cache_path(kind: str, lat: float, lon: float, elevation: float,
-                     dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:
-    """Legacy function - returns empty string. Use PostgreSQL cache instead."""
-    return ""

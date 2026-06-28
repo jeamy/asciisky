@@ -40,14 +40,14 @@ class InterpolationStrategy(Enum):
 
 class SmartInterpolationConfig:
     """Configuration for smart interpolation"""
-    
+
     def __init__(self):
         self.enabled = os.getenv('ENABLE_SMART_INTERPOLATION', 'false').lower() == 'true'
         self.on_demand_enabled = os.getenv('INTERPOLATION_ON_DEMAND', 'true').lower() == 'true'
         self.max_future_hours = float(os.getenv('INTERPOLATION_MAX_FUTURE_HOURS', '2.0'))
         self.cache_computed = os.getenv('INTERPOLATION_CACHE_COMPUTED', 'true').lower() == 'true'
         self.strategy = InterpolationStrategy(os.getenv('INTERPOLATION_STRATEGY', 'smart_interpolation'))
-        
+
         logger.info(f"Smart Interpolation Config: enabled={self.enabled}, "
                    f"on_demand={self.on_demand_enabled}, "
                    f"max_future_hours={self.max_future_hours}, "
@@ -60,7 +60,7 @@ _config = SmartInterpolationConfig()
 
 def load_asteroids_with_smart_interpolation(
     lat: float,
-    lon: float, 
+    lon: float,
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int = 1,
@@ -69,7 +69,7 @@ def load_asteroids_with_smart_interpolation(
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Load asteroid positions with smart interpolation.
-    
+
     Args:
         lat: Latitude
         lon: Longitude
@@ -78,14 +78,14 @@ def load_asteroids_with_smart_interpolation(
         bucket_hours: Cache bucket size in hours
         ttl_seconds: Cache TTL in seconds
         use_postgres: Whether to use PostgreSQL backend
-    
+
     Returns:
         List of interpolated asteroid dictionaries, or None if no data available
     """
     if not _config.enabled:
         # Fallback to original nearest-bucket strategy
         return _load_with_nearest_bucket_asteroids(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
-    
+
     return _load_with_smart_interpolation(
         'asteroids', lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres
     )
@@ -102,7 +102,7 @@ def load_comets_with_smart_interpolation(
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Load comet positions with smart interpolation.
-    
+
     Args:
         lat: Latitude
         lon: Longitude
@@ -111,14 +111,14 @@ def load_comets_with_smart_interpolation(
         bucket_hours: Cache bucket size in hours
         ttl_seconds: Cache TTL in seconds
         use_postgres: Whether to use PostgreSQL backend
-    
+
     Returns:
         List of interpolated comet dictionaries, or None if no data available
     """
     if not _config.enabled:
         # Fallback to original nearest-bucket strategy
         return _load_with_nearest_bucket_comets(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
-    
+
     return _load_with_smart_interpolation(
         'comets', lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres
     )
@@ -136,7 +136,7 @@ def _load_with_smart_interpolation(
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Core smart interpolation logic with adaptive strategies.
-    
+
     Args:
         object_type: 'asteroids' or 'comets'
         lat, lon, elevation: Location parameters
@@ -144,23 +144,23 @@ def _load_with_smart_interpolation(
         bucket_hours: Cache bucket size
         ttl_seconds: Cache TTL
         use_postgres: Use PostgreSQL backend
-    
+
     Returns:
         Interpolated object list or None
     """
     if dt_utc.tzinfo is None:
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-    
+
     # Get surrounding buckets and interpolation factor
     bucket1_dt, bucket2_dt, factor = get_interpolation_buckets(dt_utc, bucket_hours)
-    
+
     logger.info(f"Smart interpolation for {object_type} at {dt_utc.isoformat()}: "
                f"bucket1={bucket1_dt.isoformat()}, bucket2={bucket2_dt.isoformat()}, factor={factor:.3f}")
-    
+
     # Load data for both buckets
     list1 = _load_bucket(object_type, lat, lon, elevation, bucket1_dt, bucket_hours, ttl_seconds, use_postgres)
     list2 = _load_bucket(object_type, lat, lon, elevation, bucket2_dt, bucket_hours, ttl_seconds, use_postgres)
-    
+
     # DEBUG: Log bucket contents
     if list1:
         logger.info(f"Bucket1 ({bucket1_dt.isoformat()}): {len(list1)} objects loaded")
@@ -169,7 +169,7 @@ def _load_with_smart_interpolation(
             logger.info(f"  First comet: {first_comet.get('name')} - alt={first_comet.get('altitude'):.1f}°, az={first_comet.get('azimuth'):.1f}°")
     else:
         logger.warning(f"Bucket1 ({bucket1_dt.isoformat()}): EMPTY or None")
-    
+
     if list2:
         logger.info(f"Bucket2 ({bucket2_dt.isoformat()}): {len(list2)} objects loaded")
         if list2 and object_type == 'comets' and len(list2) > 0:
@@ -177,10 +177,10 @@ def _load_with_smart_interpolation(
             logger.info(f"  First comet: {first_comet.get('name')} - alt={first_comet.get('altitude'):.1f}°, az={first_comet.get('azimuth'):.1f}°")
     else:
         logger.warning(f"Bucket2 ({bucket2_dt.isoformat()}): EMPTY or None")
-    
+
     # Apply adaptive strategy based on bucket availability
     if _config.strategy == InterpolationStrategy.SMART_INTERPOLATION:
-        return _apply_smart_strategy(object_type, lat, lon, elevation, dt_utc, 
+        return _apply_smart_strategy(object_type, lat, lon, elevation, dt_utc,
                                     bucket1_dt, bucket2_dt, factor, list1, list2)
     elif _config.strategy == InterpolationStrategy.ON_DEMAND_ONLY:
         return _apply_on_demand_strategy(object_type, lat, lon, elevation, dt_utc,
@@ -205,23 +205,23 @@ def _apply_smart_strategy(
     """
     Apply smart interpolation strategy with on-demand computation.
     """
-    
+
     # Case 1: Both buckets available → True interpolation
     if list1 and list2:
         logger.info(f"Both buckets available for {object_type} → performing smart interpolation")
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-    
+
     # Case 2: Only previous bucket available → Trigger background task or compute on-demand
     if list1 and not list2 and _config.on_demand_enabled:
         # Check if background tasks are enabled (async RabbitMQ workers)
         from config.interpolation_config import get_interpolation_config
         config = get_interpolation_config()
-        
+
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket2
             logger.info(f"Only previous bucket available for {object_type} → triggering background worker for bucket2")
             _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
-            
+
             # EINFACHE LÖSUNG: Extrapoliere aus list1!
             # Wenn wir bei factor=0.5 sind (30min nach bucket1), extrapoliere 30min vorwärts
             # Das ist ungenau, aber besser als alte Position zu zeigen
@@ -239,17 +239,17 @@ def _apply_smart_strategy(
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
             logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
             return list1
-    
+
     # Case 3: Only future bucket available → Trigger background task or compute on-demand
     if not list1 and list2 and _config.on_demand_enabled:
         from config.interpolation_config import get_interpolation_config
         config = get_interpolation_config()
-        
+
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket1
             logger.info(f"Only future bucket available for {object_type} → triggering background worker for bucket1")
             _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
-            
+
             # Check if future bucket is within acceptable time range
             time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
             if time_diff_hours <= _config.max_future_hours:
@@ -266,7 +266,7 @@ def _apply_smart_strategy(
                 if _config.cache_computed:
                     _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-            
+
             # Fallback: Check if future bucket is within acceptable time range
             time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
             if time_diff_hours <= _config.max_future_hours:
@@ -275,12 +275,12 @@ def _apply_smart_strategy(
             else:
                 logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
                 return None
-    
+
     # Case 4: No buckets available → Trigger background tasks or compute on-demand
     if not list1 and not list2 and _config.on_demand_enabled:
         from config.interpolation_config import get_interpolation_config
         config = get_interpolation_config()
-        
+
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ workers for both buckets
             logger.info(f"No buckets available for {object_type} → triggering background workers for both buckets")
@@ -294,16 +294,16 @@ def _apply_smart_strategy(
             logger.info(f"No buckets available for {object_type} → computing both on-demand (SYNC)")
             list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
             list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
-            
+
             if list1 and list2:
                 if _config.cache_computed:
                     _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
                     _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-            
+
             # Return whatever we could compute
             return list1 or list2 or None
-    
+
     # Default fallback
     logger.warning(f"No strategy applicable for {object_type}, returning None")
     return None
@@ -323,17 +323,17 @@ def _apply_on_demand_strategy(
     Apply on-demand only strategy (compute everything fresh).
     """
     logger.info(f"Applying on-demand only strategy for {object_type}")
-    
+
     # Compute both buckets fresh
     list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
     list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
-    
+
     if list1 and list2:
         if _config.cache_computed:
             _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
             _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
-    
+
     return list1 or list2 or None
 
 
@@ -355,12 +355,12 @@ def _apply_nearest_bucket_strategy(
         else:
             logger.info(f"Using bucket2 (closer): factor={factor:.3f}")
             return list2
-    
+
     # If only one bucket available, use it
     if list1:
         logger.info(f"Using only available bucket1")
         return list1
-    
+
     if list2:
         # Check if bucket2 is not too far in the future
         time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
@@ -370,7 +370,7 @@ def _apply_nearest_bucket_strategy(
         else:
             logger.warning(f"Bucket2 too far in future ({time_diff_hours:.1f}h), returning None")
             return None
-    
+
     # No buckets available
     return None
 
@@ -389,20 +389,20 @@ def _load_bucket(
     lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
     loc_key = location_key(lat_norm, lon_norm, elev_norm)
     bucket = time_bucket_utc(dt_utc, bucket_hours)
-    
+
     # PostgreSQL only
     if use_postgres:
         try:
             if object_type == 'asteroids':
-                positions = get_asteroid_positions(loc_key, bucket, ttl_seconds)
+                positions = get_asteroid_positions(loc_key, bucket)
             else:
-                positions = get_comet_positions(loc_key, bucket, ttl_seconds)
-            
+                positions = get_comet_positions(loc_key, bucket)
+
             if isinstance(positions, list) and positions:
                 return positions
         except Exception as e:
             logger.error(f"Error loading {object_type} bucket {bucket}: {e}")
-    
+
     return None
 
 
@@ -423,9 +423,9 @@ def _trigger_background_worker(
         import os
         import uuid
         import time
-        
+
         rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
-        
+
         # Determine routing key based on object type
         if object_type == 'asteroids':
             routing_key = 'compute.asteroid'
@@ -433,9 +433,9 @@ def _trigger_background_worker(
         else:  # comets
             routing_key = 'compute.comet'
             kind = 'comets'
-        
+
         task_id = f"{object_type}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        
+
         # Task data
         task = {
             'task_id': task_id,
@@ -449,19 +449,19 @@ def _trigger_background_worker(
             'magnitude': 20.0 if object_type == 'asteroids' else None,
             'max_comets': 1000 if object_type == 'comets' else None
         }
-        
+
         # Publish to RabbitMQ
         params = pika.URLParameters(rabbitmq_url)
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
-        
+
         # Declare exchange
         channel.exchange_declare(
             exchange='computation.direct',
             exchange_type='direct',
             durable=True
         )
-        
+
         # Publish task
         channel.basic_publish(
             exchange='computation.direct',
@@ -472,10 +472,10 @@ def _trigger_background_worker(
                 priority=5
             )
         )
-        
+
         connection.close()
         logger.info(f"✅ Triggered background worker for {object_type}: task_id={task_id}, bucket={dt_utc.isoformat()}")
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to trigger background worker for {object_type}: {e}")
 
@@ -493,9 +493,9 @@ def _compute_bucket_on_demand(
     """
     try:
         logger.warning(f"⚠️  SYNC computation for {object_type} bucket {dt_utc.isoformat()} - this blocks the request!")
-        
+
         location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
-        
+
         if object_type == 'asteroids':
             objects = bright_asteroids.load_bright_asteroids(
                 LOADER, ts, eph, location_dict,
@@ -508,10 +508,10 @@ def _compute_bucket_on_demand(
                 max_comets=1000,
                 current_dt=dt_utc
             )
-        
+
         logger.info(f"On-demand computation completed: {len(objects) if objects else 0} {object_type}")
         return objects if objects else []
-        
+
     except Exception as e:
         logger.error(f"On-demand {object_type} computation failed: {e}")
         return None
@@ -532,14 +532,14 @@ def _store_bucket(
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         bucket = time_bucket_utc(dt_utc, 1)
-        
+
         if object_type == 'asteroids':
             store_asteroid_positions(0, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)
         else:
             store_comet_positions(0, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)
-        
+
         logger.info(f"Cached {len(objects)} {object_type} for bucket {bucket}")
-        
+
     except Exception as e:
         logger.error(f"Failed to cache {object_type} bucket: {e}")
 
@@ -560,17 +560,17 @@ def _interpolate_objects_smart(
     try:
         # Base interpolation
         interpolated = interpolate_object_list(list1, list2, factor)
-        
+
         # Apply astronomical corrections with location
         location = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         corrected = []
         for obj in interpolated:
             corrected_obj = _apply_astronomical_corrections(obj, list1, list2, factor, target_dt, location)
             corrected.append(corrected_obj)
-        
+
         logger.info(f"Smart interpolation completed for {object_type}: {len(corrected)} objects")
         return corrected
-        
+
     except Exception as e:
         logger.error(f"Smart interpolation failed for {object_type}: {e}")
         # Fallback to basic interpolation
@@ -591,10 +591,10 @@ def _apply_astronomical_corrections(
     """
     try:
         from api.astronomical_corrections import apply_astronomical_corrections
-        
+
         result = apply_astronomical_corrections(obj, list1, list2, factor, target_dt, location)
         return result.corrected_object
-        
+
     except Exception as e:
         logger.error(f"Astronomical corrections failed for {obj.get('name')}: {e}")
         # Fallback: return uncorrected object

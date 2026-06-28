@@ -10,6 +10,7 @@ import json
 import os
 import time
 import logging
+import hashlib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
@@ -59,6 +60,7 @@ def db_transaction():
         conn.rollback()
         raise e
 
+
 def close_db_connection():
     """Close thread-local PostgreSQL connection."""
     if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
@@ -72,34 +74,33 @@ def close_db_connection():
 
 def store_asteroid_dataframe(df_pickle: bytes) -> None:
     """Store asteroid DataFrame in FILESYSTEM (not PostgreSQL - too large for DB!)."""
-    import os
-    from data_paths import DATA_DIR
-    
+    from data_paths import DATA_DIR, ensure_data_dirs
+    ensure_data_dirs()
+
     # Store in filesystem instead of PostgreSQL to avoid OOM killer
     cache_file = os.path.join(DATA_DIR, 'asteroid_dataframe.pkl')
     with open(cache_file, 'wb') as f:
         f.write(df_pickle)
-    
+
     logger.info(f"Stored asteroid DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
 def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     """Retrieve cached asteroid DataFrame from FILESYSTEM (not PostgreSQL)."""
-    import os
     from data_paths import DATA_DIR
-    
+
     cache_file = os.path.join(DATA_DIR, 'asteroid_dataframe.pkl')
-    
+
     # Check if file exists and is recent enough
     if not os.path.exists(cache_file):
         return None
-    
+
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Asteroid DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
-    
+
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
-    
+
     logger.info(f"Loaded asteroid DataFrame from filesystem: {len(df_pickle) / 1024 / 1024:.1f} MB")
     return df_pickle
 
@@ -110,7 +111,7 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
     with db_transaction() as conn:
         cursor = conn.cursor()
         serialized_data = pickle.dumps(position_data)
-        
+
         cursor.execute("""
             INSERT INTO cached_positions (
                 object_type, object_id, location_key, time_bucket,
@@ -125,20 +126,17 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
             datetime.now(timezone.utc), serialized_data
         ))
 
-def get_asteroid_positions(location_key: str, time_bucket: str,
-                              max_age_seconds: int = None) -> Optional[List[Dict]]:
+def get_asteroid_positions(location_key: str, time_bucket: str) -> Optional[List[Dict]]:
     """
     Retrieve cached asteroid positions from PostgreSQL.
-    
-    Note: Positions for a specific time_bucket are immutable and can be cached indefinitely.
-    The max_age_seconds parameter is deprecated and ignored.
+
+    Positions for a specific time_bucket are immutable and can be cached indefinitely.
     """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
+
         # Positions for a specific time_bucket are immutable - no TTL needed!
-        # We simply retrieve the most recent calculation for this location/time combination
         cursor.execute("""
             SELECT position_data FROM cached_positions
             WHERE object_type = 'asteroid'
@@ -146,16 +144,17 @@ def get_asteroid_positions(location_key: str, time_bucket: str,
               AND time_bucket = %s
             ORDER BY computed_at DESC LIMIT 1
         """, (location_key, time_bucket))
-        
+
         row = cursor.fetchone()
         if row and row['position_data']:
             return pickle.loads(bytes(row['position_data']))
         return None
-    except Exception as e:
+    except Exception:
         conn.rollback()
         raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 # ===== Sunpath Functions =====
 
@@ -241,40 +240,40 @@ def get_sunpath_year(location_key: str, year_bucket: str,
         conn.rollback()
         raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 # ===== Comet Functions =====
 
 def store_comet_dataframe(df_pickle: bytes) -> None:
     """Store comet DataFrame in FILESYSTEM (not PostgreSQL - too large for DB!)."""
-    import os
-    from data_paths import DATA_DIR
-    
+    from data_paths import DATA_DIR, ensure_data_dirs
+    ensure_data_dirs()
+
     # Store in filesystem instead of PostgreSQL to avoid OOM killer
     cache_file = os.path.join(DATA_DIR, 'comet_dataframe.pkl')
     with open(cache_file, 'wb') as f:
         f.write(df_pickle)
-    
+
     logger.info(f"Stored comet DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
 def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     """Retrieve cached comet DataFrame from FILESYSTEM (not PostgreSQL)."""
-    import os
     from data_paths import DATA_DIR
-    
+
     cache_file = os.path.join(DATA_DIR, 'comet_dataframe.pkl')
-    
+
     # Check if file exists and is recent enough
     if not os.path.exists(cache_file):
         return None
-    
+
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Comet DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
-    
+
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
-    
+
     logger.info(f"Loaded comet DataFrame from filesystem: {len(df_pickle) / 1024 / 1024:.1f} MB")
     return df_pickle
 
@@ -283,17 +282,21 @@ def get_comets_by_magnitude(max_absolute_mag: float) -> List[Dict]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT id, designation, m1_mag, orbit_data
             FROM comet_elements
             WHERE m1_mag <= %s
             ORDER BY m1_mag ASC
         """, (max_absolute_mag,))
-        
+
         return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
                              observer_lat: float, observer_lon: float, observer_elevation: float,
@@ -302,7 +305,7 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
     with db_transaction() as conn:
         cursor = conn.cursor()
         serialized_data = pickle.dumps(position_data)
-        
+
         cursor.execute("""
             INSERT INTO cached_positions (
                 object_type, object_id, location_key, time_bucket,
@@ -317,20 +320,16 @@ def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
             datetime.now(timezone.utc), serialized_data
         ))
 
-def get_comet_positions(location_key: str, time_bucket: str,
-                           max_age_seconds: int = None) -> Optional[List[Dict]]:
+def get_comet_positions(location_key: str, time_bucket: str) -> Optional[List[Dict]]:
     """
     Retrieve cached comet positions from PostgreSQL.
-    
-    Note: Positions for a specific time_bucket are immutable and can be cached indefinitely.
-    The max_age_seconds parameter is deprecated and ignored.
+
+    Positions for a specific time_bucket are immutable and can be cached indefinitely.
     """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
-        # Positions for a specific time_bucket are immutable - no TTL needed!
-        # We simply retrieve the most recent calculation for this location/time combination
+
         cursor.execute("""
             SELECT position_data FROM cached_positions
             WHERE object_type = 'comet'
@@ -338,16 +337,17 @@ def get_comet_positions(location_key: str, time_bucket: str,
               AND time_bucket = %s
             ORDER BY computed_at DESC LIMIT 1
         """, (location_key, time_bucket))
-        
+
         row = cursor.fetchone()
         if row and row['position_data']:
             return pickle.loads(bytes(row['position_data']))
         return None
-    except Exception as e:
+    except Exception:
         conn.rollback()
         raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 # ===== Cache Maintenance Functions =====
 
@@ -421,7 +421,7 @@ def get_last_data_update(update_type: str = None) -> Optional[Dict]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
+
         if update_type:
             cursor.execute("""
                 SELECT * FROM data_updates
@@ -433,31 +433,50 @@ def get_last_data_update(update_type: str = None) -> Optional[Dict]:
                 SELECT * FROM data_updates
                 ORDER BY updated_at DESC LIMIT 1
             """)
-        
+
         row = cursor.fetchone()
         return dict(row) if row else None
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 def get_database_stats() -> dict:
-    """Get database statistics (asteroid/comet DataFrame availability)."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        
-        # Check if DataFrames exist (not individual elements)
-        cursor.execute("SELECT COUNT(*) as count FROM asteroid_dataframes")
-        asteroid_df_count = cursor.fetchone()['count']
-        
-        cursor.execute("SELECT COUNT(*) as count FROM comet_dataframes")
-        comet_df_count = cursor.fetchone()['count']
-        
-        return {
-            'asteroids_count': asteroid_df_count,
-            'comets_count': comet_df_count
-        }
-    finally:
-        conn.close()
+    """Get database statistics (asteroid/comet DataFrame availability from filesystem)."""
+    from data_paths import DATA_DIR
+
+    asteroid_file = os.path.join(DATA_DIR, 'asteroid_dataframe.pkl')
+    comet_file = os.path.join(DATA_DIR, 'comet_dataframe.pkl')
+
+    asteroid_count = 0
+    comet_count = 0
+
+    if os.path.exists(asteroid_file):
+        try:
+            file_age = time.time() - os.path.getmtime(asteroid_file)
+            if file_age <= 49 * 3600:
+                with open(asteroid_file, 'rb') as f:
+                    df = pickle.loads(f.read())
+                asteroid_count = len(df) if df is not None else 0
+        except Exception:
+            pass
+
+    if os.path.exists(comet_file):
+        try:
+            file_age = time.time() - os.path.getmtime(comet_file)
+            if file_age <= 49 * 3600:
+                with open(comet_file, 'rb') as f:
+                    df = pickle.loads(f.read())
+                comet_count = len(df) if df is not None else 0
+        except Exception:
+            pass
+
+    return {
+        'asteroids_count': asteroid_count,
+        'comets_count': comet_count
+    }
 
 # ===== User Settings Functions =====
 
@@ -480,8 +499,12 @@ def get_user_settings(user_id: int) -> Optional[Dict[str, Any]]:
             return json.loads(settings_obj)
         except Exception:
             return None
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 
 def save_user_settings(user_id: int, settings: Dict[str, Any]) -> None:
@@ -535,60 +558,76 @@ def get_all_user_locations() -> List[Dict[str, Any]]:
             )
 
         return locations
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 # ===== Computation Lock Functions =====
+
+def _advisory_lock_id(computation_key: str) -> int:
+    """Generate a stable, process-independent advisory lock ID from a string key."""
+    h = hashlib.md5(computation_key.encode('utf-8')).digest()
+    return int.from_bytes(h[:4], 'big') & 0x7FFFFFFF
+
 
 def is_computation_in_progress(computation_key: str) -> bool:
     """Check if a computation is already in progress using PostgreSQL Advisory Locks."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        
+
         # Try to acquire lock in non-blocking mode
         # Returns 1 if lock acquired, 0 if already locked
-        lock_id = hash(computation_key) & 0x7FFFFFFF  # Ensure positive for advisory lock
+        lock_id = _advisory_lock_id(computation_key)
         cursor.execute("SELECT pg_try_advisory_lock(%s) as acquired", (lock_id,))
-        
+
         result = cursor.fetchone()
         acquired = result['acquired']
-        
+
         if acquired:
             # We got the lock, release it immediately (we were just checking)
             cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
             return False  # No computation in progress
         else:
             return True   # Computation is in progress (lock held by someone else)
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        if not conn.closed:
+            conn.commit()
 
 @contextmanager
 def computation_lock(computation_key: str, ttl_seconds: int = 300):
     """Context manager for PostgreSQL Advisory Locks."""
     conn = get_db_connection()
-    lock_id = hash(computation_key) & 0x7FFFFFFF  # Ensure positive
-    
+    lock_id = _advisory_lock_id(computation_key)
+
     try:
         cursor = conn.cursor()
         # Try to acquire lock (blocking with timeout)
         cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
-        
+
         # Set up automatic cleanup after TTL
         cursor.execute("""
             SELECT pg_notify('computation_lock_timeout', %s)
         """, (f"{computation_key}:{ttl_seconds}",))
-        
+
         yield conn
-        
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id))
-        except:
-            pass  # Lock might already be released
-        finally:
-            conn.close()
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
-# Advisory Locks cleanup automatically on connection close
-# No manual cleanup needed!
+# Advisory locks are explicitly released above and also disappear when a
+# thread-local connection is eventually closed.

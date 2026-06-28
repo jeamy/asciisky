@@ -2,6 +2,7 @@
 AsciiSky - ASCII Art Celestial Position Tracker
 """
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -12,10 +13,18 @@ from fastapi.staticfiles import StaticFiles
 from api.routes import session, celestial, asteroids, comets, config, zodiac, filters, user_settings, auth, admin_users, messier
 from api.routes.auth import _get_user_by_id
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    app.state.precompute_tasks = {}
+    yield
+    # Shutdown (nothing to clean up currently)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AsciiSky API",
-    description="API for ASCII art representation of the night sky."
+    description="API for ASCII art representation of the night sky.",
+    lifespan=lifespan
 )
 
 # Add session middleware
@@ -38,9 +47,6 @@ async def add_no_cache_headers(request: Request, call_next):
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Global dict to store info about running and completed precompute tasks
-app.precompute_tasks = {}
 
 # Include routers
 app.include_router(session.router, prefix="/api", tags=["session"])

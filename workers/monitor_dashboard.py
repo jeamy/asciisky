@@ -16,6 +16,7 @@ import json
 import time
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from dataclasses import asdict
@@ -35,11 +36,66 @@ from worker_monitor import WorkerMonitor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global Monitor Instance
+monitor = None
+
+# WebSocket Connections
+websocket_connections = set()
+
+
+class ConnectionManager:
+    """Manager für WebSocket Verbindungen"""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                # Remove dead connections
+                self.active_connections.remove(connection)
+
+
+manager = ConnectionManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan Context Manager für Startup und Shutdown"""
+    global monitor
+
+    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    monitor = WorkerMonitor(rabbitmq_url)
+    monitor.start_monitoring()
+
+    logger.info("Worker Monitor Dashboard started")
+
+    yield
+
+    if monitor:
+        monitor.stop_monitoring()
+
+    logger.info("Worker Monitor Dashboard stopped")
+
+
 # FastAPI App
 app = FastAPI(
     title="Worker Monitor Dashboard",
     description="Real-time monitoring for ASCII Sky workers",
-    version="2.0"
+    version="2.0",
+    lifespan=lifespan
 )
 
 # CORS Middleware
@@ -50,63 +106,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Global Monitor Instance
-monitor = None
-
-# WebSocket Connections
-websocket_connections = set()
-
-
-class ConnectionManager:
-    """Manager für WebSocket Verbindungen"""
-    
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-    
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-    
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except:
-                # Remove dead connections
-                self.active_connections.remove(connection)
-
-
-manager = ConnectionManager()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialisiere Monitor beim Startup"""
-    global monitor
-    
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
-    monitor = WorkerMonitor(rabbitmq_url)
-    monitor.start_monitoring()
-    
-    logger.info("Worker Monitor Dashboard started")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup beim Shutdown"""
-    global monitor
-    
-    if monitor:
-        monitor.stop_monitoring()
-    
-    logger.info("Worker Monitor Dashboard stopped")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -145,7 +144,7 @@ async def get_dashboard():
             try {
                 const response = await fetch('/api/dashboard');
                 const data = await response.json();
-                
+
                 const statusDiv = document.getElementById('status');
                 statusDiv.className = 'status success';
                 statusDiv.innerHTML = `
@@ -167,7 +166,7 @@ async def get_dashboard():
                 `;
             }
         }
-        
+
         loadStatus();
         setInterval(loadStatus, 5000);
     </script>
@@ -188,7 +187,7 @@ async def get_dashboard_data():
                 "message": "Worker monitor is not initialized. Check RabbitMQ connection."
             }
         )
-    
+
     try:
         return monitor.get_dashboard_data()
     except Exception as e:
@@ -208,11 +207,11 @@ async def get_worker_details(worker_id: str):
     """Gibt Worker-Details zurück"""
     if not monitor:
         raise HTTPException(status_code=503, detail="Monitor not available")
-    
+
     details = monitor.get_worker_details(worker_id)
     if not details:
         raise HTTPException(status_code=404, detail="Worker not found")
-    
+
     return details
 
 
@@ -221,7 +220,7 @@ async def get_optimization_report():
     """Gibt Optimierungs-Report zurück"""
     if not monitor:
         raise HTTPException(status_code=503, detail="Monitor not available")
-    
+
     return monitor.get_optimization_report()
 
 
@@ -230,7 +229,7 @@ async def health_check():
     """Health Check Endpoint"""
     if not monitor:
         return {"status": "unhealthy", "error": "Monitor not initialized"}
-    
+
     try:
         dashboard_data = monitor.get_dashboard_data()
         return {
@@ -248,16 +247,16 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket für Real-time Updates"""
     await manager.connect(websocket)
     websocket_connections.add(websocket)
-    
+
     try:
         while True:
             # Sende aktuelle Daten alle 5 Sekunden
             if monitor:
                 data = monitor.get_dashboard_data()
                 await websocket.send_text(json.dumps(data))
-            
+
             await asyncio.sleep(5)
-    
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         websocket_connections.discard(websocket)
@@ -281,7 +280,7 @@ def main():
     """Starte Dashboard Server"""
     host = os.getenv('MONITOR_HOST', '0.0.0.0')
     port = int(os.getenv('MONITOR_PORT', '8080'))
-    
+
     print(f"Starting Worker Monitor Dashboard on http://{host}:{port}")
     print("=" * 60)
     print("Dashboard Features:")
@@ -291,7 +290,7 @@ def main():
     print("  • Optimization recommendations")
     print("  • WebSocket live updates")
     print("=" * 60)
-    
+
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
