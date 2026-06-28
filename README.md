@@ -1,6 +1,8 @@
-# ASCII Sky - Celestial Tracker
+# ASCII Sky – RabbitMQ/PostgreSQL Test Application
 
-A web application that displays the current positions of celestial bodies (Sun, Moon, planets, asteroids, comets) in ASCII art.
+ASCII Sky is a **test and demonstration application for the combined use of RabbitMQ and PostgreSQL**. Its astronomy UI displays the current positions of the Sun, Moon, planets, asteroids, and comets as ASCII art, while providing a realistic workload for queues, workers, caching, persistence, and deduplication.
+
+The supported default setup is a **local, single-workstation system**: the web application, PostgreSQL, RabbitMQ, and the workers all run on one computer with Docker Compose and are used from a browser on that same computer. It is intended for development and experimentation, not as a production-ready public service. The repository also contains historical and experimental multi-host deployment material; that is outside the primary usage described here.
 
 ## Features
 
@@ -64,52 +66,91 @@ A web application that displays the current positions of celestial bodies (Sun, 
 
 ![ASCII Sky – Sunpath overlay](doc/ASCII-1.png)
 
-## Prerequisites
+## Local Usage (Single-Workstation System)
 
-- Docker and Docker Compose
+The local Docker Compose stack runs these components on one machine:
 
-### Development Setup (Local)
+- FastAPI web application and astronomy UI
+- PostgreSQL for orbital data, user data, cached results, and advisory locks
+- RabbitMQ for asynchronous task distribution
+- Unified workers for precomputation and on-demand calculations
+- A nightly data updater and a precompute coordinator
 
-#### Quick Start with Hybrid Deduplication (Recommended)
+This setup demonstrates the complete RabbitMQ/PostgreSQL processing path without requiring additional hosts.
+
+### Prerequisites
+
+- Docker with Docker Compose v2
+- A current browser
+- Internet access during the initial data download
+
+### Quick Start
 
 1. Clone this repository
 2. Navigate to the project directory
-3. Run the Hybrid Deduplication setup:
+3. Start the local stack:
    ```bash
    ./scripts/hybrid-setup.sh local
    ```
-4. Open your browser and navigate to `http://localhost:8000`
+4. Open `http://localhost:8000` in a browser on the same computer.
 
-The Hybrid setup automatically:
-- Configures PostgreSQL Advisory Locks for deduplication
-- Starts all core services (FastAPI, PostgreSQL, RabbitMQ, workers)
-- Builds Docker images with the latest code
-- Initializes the database and downloads asteroid/comet data
-- Launches unified workers (with per-message dedup IDs + Advisory Locks)
-- Runs the hybrid deduplication smoke tests
+The setup script creates `.env` from `.env.example` if necessary, builds the images, starts the services, initializes PostgreSQL, downloads the astronomy data, launches the RabbitMQ workers, and runs smoke tests. The first start can take several minutes because images and orbital data must be downloaded.
 
-**Data Safety:** By default, all data (database, cache, etc.) is preserved when restarting. Only use `./scripts/hybrid-setup.sh local --clean` if you want to delete everything.
+Local access points:
 
-**Access Points:**
-- Web API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- RabbitMQ UI: http://localhost:15672 (admin/changeme)
+- Application: http://localhost:8000
+- OpenAPI documentation: http://localhost:8000/docs
+- RabbitMQ management UI: http://localhost:15672
 
-**Testing Hybrid Deduplication:**
+The RabbitMQ login is taken from `RABBITMQ_USER` and `RABBITMQ_PASSWORD` in `.env` (development defaults: `admin` / `changeme`). These defaults and the published database/message-broker ports are suitable only for an isolated development machine. Do not expose this stack directly to an untrusted network.
+
+### Daily Operation
+
 ```bash
-# Run all tests and verification
+# Show container status
+docker compose ps
+
+# Follow logs from all services
+docker compose logs -f
+
+# Stop the application and retain PostgreSQL/RabbitMQ data
+docker compose down
+
+# Start it again with the retained data
+docker compose up -d
+```
+
+PostgreSQL and RabbitMQ state is stored in named Docker volumes. Normal restarts retain it. To deliberately remove containers **and all local database and queue data**, run:
+
+```bash
+./scripts/hybrid-setup.sh local --clean
+```
+
+### What the Test Application Demonstrates
+
+- API requests use PostgreSQL as a cache and persistent data store.
+- Cache misses create asynchronous tasks in RabbitMQ.
+- Workers consume those tasks, calculate asteroid/comet positions, and write results to PostgreSQL.
+- Deterministic message IDs and PostgreSQL advisory locks prevent duplicate work.
+- The browser receives cached results while missing data can be calculated in the background.
+
+See [API Request Flow](doc/ARCHITECTURE_FLOW_API.md) for the detailed processing path.
+
+### Verification
+
+```bash
+# Run the RabbitMQ/PostgreSQL integration checks
 ./scripts/hybrid-setup.sh test
 
-# Show implementation summary
-./scripts/hybrid-setup.sh summary
-
-# Test API with deduplication
+# Exercise an API endpoint
 curl -s "http://localhost:8000/api/bright_asteroids?lat=46.7632&lon=14.8417&elevation=405"
 ```
 
-### Production Deployment (Multi-Host)
+### Experimental Multi-Host Deployment
 
-For production deployment across multiple servers:
+The files below document an experimental multi-host topology. They are not required for, and are not the supported default of, the local single-workstation test application.
+
+For deployment across multiple servers:
 
 1. Configure `.env` file (see `.env.example`)
 2. Optional: Create `.env.b` and `.env.c` for worker-specific settings (see `.env.b.example`, `.env.c.example`)
@@ -162,7 +203,7 @@ The application runs multiple services. In local development these are defined i
 - **`unified_worker`** – Unified Worker(s) with hybrid deduplication
   - Handles all task types: precompute, on-demand asteroids, on-demand comets
   - Uses RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
-  - Runs as a single container in local `docker-compose.yml` and as scalable workers in `docker-compose.workers.yml`
+  - Runs as a locally replicated service in `docker-compose.yml` and as scalable workers in `docker-compose.workers.yml`
 - **`worker_monitor`** – Real-time performance dashboard for workers (port configurable via `MONITOR_PORT`)
 
 **Performance Benefits (Unified Worker Architecture):**
@@ -535,5 +576,3 @@ Important: There is no password reset and no support for account recovery. If yo
 ## License
 
 This repository is released under the [MIT License](LICENSE).
-
-
