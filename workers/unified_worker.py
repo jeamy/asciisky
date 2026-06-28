@@ -132,6 +132,9 @@ class UnifiedWorker:
         # Metrics
         self.metrics = WorkerMetrics()
         self.metrics.start_time = time.time()
+        self._task_state_lock = threading.Lock()
+        self._current_task = None
+        self._last_task = None
 
         # Graceful Shutdown
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -229,6 +232,11 @@ class UnifiedWorker:
         """
         start_time = time.time()
         task_type = task.get('type', 'precompute')
+        task_summary = self._describe_task(task)
+        task_summary['started_at'] = datetime.now(timezone.utc).isoformat()
+        task_summary['started_monotonic'] = start_time
+        with self._task_state_lock:
+            self._current_task = task_summary
 
         try:
             if task_type == 'precompute':
@@ -239,11 +247,12 @@ class UnifiedWorker:
                 success = self._process_rpc_task(task)
             else:
                 logger.error(f"Unknown task type: {task_type}")
-                return False
+                success = False
 
             # Update Metrics
             processing_time = time.time() - start_time
             self._update_metrics(success, processing_time)
+            self._finish_task_summary(task_summary, success, processing_time)
 
             return success
 
@@ -251,7 +260,41 @@ class UnifiedWorker:
             logger.error(f"Task processing failed: {e}", exc_info=True)
             processing_time = time.time() - start_time
             self._update_metrics(False, processing_time)
+            task_summary['error'] = str(e)
+            self._finish_task_summary(task_summary, False, processing_time)
             return False
+
+    @staticmethod
+    def _describe_task(task: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract compact, stable fields for logs and health messages."""
+        location = task.get('location') or {}
+        lat = location.get('latitude')
+        lon = location.get('longitude')
+        if lat is not None and lon is not None:
+            try:
+                coordinates = f"{float(lat):.4f},{float(lon):.4f}"
+            except (TypeError, ValueError):
+                coordinates = f"{lat},{lon}"
+        else:
+            coordinates = None
+        return {
+            'type': task.get('type', 'precompute'),
+            'kind': task.get('kind') or task.get('object_type') or 'unknown',
+            'location': location.get('name') or coordinates or 'unknown',
+            'coordinates': coordinates,
+            'time_bucket': task.get('time_bucket') or 'unknown',
+            'task_id': task.get('task_id'),
+            'magnitude': task.get('magnitude'),
+        }
+
+    def _finish_task_summary(self, summary, success, processing_time):
+        summary['status'] = 'success' if success else 'failed'
+        summary['duration_seconds'] = processing_time
+        summary['finished_at'] = datetime.now(timezone.utc).isoformat()
+        summary.pop('started_monotonic', None)
+        with self._task_state_lock:
+            self._last_task = dict(summary)
+            self._current_task = None
 
     def _process_precompute_task(self, task: Dict[str, Any]) -> bool:
         """Verarbeite Precompute Task (optimiert)"""
@@ -358,6 +401,9 @@ class UnifiedWorker:
             logger.error(f"Failed to acquire Advisory Lock for {computation_key}: {e}", exc_info=True)
             return False
 
+        with self._task_state_lock:
+            if self._current_task is not None:
+                self._current_task['objects'] = count
         logger.info(f"✅ Precompute {kind} completed: {count} objects")
         return True
 
@@ -446,6 +492,13 @@ class UnifiedWorker:
         uptime = time.time() - self.metrics.start_time
         success_rate = (self.metrics.tasks_processed - self.metrics.tasks_failed) / max(self.metrics.tasks_processed, 1)
 
+        with self._task_state_lock:
+            current_task = dict(self._current_task) if self._current_task else None
+            last_task = dict(self._last_task) if self._last_task else None
+        if current_task:
+            started = current_task.pop('started_monotonic', None)
+            current_task['running_seconds'] = time.time() - started if started else None
+
         return {
             'worker_id': self.worker_id,
             'status': 'healthy' if self.running else 'stopped',
@@ -456,7 +509,9 @@ class UnifiedWorker:
             'avg_processing_time': self.metrics.total_processing_time / max(self.metrics.tasks_processed, 1),
             'memory_usage_mb': self.metrics.memory_usage_mb,
             'cpu_usage_percent': self.metrics.cpu_usage_percent,
-            'last_task_time': self.metrics.last_task_time
+            'last_task_time': self.metrics.last_task_time,
+            'current_task': current_task,
+            'last_task': last_task,
         }
 
     def callback(self, ch, method, properties, body):
@@ -570,10 +625,16 @@ class UnifiedWorker:
                 time.sleep(30)
                 if self.running:
                     health = self.get_health_status()
+                    task = health['current_task'] or health['last_task']
+                    task_label = self._format_task_for_log(
+                        task,
+                        current=health['current_task'] is not None,
+                    )
                     logger.info(
                         f"Health: {health['tasks_processed']} tasks, "
                         f"{health['success_rate']:.2%} success, "
-                        f"{health['memory_usage_mb']:.1f}MB mem"
+                        f"{health['memory_usage_mb']:.1f}MB mem, "
+                        f"{task_label}"
                     )
                     if not connection or connection.is_closed:
                         params = pika.URLParameters(self.rabbitmq_url)
@@ -598,6 +659,27 @@ class UnifiedWorker:
             pass
         logger.info("Heartbeat thread exiting")
 
+    @staticmethod
+    def _format_task_for_log(task, current=False):
+        if not task:
+            return "task=idle (nothing processed yet)"
+        state = "running" if current else task.get('status', 'unknown')
+        elapsed = task.get('running_seconds') if current else task.get('duration_seconds')
+        elapsed_text = f", elapsed={elapsed:.1f}s" if elapsed is not None else ""
+        objects = task.get('objects')
+        objects_text = f", objects={objects}" if objects is not None else ""
+        magnitude = task.get('magnitude')
+        magnitude_text = f", max_mag={magnitude}" if magnitude is not None else ""
+        location = task.get('location')
+        coordinates = task.get('coordinates')
+        if coordinates and coordinates != location:
+            location = f"{location} ({coordinates})"
+        return (
+            f"task={state} {task.get('type')}/{task.get('kind')}, "
+            f"location={location}, bucket={task.get('time_bucket')}"
+            f"{magnitude_text}{objects_text}{elapsed_text}"
+        )
+
     def _wait_for_shutdown(self, seconds):
         """Interruptible reconnect delay."""
         deadline = time.monotonic() + seconds
@@ -619,7 +701,9 @@ class UnifiedWorker:
                 'success_rate': health['success_rate'],
                 'memory_usage_mb': health['memory_usage_mb'],
                 'cpu_usage_percent': health['cpu_usage_percent'],
-                'uptime_seconds': health['uptime_seconds']
+                'uptime_seconds': health['uptime_seconds'],
+                'current_task': health['current_task'],
+                'last_task': health['last_task'],
             }
 
             props = pika.BasicProperties(
