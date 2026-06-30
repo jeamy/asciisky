@@ -18,11 +18,12 @@ This document explains how ASCII Sky computes positions and brightness for comet
 - Rise/Set/Transit: Computed with Skyfield almanac over a two-day window, selecting the best local-day transit.
   - Functions `risings_and_settings(eph, target, topos)` and `meridian_transits(eph, target, topos)` are used with the `target` defined above.
 - Caching: a filesystem cache is used for the raw DataFrame (elements), and PostgreSQL is used for computed positions. Final lists are filtered at API time per request.
-- API: `GET /api/comets` with optional `max_comets` parameter.
+- API: `GET /api/comets`; the worker's internal `max_comets` limit is configured by the interpolation settings.
 
 Backend entrypoint: `comets.load_comets()`.
 API endpoint: `/api/comets` (see `api/routes/comets.py`).
-Worker: `workers/comet_worker.py` (RabbitMQ-based async computation).
+Worker: `workers/unified_worker.py` for on-demand work;
+`workers/precompute_worker.py` is the dedicated precompute consumer.
 Cache:
 - Filesystem DataFrame cache: `comet_dataframe.pkl` under `DATA_DIR`.
 - PostgreSQL position cache: `cached_positions` table.
@@ -136,10 +137,9 @@ using a magnitude limit up to about 20.0 and store unfiltered results.
 
 ## Endpoint
 
-- `GET /api/comets?lat=<deg>&lon=<deg>&elevation=<m>&max_comets=<N>&time=<ISO8601>` (optional `time`)
+- `GET /api/comets?lat=<deg>&lon=<deg>&elevation=<m>&time=<ISO8601>` (optional `time`)
   - Returns a JSON object with `time`, `location`, and `bodies`.
   - The API applies the current user magnitude filter from `user_settings.json` (defaults can be set via environment variables; see README).
-  - `max_comets` limits how many candidates are processed/returned (default 1000 at the API layer).
   - `time` is an optional ISO 8601 UTC timestamp (e.g., `2025-01-15T21:30:00Z` or `2025-01-15T21:30:00+00:00`). When provided, all calculations and event windows use the simulated timestamp and day.
 
 Example:
@@ -161,3 +161,5 @@ GET /api/comets?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:00Z
 - [API Request Flow](ARCHITECTURE_FLOW_API.md)
 - [Cache Strategy](ARCHITECTURE_CACHE.md)
 - [Database Schema](ARCHITECTURE_DATABASE.md)
+
+Last reviewed against the code: 2026-06-30.

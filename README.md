@@ -47,16 +47,14 @@ The supported default setup is a **local, single-workstation system**: the web a
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - PostgreSQL database backend for efficient data storage and retrieval
 - RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
-- **Hybrid Deduplication (Phase 3)**: Deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
-  - Prevents duplicate computations across all workers
-  - Scales horizontally across unlimited worker hosts
-  - Automatic cleanup and monitoring
-  - Performance: -80% memory usage, +35% throughput
-- **Vectorized Performance Optimization**: NumPy-based magnitude calculations
-  - 100-200x faster magnitude computations for asteroids and comets
-  - NumPy pre-filtering reduces expensive Skyfield observe() calls by 40-60%
-  - 3-stage pipeline: H-filter → NumPy pre-filter → precise calculation
-  - Overall performance: 2-4x faster (7-8x with many objects)
+- **Distributed duplicate-work protection**: deterministic RabbitMQ message IDs + PostgreSQL advisory locks
+  - Message IDs make equivalent tasks identifiable in logs and tooling; standard RabbitMQ queues do not deduplicate on this property
+  - Advisory locks serialize equivalent computations across workers that use the same PostgreSQL instance
+  - Locks are released explicitly after processing and automatically when their database connection closes
+- **Vectorized computation path**: NumPy-based orbit propagation, geometry, and magnitude calculations
+  - Asteroids use an H filter, a rough apparent-magnitude filter, then batched propagation and H–G magnitude evaluation
+  - Comets use an M1 filter followed by vectorized geometry and M1/k1 magnitude evaluation
+  - Rise/set/transit calculations remain limited to the brightest result subset because they are comparatively expensive
 - Automatic nightly updates of asteroid and comet orbital data (configurable; default 4:00 AM)
 - DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
 
@@ -159,18 +157,17 @@ For deployment across multiple servers:
    ./scripts/setup-production.sh
    ```
 
-This deploys with **PostgreSQL Advisory Locks** (Phase 3):
+This deploys with **PostgreSQL advisory locks**:
 - **Main Server** ($RABBITMQ_MAIN): Web UI, PostgreSQL, RabbitMQ, Data Updater
 - **Worker Server B** ($RABBITMQ_B): Unified Workers with PostgreSQL Advisory Locks
 - **Worker Server C** ($RABBITMQ_C): Unified Workers with PostgreSQL Advisory Locks
 
 **PostgreSQL Deduplication Features:**
-- PostgreSQL Advisory Locks prevent duplicate tasks (100% protection)
+- PostgreSQL advisory locks prevent workers from computing the same cache key concurrently
 - Standard RabbitMQ queues for task distribution
-- Automatic scaling across unlimited worker hosts
-- Performance: -80% memory, +35% throughput
+- Horizontal worker scaling against the shared RabbitMQ/PostgreSQL services
 
-See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions and `docs/hybrid-deduplication.md` for deduplication details.
+See `doc/PRODUCTION_DEPLOYMENT.md` for detailed deployment instructions and `doc/hybrid-deduplication.md` for duplicate-work protection details.
 
 Compose files for production:
 - `docker-compose.production.yml` — main server with PostgreSQL Advisory Locks
@@ -196,21 +193,21 @@ The application runs multiple services. In local development these are defined i
 - **`rabbitmq`** – RabbitMQ 4.1 message broker for task distribution (ports 5672, 15672)
 - **`data_updater`** – Nightly data update service (runs via `nightly_data_updater.py`)
 - **`precompute_coordinator`** – Coordinates creation of precompute tasks and publishes them to RabbitMQ
-- **`precompute_worker`** – Dedicated precompute workers that consume `precompute.tasks` and write asteroid/comet positions to PostgreSQL (production main server)
+- **`precompute_worker`** – Dedicated precompute workers that consume `precompute.tasks` and write asteroid/comet positions to PostgreSQL (production main server only)
 
 **Unified Workers and monitoring (local + worker hosts):**
 
 - **`unified_worker`** – Unified Worker(s) with hybrid deduplication
   - Handles all task types: precompute, on-demand asteroids, on-demand comets
-  - Uses RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+  - Publishes deterministic RabbitMQ message IDs and uses PostgreSQL advisory locks while computing
   - Runs as a locally replicated service in `docker-compose.yml` and as scalable workers in `docker-compose.workers.yml`
 - **`worker_monitor`** – Real-time performance dashboard for workers (port configurable via `MONITOR_PORT`)
 
-**Performance Benefits (Unified Worker Architecture):**
-- **-80% Memory Usage** – Unified Workers share Skyfield resources
-- **+35% Throughput** – Hybrid deduplication eliminates duplicate work
-- **Unlimited Scaling** – Horizontal scaling across multiple worker hosts
-- **Hybrid Deduplication** – RabbitMQ + PostgreSQL Advisory Locks for duplicate protection
+**Unified Worker Architecture:**
+- Loads shared Skyfield resources once per worker process and handles precompute, on-demand, and RPC tasks
+- Supports horizontal scaling across worker hosts connected to the same broker and database
+- Uses PostgreSQL advisory locks to avoid concurrent work for the same computation key
+- Adds deterministic message IDs for traceability; this is not broker-side deduplication
 - **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
 
  All services restart automatically unless stopped.
@@ -228,18 +225,18 @@ WORKER_MONITOR=1      # Worker monitoring dashboard
 On worker hosts, `UNIFIED_WORKERS` controls `unified_worker` scaling. If it is not set,
 the deployment scripts fall back to `PRECOMPUTE_WORKERS`.
 
-**Hybrid Deduplication Configuration:**
+**Duplicate-work protection configuration:**
 ```bash
-ENABLE_HYBRID_DEDUPLICATION=true     # Enable Hybrid Deduplication
-ASCII_SKY_DEDUPLICATION_TTL=300       # RabbitMQ message TTL (5 minutes)
-ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
+ENABLE_HYBRID_DEDUPLICATION=true     # Legacy compatibility value; currently not read by Python
+ASCII_SKY_DEDUPLICATION_TTL=300       # Legacy/configuration value; publishing code currently uses a fixed 5-minute message expiration
+ASCII_SKY_ADVISORY_LOCK_TTL=300       # Passed to lock instrumentation; it does not expire a PostgreSQL advisory lock
 ```
 
 ### First Run and Data Management
 
 - **First Startup**: The app automatically downloads and stores MPC orbital data in PostgreSQL database
 - **Daily Updates**: The `data_updater` service automatically downloads fresh data at the configured hour (default 4:00 AM local time)
-- **Performance**: After initial setup, all data loads from database (10x faster than file parsing)
+- **Loading**: Parsed MPC data is cached as pickled DataFrames on the filesystem; PostgreSQL stores orbital records and computed positions
 
 ### Cache Architecture
 
@@ -287,20 +284,20 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 - `bright_asteroids.py` - Bright asteroid pipeline (IAU H–G), Sun+orbit observation, event times
 - `comets.py` - Comet pipeline using MPC data with M1/k1 magnitude model
 - `db_utils.py` - PostgreSQL database utilities for efficient data storage and retrieval
-- `nightly_data_updater.py` - Automatic daily updates of asteroid and comet data (2:00 AM)
+- `nightly_data_updater.py` - Automatic daily updates of asteroid and comet data (default: 4:00 AM)
 - `settings.py` - User/location settings; persists to `user_settings.json`
 - `de421.bsp` - JPL ephemeris used by Skyfield
 
 ### RabbitMQ Workers (Unified Architecture)
-- `workers/unified_worker.py` - **Unified Worker** with Hybrid Deduplication (replaces separate asteroid/comet workers)
+- `workers/unified_worker.py` - **Unified Worker** (replaces separate asteroid/comet workers)
   - Handles all task types: precompute, asteroids, comets
   - Uses deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
   - Vectorized magnitude calculations for performance
 - `workers/precompute_worker.py` - Dedicated precompute worker consuming `precompute.tasks` and writing positions to PostgreSQL
-- `workers/precompute_coordinator.py` - Coordinates precomputation across workers (schedules tasks to RabbitMQ)
+- `precompute_coordinator.py` - Coordinates precomputation across workers (schedules tasks to RabbitMQ)
 
 ### Deployment Scripts
-- `scripts/hybrid-setup.sh` - **All-in-One Hybrid Deduplication Setup** (local, production, tests, monitoring)
+- `scripts/hybrid-setup.sh` - All-in-one local/production setup and diagnostics
 - `scripts/setup-production.sh` - Multi-host production deployment
 - `scripts/setup-firewall.sh` - Firewall configuration for production
 
@@ -322,11 +319,10 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 - `doc/comets.md` - Comet position and magnitude pipeline (M1/k1 model)
 - `doc/planets.md` - Planet/Sun/Moon positions, magnitudes, and event times
 - `doc/ARCHITECTURE_INDEX.md` - Architecture entry point
-- `doc/ARCHITECTURE_FLOW.md` - System & precompute flow
 - `doc/ARCHITECTURE_FLOW_API.md` - API request flow
 - `doc/ARCHITECTURE_CACHE.md` - Cache strategy
 - `doc/ARCHITECTURE_DATABASE.md` - Database schema and data flow
-- `docs/hybrid-deduplication.md` - **Hybrid Deduplication Implementation (Phase 3)**
+- `doc/hybrid-deduplication.md` - Distributed duplicate-work protection
 
 ### Configuration
 - `Dockerfile` - Docker configuration
@@ -341,14 +337,14 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # PostgreSQL lock TTL (5 minutes)
 ### Scripts
 
 #### Setup and Deployment
-- `scripts/hybrid-setup.sh` - **All-in-one Hybrid Deduplication setup** (local, production, tests, monitoring)
-- `scripts/setup-production.sh` - Production deployment with Hybrid Deduplication
-- `scripts/update-production.sh` - Production updates with Hybrid verification
+- `scripts/hybrid-setup.sh` - All-in-one local/production setup and diagnostics
+- `scripts/setup-production.sh` - Experimental multi-host deployment
+- `scripts/update-production.sh` - Experimental multi-host updates
 
 #### Utility Scripts
 - `scripts/setup-firewall.sh` - Production firewall configuration
 - `scripts/init-postgres.sql` - PostgreSQL schema initialization
-- `test_hybrid_deduplication.py` - **Comprehensive Hybrid Deduplication tests**
+- `test_hybrid_deduplication.py` - Message-ID and advisory-lock smoke tests
 
 ## API Endpoints
 
@@ -359,7 +355,7 @@ All frontend calls use centralized API endpoint constants in `static/js/constant
 - `GET /api/celestial/sunpath` — yearly sunrise/sunset curve for the current or given location
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes, distances and rise/set/transit times
 - `GET /api/asteroids` — backward-compatible alias for `/api/bright_asteroids`
-- `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; optional `max_comets` query parameter; see `doc/comets.md`
+- `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; see `doc/comets.md`
 - `GET /api/zodiac` — zodiac and selected constellations for a location and time
 - `GET /api/session/location` — get current session location (if set)
 - `POST /api/session/location` — set session location; triggers background sunpath precompute
@@ -435,10 +431,11 @@ Notes:
 - `ASCII_SKY_PRECOMPUTE_HOURS` – Number of hours into the future that the precompute coordinator generates tasks for (default: 720 = 30 days)
 - `ASCII_SKY_PRECOMPUTE_LOCATIONS` – Optional JSON array of locations (`latitude`, `longitude`, `elevation`, `name`) used by the precompute coordinator in addition to the last global location, static `precompute_locations.json`, and all user locations from the database.
 
-### Hybrid Deduplication Configuration
-- `ENABLE_HYBRID_DEDUPLICATION` - Enable Hybrid Deduplication (default: true)
-- `ASCII_SKY_DEDUPLICATION_TTL` - RabbitMQ message TTL in seconds (default: 300)
-- `ASCII_SKY_ADVISORY_LOCK_TTL` - PostgreSQL advisory lock TTL in seconds (default: 300)
+### Legacy Duplicate-Work Settings
+- `ENABLE_HYBRID_DEDUPLICATION`, `ASCII_SKY_DEDUPLICATION_TTL`, and
+  `ASCII_SKY_ADVISORY_LOCK_TTL` remain in Compose and environment examples but are
+  currently not read by Python. PostgreSQL advisory locks have no TTL; see
+  [`doc/hybrid-deduplication.md`](doc/hybrid-deduplication.md).
 
 **Note:** The old separate worker variables (`ASTEROID_WORKERS`, `COMET_WORKERS`) have been replaced by `UNIFIED_WORKERS` for better resource efficiency.
 
@@ -467,7 +464,6 @@ Notes:
 
 ### Architecture
 - [Architecture Index](doc/ARCHITECTURE_INDEX.md) - Entry point for architecture docs
-- [System & Precompute Flow](doc/ARCHITECTURE_FLOW.md)
 - [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
 - [Cache Strategy](doc/ARCHITECTURE_CACHE.md)
 - [Database Schema](doc/ARCHITECTURE_DATABASE.md)
@@ -482,7 +478,7 @@ Notes:
 - **Frontend**: HTML, CSS, JavaScript
 - **Containerization**: Docker, Docker Compose
 
-## 🚀 Hybrid Deduplication Quick Reference (Phase 3)
+## Duplicate-Work Protection Quick Reference
 
 **All-in-One Setup:**
 ```bash
@@ -494,42 +490,73 @@ Notes:
 ./scripts/hybrid-setup.sh summary         # Show overview
 ```
 
-**Key Benefits:**
-- **100% Deduplication** - No duplicate computations
-- **Unlimited Scaling** - Horizontal across multiple hosts  
-- **-80% Memory** - Unified Workers share resources
-- **+35% Throughput** - Hybrid eliminates duplicate work
+**How it works:**
+- Publishers attach a deterministic `message_id` and a message expiration; the standard queues still accept duplicate messages.
+- Before computing, workers acquire a PostgreSQL advisory lock derived from the normalized location, time bucket, and object type.
+- A second equivalent task waits for the lock and then rechecks the cache, so it normally skips work completed by the first worker.
+- The lock is connection-scoped, has no time-based expiry, and is released in `finally` or when the database connection closes.
 
 **Monitoring:**
 - RabbitMQ UI: http://localhost:15672
 - Quick status: `./scripts/hybrid-setup.sh test`
 - Complete overview: `./scripts/hybrid-setup.sh summary`
 
-**Documentation:** See `docs/hybrid-deduplication.md` for complete implementation details.
+**Documentation:** See [`doc/hybrid-deduplication.md`](doc/hybrid-deduplication.md) for implementation details and limitations.
 
 ## Performance Optimizations
 
-### Vectorized Computations
-ASCII Sky uses NumPy vectorization for maximum performance:
+### Benchmark Results (2026-06-30)
 
-**Magnitude Calculations:**
-- 100-200x faster than traditional loops
-- Vectorized asteroid apparent magnitude (H-G model)
-- Vectorized comet apparent magnitude (M1/k1 model)
-- Batch processing of multiple objects
+Measured on the full MPCORB dataset (1 479 868 asteroids, 1 220 comets) using `test_positions_local.py`
+on Python 3.14.6 / NumPy 2.5.0 / Skyfield 1.54, observer Vienna (48.2°N 16.4°E):
+
+| Step | Before | After | Speedup |
+|------|--------|-------|---------|
+| Asteroid total (H ≤ 12, 4 550 candidates) | 259 s | **29 s** | **8.9×** |
+| — Orbit building (4 550 orbits) | 131 s | 0.44 s | 297× |
+| — Distance / phase-angle pass | 125 s | 28 s | 4.5× |
+| — Rise / set / transit (7 results) | 0.42 s | 0.43 s | — |
+| Comet total (1 167 candidates, 20 results) | crashed | **33 s** | fixed |
+
+*Hardware: single-core equivalent, no GPU. Results are representative; exact times vary with hardware.*
+
+### What Changed
+
+**Asteroid pipeline (`bright_asteroids.py`):**
+- Replaced two `observer.at(t).observe(target)` loops (22 ms/object × 6 000+ objects = ~250 s)
+  with a single `target.at(t)` loop (6 ms/object) plus vectorised NumPy position arithmetic
+  for heliocentric distance `r`, geocentric distance `δ`, and phase angle `α`.
+- `observer.at(t)` is now called only for the small final output set (≤ 50 objects) to produce
+  RA / Dec / Alt / Az — not for every candidate.
+- Tightened the rough-magnitude pre-filter margin from **+3.0 → +1.5 mag** (26 % fewer candidates;
+  profiling confirmed 0 bright objects missed at margin 1.0).
+- Accuracy impact: < 0.001 AU in distance, < 0.001° in phase angle vs. the full light-time-corrected
+  `observe()` path — negligible for H–G magnitude computation.
+
+**Comet pipeline (`comets.py`):**
+- Fixed `AttributeError: eccentricity` crash: `mpc.comet_orbit()` requires `eccentricity`,
+  `perihelion_distance_au`, `inclination_degrees`, etc. as row attributes; the `_RowProxy` data
+  dictionary was missing these MPC field aliases → all aliases now generated consistently.
+- Fixed fractional perihelion-day handling (`perihelion_day = 20.3223` → float preserved in
+  `ts.tt(y, m, d)`; previously truncated to integer).
+- Same `target.at(t)` vectorisation as asteroids: `observe()` eliminated from the first pass,
+  deferred to the final output loop only.
+- First-pass orbit building runs via `ThreadPoolExecutor` (orbit normalisation + `_make_comet_orbit_cached`).
+
+### Vectorized Computations
+ASCII Sky uses NumPy vectorization to reduce Python-loop and per-object astronomy overhead:
+
+**Batched calculations:**
+- Asteroid orbit propagation, geometry, phase angle, and H–G apparent magnitude
+- Comet distance geometry and M1/k1 apparent magnitude
+- Batch processing of candidate arrays
 
 **Smart Pre-Filtering:**
 - NumPy rough magnitude estimation
 - Filters impossible objects before expensive Skyfield calls
-- Reduces observe() calls by 40-60%
-- 3-stage pipeline for optimal efficiency
-
-**Performance Results:**
-- Overall: 2-4x faster (realistic)
-- Many objects: 7-8x faster
-- Magnitude: 100-200x faster
-- Phase angle: 50-100x faster
-- Rise/set: 10-50x faster (top 30-50 objects)
+- Asteroid pipeline: absolute-magnitude filter → rough apparent-magnitude filter (+1.5 mag margin) → vectorized precise calculation
+- Comet pipeline: absolute-magnitude filter → vectorized calculation → apparent-magnitude selection
+- Event-time calculations are capped via `ASCII_SKY_ASTEROIDS_EVENTS_MAX` and `ASCII_SKY_COMET_EVENTS_MAX`
 
 ### Database Optimization
 - DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
@@ -556,7 +583,7 @@ https://ui.adsabs.harvard.edu/abs/2019ascl.soft07024R
 
 ## Attribution
 
-This project was built with assistance from Windsurf (agentic AI coding assistant), GPT 5, 5.1, Claude 3.7, 4.5 Sonnet, SWE-1 and google-labs-jules[bot]. Babysitting by a human in a virtual environment.
+This project was built with assistance from Windsurf (agentic AI coding assistant), GPT, Claude, Kimi, GLM, SWE and google-labs-jules[bot]. Babysitting by a human in a virtual environment.
 
 This research has made use of data and/or services provided by the International Astronomical Union's Minor Planet Center. 
 

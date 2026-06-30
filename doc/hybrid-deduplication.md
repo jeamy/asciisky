@@ -1,258 +1,110 @@
-# PostgreSQL Advisory Locks Deduplication Implementation (Phase 3)
-==============================================================
+# Distributed Duplicate-Work Protection
 
-## Overview
+## Scope
 
-ASCII Sky uses **deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks** for task deduplication:
-- **Deterministic task IDs** are sent via RabbitMQ to avoid duplicate messages
-- **PostgreSQL Advisory Locks** guard database operations
-- **ACID-safe deduplication** across all workers/hosts
+ASCII Sky combines deterministic RabbitMQ message IDs with PostgreSQL advisory locks. The two mechanisms have different roles:
 
-This provides 100% protection against duplicate tasks with minimal complexity.
+- `message_id` identifies equivalent tasks for logging and diagnostics. RabbitMQ classic queues do **not** reject a second message merely because the ID is equal.
+- PostgreSQL advisory locks serialize computations with the same computation key across processes and hosts connected to the same database.
+- RabbitMQ acknowledgements and persistent messages provide at-least-once delivery semantics. This is not exactly-once processing.
 
-## Architecture
+The protection therefore targets concurrent duplicate computation, not duplicate queue entries.
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Task Sender   │───▶│   RabbitMQ       │───▶│  Worker Pool    │
-│                 │    │  Task Queue      │    │                 │
-│ - Deterministic │    │ - Standard Queue │    │ - Advisory Locks│
-│   Task IDs      │    │ - High Throughput│    │ - DB Protection │
-│ - Hash-based    │    │ - Reliable       │    │ - ACID Safe     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │   PostgreSQL    │
-                                               │                 │
-                                               │ - Advisory Locks│
-                                               │ - ACID Safe     │
-                                               │ - Auto Cleanup  │
-                                               │ - 100% Protection│
-                                               └─────────────────┘
+## Processing Flow
+
+```text
+publisher
+  -> deterministic message_id + persistent RabbitMQ message
+  -> classic queue
+  -> worker derives computation key
+  -> pg_advisory_lock(hash(computation key))
+  -> compute and upsert cached result
+  -> pg_advisory_unlock(...)
+  -> acknowledge RabbitMQ message
 ```
 
-## Components
+Precompute keys contain the object kind, normalized location key, and UTC time bucket. The implementation is in:
 
-### 1. PostgreSQL Advisory Locks
+- `precompute_coordinator.py`: publishes precompute tasks with deterministic IDs.
+- `workers/unified_worker.py`: generates IDs and processes precompute, on-demand, and RPC tasks.
+- `workers/precompute_worker.py`: dedicated precompute consumer used by the production main-server stack.
+- `db_utils.py`: `_advisory_lock_id()` and `computation_lock()`.
+- `workers/worker_utils.py`: declares the standard exchanges and queues.
 
-**Location:** `workers/unified_worker.py`
+## Lock Semantics and Limitations
 
-```python
-# Generate deterministic task ID for lock
-task_id = generate_precompute_task_id(lat, lon, elevation, time_bucket, object_type)
+`computation_lock()` uses a blocking, session-level `pg_advisory_lock()`. A competing worker waits until the holder releases the lock. Locks are explicitly released in `finally` and PostgreSQL also releases them when the database connection closes.
 
-# Acquire advisory lock before processing
-with postgres_advisory_lock(task_id, timeout=300):
-    # Process task - guaranteed unique execution
-    process_precompute_task(task_data)
-```
+Important constraints:
 
-**Configuration:**
-```python
-# Advisory lock configuration
-ADVISORY_LOCK_TIMEOUT = 300  # 5 minutes
-ADVISORY_LOCK_TTL = 300      # Auto-cleanup
-```
+- PostgreSQL advisory locks do not have a TTL. The current `ttl_seconds` argument is included in a `pg_notify()` payload, but no listener in this repository expires the lock.
+- The 32-bit integer lock ID is derived from the first four bytes of an MD5 digest. Hash collisions are unlikely but possible and would cause unrelated work to serialize.
+- All participating workers must use the same PostgreSQL database and the same key construction.
+- The lock covers the computation and database write. It does not prevent duplicate messages from occupying queue capacity.
+- A waiting task currently computes after obtaining the lock; the worker does not recheck the position cache inside the lock. Duplicate messages can therefore still cause sequential duplicate computation.
 
-**Benefits:**
-- ✅ Prevents duplicate tasks across all workers
-- ✅ Automatic TTL and cleanup
-- ✅ Works across multiple hosts
-- ✅ Built-in to PostgreSQL (no plugins needed)
-- ✅ ACID-safe database operations
-- ✅ Automatic cleanup on disconnect
-- ✅ No extra tables needed
-- ✅ Distributed across connections
+These properties mean that descriptions such as “100% deduplication” or “exactly once” are not accurate for the current implementation.
 
-### 2. Task Processing Flow
+## RabbitMQ Queues and Expiration
 
-1. **Task Creation:** Generate deterministic task ID from computation parameters
-2. **RabbitMQ:** Queue task to workers
-3. **Worker:** Receive task and acquire advisory lock
-4. **Advisory Lock:** Protect against duplicate processing
-5. **Processing:** Safe computation with database protection
-6. **Cleanup:** Automatic lock release
+The application uses standard RabbitMQ 4.1 classic queues; no broker-side deduplication plugin is configured.
 
-## Configuration Files
+| Queue | Purpose | Queue-level TTL |
+|---|---|---:|
+| `precompute.tasks` | Scheduled asteroid/comet/sunpath work | none |
+| `asteroid.compute` | On-demand asteroid work | 1 hour |
+| `comet.compute` | On-demand comet work | 1 hour |
+| `computation.status` | Worker status | none |
 
-### Docker Compose Files
+`UnifiedWorker.send_task_with_deduplication()` additionally publishes with a fixed five-minute per-message expiration. Despite their names, `ASCII_SKY_DEDUPLICATION_TTL`, `ASCII_SKY_ADVISORY_LOCK_TTL`, and `ENABLE_HYBRID_DEDUPLICATION` are not currently read by the Python implementation. They remain in Compose/examples for compatibility and should not be treated as effective runtime controls.
 
-**Local Development:** `docker-compose.yml`
-- Unified Worker service
-- RabbitMQ standard queues
-- PostgreSQL with Advisory Locks
+## Configuration
 
-**Production:** `docker-compose.production.yml`
-- Multiple unified workers
-- Optimized resource limits
-- High availability configuration
-
-**Worker Hosts:** `docker-compose.workers.yml`
-- Remote worker configuration
-- Connection to central RabbitMQ
-- Hybrid deduplication enabled
-
-### RabbitMQ Configuration
-
-RabbitMQ 4.1 is used with classic queues. Deduplication relies on deterministic `message_id` plus per-message TTL (300 s) handled by the workers; no additional plugins are required.
-
-## Usage Examples
-
-### Sending Tasks with Deduplication
-
-```python
-from workers.unified_worker import UnifiedWorker
-
-worker = UnifiedWorker()
-worker.connect()
-
-# Send precompute task
-location = {
-    'latitude': 46.7632,
-    'longitude': 14.8417,
-    'elevation': 405
-}
-
-success = worker.send_precompute_task_with_deduplication(
-    kind='asteroids',
-    location=location,
-    time_bucket='20251114T18',
-    magnitude=20.0
-)
-```
-
-### Processing Tasks Safely
-
-```python
-def _process_precompute_task(self, task):
-    # Create computation key for Advisory Locks
-    computation_key = f"precompute_{kind}:{loc_key}:{time_bucket}"
-    
-    try:
-        with computation_lock(computation_key, ttl_seconds=300):
-            # RabbitMQ already filtered duplicates
-            # Advisory Locks protect database operations
-            result = bright_asteroids.load_bright_asteroids(...)
-            
-    except Exception as e:
-        logger.error(f"Failed to acquire lock: {e}")
-        return False
-```
-
-## Testing
-
-**Test Script:** `test_hybrid_deduplication.py`
+The settings that currently affect worker delivery are:
 
 ```bash
-# Run all tests
-python test_hybrid_deduplication.py
-
-# Test individual components
-python -c "from workers.unified_worker import generate_precompute_message_id; print(generate_precompute_message_id(46.7632, 14.8417, 405, '20251114T18', 'asteroids'))"
+RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
+RABBITMQ_PREFETCH_COUNT=1
+RABBITMQ_HEARTBEAT=60
 ```
 
-## Performance Benefits
+Worker counts are selected by Compose scaling:
 
-| Metric | Before | After Hybrid | Improvement |
-|--------|--------|--------------|-------------|
-| Duplicate Tasks | Possible | Eliminated | 100% |
-| DB Conflicts | Possible | Eliminated | 100% |
-| Horizontal Scaling | Limited | Full | ∞ |
-| Memory Usage | High | Optimized | -80% |
-| Throughput | Baseline | +35% | +35% |
+```bash
+PRECOMPUTE_WORKERS=4  # production main-server precompute workers
+UNIFIED_WORKERS=8     # unified workers on worker hosts
+```
 
-## Monitoring
+## Verification and Monitoring
 
-### RabbitMQ Management UI
+The lightweight test verifies stable message-ID generation and basic lock behavior:
 
-**URL:** http://localhost:15672
-- Queue depth and message rates
-- Consumer monitoring (number of unified workers, precompute/on-demand load)
-- Inspect queues used for deduplicated tasks (`precompute.tasks`, `asteroid.compute`, `comet.compute`)
+```bash
+python test_hybrid_deduplication.py
+```
 
-### PostgreSQL Advisory Locks
+It is not a proof of exactly-once behavior or a multi-host load benchmark.
+
+RabbitMQ queue depth and consumers are visible at `http://localhost:15672`. Active and waiting PostgreSQL advisory locks can be inspected with:
 
 ```sql
--- Monitor active advisory locks
-SELECT * FROM pg_locks WHERE locktype = 'advisory';
-
--- Check lock contention
-SELECT pid, mode, granted 
-FROM pg_locks 
-WHERE locktype = 'advisory' 
-AND NOT granted;
+SELECT pid, mode, granted
+FROM pg_locks
+WHERE locktype = 'advisory'
+ORDER BY granted, pid;
 ```
 
-## Migration Guide
+No fixed memory or throughput improvement is claimed: the repository contains no reproducible before/after benchmark for the previously documented `-80%` memory or `+35%` throughput figures.
 
-### From Custom Locks to Hybrid
-
-1. **Update Docker Compose:**
-   - Ensure RabbitMQ 4.x (or newer) is used.
-   - Make sure queues `precompute.tasks`, `asteroid.compute`, and `comet.compute`
-     are declared consistently (see `worker_utils.declare_computation_queues`).
-
-2. **Update Worker Code:**
-   - Replace custom lock checks with message ID generation
-   - Add Advisory Locks for database operations
-
-3. **Update Database:**
-   - Remove `computation_locks` table (optional)
-   - Advisory Locks don't need tables
-
-4. **Testing:**
-   - Run `test_hybrid_deduplication.py`
-   - Verify no duplicate tasks
-   - Monitor performance improvements
-
-## Future Enhancements
-
-### Phase 4: Full RabbitMQ Native
-- Remove Advisory Locks completely
-- Use RabbitMQ for all coordination
-- Implement exactly-once processing
-
-### Advanced Features
-- Dynamic TTL based on computation complexity
-- Priority-based task routing
-- Automatic worker scaling based on queue depth
-
-## Production Deployment
-
-### Environment Variables
+## Operational Commands
 
 ```bash
-# RabbitMQ Configuration
-RABBITMQ_URL=amqp://admin:changeme@rabbitmq:5672/
-RABBITMQ_PREFETCH_COUNT=2
-RABBITMQ_HEARTBEAT=600
-
-# Deduplication Settings
-ASCII_SKY_DEDUPLICATION_TTL=300
-ASCII_SKY_ADVISORY_LOCK_TTL=300
+./scripts/hybrid-setup.sh local
+./scripts/hybrid-setup.sh local --clean  # destructive: removes local volumes
+./scripts/hybrid-setup.sh test           # expects an existing production-style environment
+./scripts/hybrid-setup.sh summary
 ```
 
-### Health Checks
+For multi-host deployment, see [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md). The supported introductory path remains the local stack documented in the repository [README](../README.md).
 
-```yaml
-# RabbitMQ Health Check
-healthcheck:
-  test: ["CMD", "rabbitmq-diagnostics", "ping"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-
-# PostgreSQL Health Check  
-healthcheck:
-  test: ["CMD-SHELL", "pg_isready -U asciisky -d asciisky"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-```
-
----
-
-**Status:** ✅ Production Ready
-**Version:** Phase 3 Hybrid Implementation
-**Last Updated:** 2025-11-14
+Last reviewed against the code: 2026-06-30.

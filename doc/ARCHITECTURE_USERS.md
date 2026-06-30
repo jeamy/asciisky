@@ -1,5 +1,10 @@
 # Benutzer-Integration – Roadmap
 
+> Status 2026-06-30: Historisches Planungsdokument. Registrierung, Login/Logout,
+> serverseitige User-Settings und Admin-Endpunkte sind implementiert. Maßgeblich
+> sind `scripts/init-postgres.sql`, `api/routes/auth.py`,
+> `api/routes/user_settings.py` und `api/routes/admin_users.py`.
+
 ## 1. Zielbild
 
 - **Ohne Login:**

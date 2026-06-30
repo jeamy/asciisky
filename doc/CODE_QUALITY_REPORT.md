@@ -1,5 +1,9 @@
 # Code Quality Report – AsciiSky
 
+> Datiertes Audit-Artefakt (Änderungsprotokoll: 2026-04-15), kein aktueller
+> Fehlerkatalog. Zeilennummern und Befunde vor einer Umsetzung am aktuellen Code
+> verifizieren.
+
 Erstellt: 2026-04-15  
 Scope: Backend (`api/`, `*.py` im Root) + Frontend (`static/js/`, `templates/`)
 

@@ -1,5 +1,10 @@
 # ASCII Sky - Production Deployment Guide
 
+> Experimental multi-host guide, reviewed 2026-06-30. The supported introductory
+> setup is the local single-workstation stack in the repository README. Validate
+> hostnames, firewall rules, credentials, and capacity figures for the target
+> environment before using this guide.
+
 ## 🏗️ Multi-Host Architecture
 
 ### Server Overview

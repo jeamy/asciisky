@@ -1,5 +1,9 @@
 # UFW Firewall Setup for ASCII Sky
 
+> Experimental multi-host guidance, reviewed 2026-06-30. Docker networking and
+> firewall behavior vary by host distribution and Docker version. Test the final
+> `DOCKER-USER`/UFW rules from both permitted and untrusted hosts before deployment.
+
 ## 🔥 Overview
 
 Firewall configuration for the multi-host production deployment.

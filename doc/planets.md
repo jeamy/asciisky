@@ -96,3 +96,5 @@ GET /api/celestial?lat=48.2082&lon=16.3738&elevation=171&time=2025-01-15T21:30:0
 - [API Request Flow](ARCHITECTURE_FLOW_API.md)
 - [Cache Strategy](ARCHITECTURE_CACHE.md)
 - [Database Schema](ARCHITECTURE_DATABASE.md)
+
+Last reviewed against the code: 2026-06-30.

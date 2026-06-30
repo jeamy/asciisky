@@ -50,7 +50,7 @@ Step 3: Cache lookup (PostgreSQL)
 
     else (Cache MISS):
 
-Step 4: Computation lock
+Step 4: Best-effort in-progress check
 
     computation_key = "computing:{object_type}:{location_key}:{bucket_key}"
 
@@ -58,7 +58,6 @@ Step 4: Computation lock
         -> another worker is already computing this bucket
         -> return (empty bodies or nearest bucket)
     else:
-        -> acquire computation_lock(computation_key)
         -> schedule background worker task
 
 Step 5: Background worker scheduling (RabbitMQ)
@@ -66,11 +65,11 @@ Step 5: Background worker scheduling (RabbitMQ)
     FastAPI BackgroundTask:
         - publishes task to exchange "computation.direct"
         - routing_key = "compute.asteroid" or "compute.comet"
-        - queues: "asteroid.compute", "comet.compute" (quorum, TTL ≈ 1h)
+        - queues: "asteroid.compute", "comet.compute" (classic, TTL ≈ 1h)
 
 Step 6: Worker computation
 
-    Worker (asteroid_worker/comet_worker):
+    Unified worker:
         - loads asteroid/comet DataFrame from filesystem cache (or MPC)
         - computes positions with Skyfield (up to mag ≈ 20.0)
         - stores result list into PostgreSQL `cached_positions`
@@ -108,8 +107,9 @@ In addition to on-demand workers there is a precompute pipeline:
 
 ### Magnitude Filtering
 
-- Workers and precompute compute and cache objects up to about **mag 20.0**
-  (or `min(user_max, 20.0)` on the worker side).
+- Workers compute a broad cache result using their active environment limits.
+  Local Compose defaults the unified worker's apparent-magnitude limits to 20.0;
+  other Compose stacks and Python fallbacks differ.
 - The **user-specific magnitude filter** is only applied in the FastAPI routes:
   - Asteroids: `get_bright_asteroids` filters by `asteroid["magnitude"] <= max_magnitude`.
   - Comets: `get_comets` filters by `comet["magnitude"] <= max_magnitude`.
@@ -144,9 +144,9 @@ RabbitMQ is used both for precompute and on-demand computation:
 - **Queues**
   - `precompute.tasks` (classic, durable, `x-max-priority = 10`)
     - Used by `precompute_worker` for scheduled bucket computations.
-  - `asteroid.compute` (quorum, durable, `x-message-ttl = 3600000` ms ≈ 1h)
+  - `asteroid.compute` (classic, durable, `x-message-ttl = 3600000` ms ≈ 1h)
     - On-demand asteroid bucket computations.
-  - `comet.compute` (quorum, durable, `x-message-ttl = 3600000` ms ≈ 1h)
+  - `comet.compute` (classic, durable, `x-message-ttl = 3600000` ms ≈ 1h)
     - On-demand comet bucket computations.
   - `computation.status` (classic, durable)
     - Worker status updates (started/progress/completed/failed) via `publish_worker_status`.
@@ -157,8 +157,7 @@ which are bound to the respective queues.
 
 ### Computation Locks (PostgreSQL Advisory Locks)
 
-To avoid duplicate computation of the same bucket, the API and workers use a lock key
-of the form:
+The API checks an advisory-lock key of the form:
 
 - `computing:{object_type}:{location_key}:{bucket_key}`
   - `object_type` – `asteroid` or `comet`.
@@ -172,13 +171,15 @@ Lock handling is implemented in `db_utils.py` using PostgreSQL advisory locks:
   - If the lock **cannot** be acquired, a computation for that bucket is already running.
   - If the lock **can** be acquired, it is immediately released and the function returns
     "no computation in progress".
-- `computation_lock(computation_key)`
-  - Context manager that acquires `pg_advisory_lock` for the hashed key and releases it on exit.
-  - Used by the API when scheduling work to ensure only one worker per bucket.
+- `computation_lock(computation_key)` is a context manager that acquires
+  `pg_advisory_lock` and releases it on exit.
 
-Workers mirror the same key pattern via `worker_utils.compute_lock_key` and always
-clean up locks with `worker_utils.clear_lock_safely` / `WorkerContext` to prevent
-stuck locks.
+Current limitation: the route calls `computation_lock(...)` without entering it
+with `with`, so that call does not acquire a lock around publication. The check and
+publish are therefore racy and multiple cache misses can enqueue duplicate tasks.
+Precompute workers do enter `computation_lock()`, but use a different
+`precompute_{kind}:...` key. See [hybrid-deduplication.md](hybrid-deduplication.md)
+for the exact semantics and limitations.
 
 ---
 
@@ -244,8 +245,7 @@ Planets (und andere helle Himmelskörper) werden heute über die
 | Positions cache backend      | `db_utils.py`                 | `get_asteroid_positions`, `get_comet_positions`, `store_asteroid_positions`, `store_comet_positions` |
 | Asteroid computation         | `bright_asteroids.py`         | `load_bright_asteroids`, `_compute_asteroids_vectorized` |
 | Comet computation            | `comets.py`                   | `load_comets`, `_compute_comets_vectorized`     |
-| On-demand workers            | `workers/asteroid_worker.py`  | `AsteroidWorker`, `compute_asteroids`           |
-|                              | `workers/comet_worker.py`     | `CometWorker`, `compute_comets`                 |
+| On-demand worker             | `workers/unified_worker.py`   | `UnifiedWorker` queue callbacks                  |
 | Precompute coordinator       | `precompute_coordinator.py`   | `create_precompute_tasks`, `publish_tasks_to_rabbitmq` |
 | Precompute worker            | `workers/precompute_worker.py`| `process_task`, `main`                          |
 
@@ -292,3 +292,7 @@ Planets (und andere helle Himmelskörper) werden heute über die
   - Always computed on demand with Skyfield.
   - No caching overhead; complexity is bounded by a fixed small number of bodies.
 
+The repository has no controlled end-to-end benchmark for fixed response-time
+guarantees; actual timings depend on data, cache state, database, and hardware.
+
+Last reviewed against the code: 2026-06-30.

@@ -34,15 +34,20 @@ DataFrames on the filesystem (not in PostgreSQL tables):
 
 ## PostgreSQL Tables
 
+`scripts/init-postgres.sql` creates orbital-element tables, legacy DataFrame
+tables, `cached_positions`, updater history, and the `users` / `user_settings`
+tables. The active DataFrame helpers use filesystem files rather than the legacy
+`asteroid_dataframes` and `comet_dataframes` tables.
+
 ### 2. cached_positions (Position cache)
 
-Stores computed positions for specific location/time combinations.
-Uses a single table for both asteroids and comets.
+Stores computed results for specific location/time combinations.
+Uses a single table for asteroids, comets, and yearly sunpath data.
 
 ```sql
 CREATE TABLE cached_positions (
     id SERIAL PRIMARY KEY,
-    object_type VARCHAR(20) NOT NULL,      -- 'asteroid' or 'comet'
+    object_type VARCHAR(20) NOT NULL,      -- 'asteroid', 'comet', or 'sunpath'
     object_id INTEGER NOT NULL,
     location_key VARCHAR(100) NOT NULL,    -- 'lat+XX.XXXX_lon+YY.YYYY_el+ZZZZ'
     time_bucket VARCHAR(20) NOT NULL,      -- 'YYYYMMDDTHH' (1-hour buckets)
@@ -86,8 +91,9 @@ and elevation (see `cache_utils.location_key`).
 ]
 ```
 
-**Important:** Contains all computed objects for that bucket (unfiltered by
-user magnitude). Filtering happens later in the API routes.
+**Important:** Asteroid/comet rows contain the worker's computed result list
+without a user-specific magnitude filter. Filtering happens later in the API
+routes. Sunpath rows contain a versioned dictionary rather than a list.
 
 **Code:**
 - `db_utils.store_asteroid_positions`
@@ -132,30 +138,28 @@ API Routes (asteroids.py, comets.py)
 | Storage                          | TTL / Staleness window | Reason |
 |----------------------------------|------------------------|--------|
 | asteroid/comet DataFrame files   | ~49 hours              | Refreshed regularly; orbital elements change slowly |
-| cached_positions (PostgreSQL)    | Unlimited              | Positions for a specific timestamp are immutable |
+| cached_positions (PostgreSQL)    | No automatic database expiry | Maintenance functions can prune or invalidate rows |
 
 **Position cache:**
 
-Positions for a **specific timestamp** (time_bucket) are **immutable**:
-- The position of Ceres on 2025-12-25 at 12:00 UTC never changes
-- Cached indefinitely
-- Saves significant compute time for repeated queries
+The represented instant is fixed, but a cached result can become stale when
+orbital elements, magnitude limits, ephemerides, or computation code change.
+Asteroid/comet stores currently use `ON CONFLICT ... DO NOTHING`, so an existing
+key is not refreshed automatically.
 
 **Storage management:**
-- Old positions can be pruned manually if needed
-- Recommendation: delete positions with `time_bucket` < now() - 1 year
-- Typical storage: ~10 KB per location/time combination
+- `db_utils.cleanup_cached_positions(retention_days, object_types)` prunes by `computed_at`.
+- SQL function `cleanup_old_positions(retention_days)` defaults to 60 days.
+- `db_utils.invalidate_cached_positions(object_types)` removes selected result types.
 
 **Celestial objects (Sun, Moon, planets):** NOT cached (direct computation
 via `/api/celestial` for each request)
 
 ## Storage Usage
 
-| Storage              | Size (approx.)       | Per entry / file                |
-|----------------------|----------------------|---------------------------------|
-| asteroid DataFrame   | 20–50 MB             | ~20 MB (DataFrame with ~1M rows) |
-| comet DataFrame      | 1–5 MB               | ~1 MB (DataFrame with ~1000 rows) |
-| cached_positions row | 100–500 KB           | ~10 KB (pickled list, unfiltered) |
+Storage depends on the MPC datasets, configured candidate limits, locations,
+precompute horizon, and serialized event data. Measure actual use with filesystem
+tools and PostgreSQL's `pg_total_relation_size`; fixed estimates become stale
+quickly for this workload.
 
-**Total:** ~25–60 MB for a typical cache snapshot (excluding celestial
-objects, which are computed on demand).
+Last reviewed against the code: 2026-06-30.
