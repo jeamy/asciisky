@@ -386,6 +386,25 @@ def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
         logger.error("Cannot publish tasks - no RabbitMQ connection")
         return False
 
+    # Claims are mandatory for duplicate suppression. Verify PostgreSQL once
+    # before entering the task loop so an outage produces one actionable error
+    # instead of two tracebacks per task.
+    try:
+        from db_utils import get_db_connection
+        db_connection = get_db_connection()
+        with db_connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        db_connection.commit()
+    except Exception as exc:
+        logger.error("Cannot publish precompute tasks - PostgreSQL unavailable: %s", exc)
+        try:
+            if connection.is_open:
+                connection.close()
+        except Exception:
+            pass
+        return False
+
     try:
         channel = connection.channel()
 
