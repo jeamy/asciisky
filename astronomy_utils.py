@@ -6,6 +6,7 @@ the two modules don't drift apart.
 """
 from datetime import timedelta, timezone
 from typing import List, Optional, Tuple
+import os
 import numpy as np
 
 
@@ -39,13 +40,15 @@ def timescale_from_datetimes(ts, times_dt):
     return ts.from_datetimes(times_dt)
 
 
-def build_event_time_grid(ts, anchor_time, days: int = 2, minutes_step: int = 5):
+def build_event_time_grid(ts, anchor_time, days: int = 2, minutes_step: int | None = None):
     """Build a Skyfield Time array + matching list of Python datetimes.
 
     The window starts at the UTC midnight of ``anchor_time`` and spans
     ``days`` days with ``minutes_step`` minute resolution. Returns
     ``(t_grid, times_dt, minutes_step)``.
     """
+    if minutes_step is None:
+        minutes_step = max(1, int(os.environ.get('ASCII_SKY_EVENT_GRID_MINUTES', '10')))
     start_dt = anchor_time.utc_datetime().replace(hour=0, minute=0, second=0, microsecond=0)
     end_dt = start_dt + timedelta(days=days)
     total_minutes = int((end_dt - start_dt).total_seconds() / 60)

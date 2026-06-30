@@ -98,12 +98,19 @@ In addition to on-demand workers there is a precompute pipeline:
     - Checks `cached_positions` via `get_asteroid_positions` / `get_comet_positions`.
     - Skips buckets that are already cached or already queued.
     - Enqueues missing buckets as tasks to `precompute.tasks` (classic queue, with priorities).
+    - Prioritizes the current hour, then ±1 hour, the next six hours, and the
+      remaining horizon in progressively lower classes.
+    - Claims a normalized key in PostgreSQL before publishing, preventing a
+      second coordinator/restart from publishing the same task until completion
+      or claim expiry.
 - `workers/precompute_worker.py`:
   - Consumes from `precompute.tasks`.
   - For each task (`kind = 'asteroids' | 'comets'`):
     - Calls `bright_asteroids.load_bright_asteroids(...)` or `comets.load_comets(...)`.
     - Stores the resulting list in `cached_positions` via
       `store_asteroid_positions` / `store_comet_positions`.
+    - Rechecks the cache after acquiring the advisory lock, so a redelivered or
+      duplicate message skips computation when another worker already completed it.
 
 ### Magnitude Filtering
 

@@ -124,6 +124,20 @@ def round_to_bucket_boundary(time_bucket_str: str) -> datetime:
     return time_bucket_dt
 
 
+def precompute_task_key(task: Dict[str, Any]) -> str:
+    """Return the canonical persistent claim/message key for a precompute task."""
+    from cache_utils import normalize_location, time_bucket_utc
+
+    location = task['location']
+    lat, lon, elevation = normalize_location(
+        location['latitude'], location['longitude'], location.get('elevation', 0)
+    )
+    kind = task['kind']
+    dt = datetime.fromisoformat(task['time_bucket'].replace('Z', '+00:00'))
+    bucket = dt.isoformat() if kind == 'sunpath' else time_bucket_utc(dt, 1)
+    return f"{kind}_{lat:.4f}_{lon:.4f}_{elevation:.0f}_{bucket}"
+
+
 def publish_worker_status(
     channel: pika.channel.Channel,
     worker_id: str,

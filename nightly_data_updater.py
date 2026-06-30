@@ -9,6 +9,7 @@ import time
 import signal
 import logging
 import traceback
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from ftplib import FTP, FTP_TLS
@@ -170,6 +171,29 @@ def invalidate_object_cache(object_type: str):
         return False
 
 
+def _content_changed(previous: bytes | None, current: bytes) -> bool:
+    """Compare serialized source datasets without retaining duplicate objects."""
+    if previous is None:
+        return True
+    return hashlib.sha256(previous).digest() != hashlib.sha256(current).digest()
+
+
+def _calendar_tt_jd(year, month, day):
+    """Convert a TT calendar date (fractional day allowed) to Julian date."""
+    import numpy as np
+
+    year = np.asarray(year, dtype=np.int64)
+    month = np.asarray(month, dtype=np.int64)
+    day = np.asarray(day, dtype=float)
+    whole_day = np.floor(day).astype(np.int64)
+    fraction = day - whole_day
+    a = (14 - month) // 12
+    y = year + 4800 - a
+    m = month + 12 * a - 3
+    jdn = whole_day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
+    return jdn.astype(float) - 0.5 + fraction
+
+
 def update_asteroid_data():
     """Download and process asteroid data"""
     logger.info("Updating asteroid data...")
@@ -179,7 +203,7 @@ def update_asteroid_data():
         import pandas as pd
         from pathlib import Path
         from skyfield.data import mpc
-        from db_utils import store_asteroid_dataframe, get_database_stats
+        from db_utils import store_asteroid_dataframe, get_asteroid_dataframe, get_database_stats
         import bright_asteroids
 
         # Download latest data
@@ -225,14 +249,23 @@ def update_asteroid_data():
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
         df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
+        valid_epoch = df['epoch_packed'].astype(str).str.len().eq(5)
+        df['epoch_tt'] = float('nan')
+        if valid_epoch.any():
+            df.loc[valid_epoch, 'epoch_tt'] = bright_asteroids._packed_mpc_epochs_tt(
+                df.loc[valid_epoch, 'epoch_packed'].to_numpy()
+            )
 
-        # Store in database (as pickle)
+        # Store only changed source data; unchanged nightly downloads must not
+        # invalidate every computed bucket.
         df_pickle = pickle.dumps(df)
-        store_asteroid_dataframe(df_pickle)
-        logger.info(f"✓ Stored asteroid DataFrame in PostgreSQL")
-
-        # Drop cached asteroid positions so they are rebuilt from fresh orbital elements
-        invalidate_object_cache('asteroid')
+        previous = get_asteroid_dataframe(max_age_seconds=10**12)
+        if _content_changed(previous, df_pickle):
+            store_asteroid_dataframe(df_pickle)
+            logger.info("✓ Stored changed asteroid DataFrame")
+            invalidate_object_cache('asteroid')
+        else:
+            logger.info("✓ Asteroid dataset unchanged; keeping computed position cache")
 
         # Verify
         stats = get_database_stats()
@@ -250,7 +283,7 @@ def update_comet_data():
     logger.info("Updating comet data...")
     try:
         import pickle
-        from db_utils import get_database_stats, store_comet_dataframe
+        from db_utils import get_database_stats, get_comet_dataframe, store_comet_dataframe
         import comets
 
         ensure_data_dirs()
@@ -279,13 +312,25 @@ def update_comet_data():
         if df is not None and not df.empty:
             logger.info(f"✓ Loaded {len(df)} comets from CometEls.txt")
 
-            # Store in database (as pickle)
-            df_pickle = pickle.dumps(df)
-            store_comet_dataframe(df_pickle)
-            logger.info(f"✓ Stored comet DataFrame in PostgreSQL")
+            # Prepare perihelion epochs once during ingestion instead of in
+            # every worker/bucket.
+            required = {'perihelion_year', 'perihelion_month', 'perihelion_day'}
+            if required.issubset(df.columns):
+                valid = df[list(required)].notna().all(axis=1)
+                df.loc[valid, 'Tp'] = _calendar_tt_jd(
+                    df.loc[valid, 'perihelion_year'],
+                    df.loc[valid, 'perihelion_month'],
+                    df.loc[valid, 'perihelion_day'],
+                )
 
-            # Drop cached comet positions so they are rebuilt from fresh orbital elements
-            invalidate_object_cache('comet')
+            df_pickle = pickle.dumps(df)
+            previous = get_comet_dataframe(max_age_seconds=10**12)
+            if _content_changed(previous, df_pickle):
+                store_comet_dataframe(df_pickle)
+                logger.info("✓ Stored changed comet DataFrame")
+                invalidate_object_cache('comet')
+            else:
+                logger.info("✓ Comet dataset unchanged; keeping computed position cache")
 
             # Verify
             stats = get_database_stats()

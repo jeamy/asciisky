@@ -520,8 +520,7 @@ def _compute_comets_vectorized(
     observer_at_t = observer.at(t)
     observer_xyz = observer_at_t.position.au  # (3,)
 
-    processed_rows = []  # (designation, row2, target)
-    orbits = []
+    processed_rows = []  # (designation, normalized row, orbit cache key)
     M1_list = []
     n_list = []
 
@@ -613,21 +612,13 @@ def _compute_comets_vectorized(
                 _float_or_none(row2.get('epoch_month')),
                 _float_or_none(row2.get('epoch_day')),
             )
-            orbit = _make_comet_orbit_cached(orbit_key)
-
-            try:
-                center_code = int(getattr(orbit, 'center', 10))
-            except Exception:
-                center_code = 10
-            target = (sun + orbit) if center_code != 0 else orbit
-
             M1 = row2.get('M1')
             if M1 is None or pd.isna(M1):
                 return None
             n_raw = row2.get('k1')
             n = float(n_raw) if (n_raw is not None and pd.notna(n_raw)) else 4.0
 
-            return designation, row2, target, orbit, float(M1), n
+            return designation, row2, orbit_key, float(M1), n
         except Exception as exc:
             logger.debug(f"Error preparing comet {designation}: {exc}")
             return None
@@ -640,13 +631,23 @@ def _compute_comets_vectorized(
     for res in raw_results:
         if res is None:
             continue
-        designation, row2, target, orbit, M1, n = res
-        processed_rows.append((designation, row2, target))
-        orbits.append(orbit)
+        designation, row2, orbit_key, M1, n = res
+        processed_rows.append((designation, row2, orbit_key))
         M1_list.append(M1)
         n_list.append(n)
 
     if not processed_rows:
+        return []
+
+    # Build one representative orbit for Skyfield's rotation/GM constants.
+    representative_orbit = None
+    for _, _, orbit_key in processed_rows[:16]:
+        try:
+            representative_orbit = _make_comet_orbit_cached(orbit_key)
+            break
+        except Exception:
+            continue
+    if representative_orbit is None:
         return []
 
     # Batch-propagate elliptic, hyperbolic, and parabolic two-body elements.
@@ -655,10 +656,10 @@ def _compute_comets_vectorized(
     try:
         eccentricity = np.array([row.e for _, row, _ in processed_rows], dtype=float)
         perihelion = np.array([row.q for _, row, _ in processed_rows], dtype=float)
-        periapsis_tt = np.array([orbit.epoch.tt for orbit in orbits], dtype=float)
-        mu = orbits[0].mu_au3_d2
-        x_orbit = np.empty(len(orbits), dtype=float)
-        y_orbit = np.empty(len(orbits), dtype=float)
+        periapsis_tt = np.array([float(row.Tp) for _, row, _ in processed_rows], dtype=float)
+        mu = representative_orbit.mu_au3_d2
+        x_orbit = np.empty(len(processed_rows), dtype=float)
+        y_orbit = np.empty(len(processed_rows), dtype=float)
 
         elliptic = eccentricity < 1.0
         if np.any(elliptic):
@@ -714,12 +715,36 @@ def _compute_comets_vectorized(
             + (-sin_node * sin_arg + cos_node * cos_arg * cos_inc) * y_orbit,
             sin_arg * sin_inc * x_orbit + cos_arg * sin_inc * y_orbit,
         ])
-        tgt_xyz = orbits[0]._rotation @ ecliptic_xyz + sun_xyz[:, None]
+        tgt_xyz = representative_orbit._rotation @ ecliptic_xyz + sun_xyz[:, None]
         if not np.all(np.isfinite(tgt_xyz)):
             raise ValueError("non-finite comet positions")
     except Exception as exc:
-        logger.debug("Falling back to per-object comet propagation: %s", exc)
-        tgt_xyz = np.array([target.at(t).position.au for _, _, target in processed_rows]).T
+        logger.warning(
+            "Falling back to per-object comet propagation for %d candidates: %s",
+            len(processed_rows), exc,
+        )
+        fallback_rows = []
+        fallback_targets = []
+        fallback_m1 = []
+        fallback_n = []
+        for pos, item in enumerate(processed_rows):
+            designation, row, orbit_key = item
+            try:
+                orbit = _make_comet_orbit_cached(orbit_key)
+                center_code = int(getattr(orbit, 'center', 10))
+                target = (sun + orbit) if center_code != 0 else orbit
+                fallback_rows.append(item)
+                fallback_targets.append(target)
+                fallback_m1.append(M1_list[pos])
+                fallback_n.append(n_list[pos])
+            except Exception:
+                continue
+        if not fallback_targets:
+            return []
+        processed_rows = fallback_rows
+        M1_list = fallback_m1
+        n_list = fallback_n
+        tgt_xyz = np.array([target.at(t).position.au for target in fallback_targets]).T
 
     # These are genuinely heliocentric/topocentric distances. The old
     # target.at(t).distance() value was measured from the system barycentre.
@@ -756,9 +781,12 @@ def _compute_comets_vectorized(
         # Cache observer.at(t_grid) once for the final output set.
         observer_at_grid = observer.at(t_grid)
 
-        for pos in selected_idx:
+        for result_pos, pos in enumerate(selected_idx):
             try:
-                designation, row2, target = processed_rows[pos]
+                designation, row2, orbit_key = processed_rows[pos]
+                orbit = _make_comet_orbit_cached(orbit_key)
+                center_code = int(getattr(orbit, 'center', 10))
+                target = (sun + orbit) if center_code != 0 else orbit
                 apparent_mag = float(apparent_magnitudes[pos])
 
                 # Apparent position (observe() only for the small final output set)
@@ -768,13 +796,14 @@ def _compute_comets_vectorized(
 
                 # Rise/set/transit via shared grid helper
                 rise_time = set_time = transit_time = None
-                try:
-                    grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
-                    rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
-                        grid_alt.degrees, times_dt, minutes_step
-                    )
-                except Exception as e:
-                    logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
+                if result_pos < COMET_EVENTS_MAX:
+                    try:
+                        grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
+                        rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
+                            grid_alt.degrees, times_dt, minutes_step
+                        )
+                    except Exception as e:
+                        logger.debug(f"Rise/Set/Transit calculation failed for {designation}: {e}")
 
                 # Name or designation
                 if 'name' in row2 and pd.notna(row2['name']) and str(row2['name']).strip():

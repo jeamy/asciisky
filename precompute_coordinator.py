@@ -32,7 +32,14 @@ import pika
 # Settings
 import settings
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import get_asteroid_positions, get_comet_positions, get_sunpath_year, get_all_user_locations
+from db_utils import (
+    claim_precompute_task,
+    get_asteroid_positions,
+    get_comet_positions,
+    get_sunpath_year,
+    get_all_user_locations,
+    release_precompute_task,
+)
 
 # Worker Utils
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'workers'))
@@ -181,28 +188,37 @@ def get_target_locations() -> List[Dict[str, Any]]:
 
 def get_existing_queue_tasks() -> set:
     """
-    Hole alle Tasks, die bereits in der precompute.tasks Queue sind.
+    Compatibility snapshot for task generation.
 
-    Tracks tasks published by this coordinator process. Completed tasks are
-    removed from this set when their database cache is observed.
+    Publication deduplication is enforced atomically by PostgreSQL claims in
+    ``publish_tasks_to_rabbitmq``. A process-local set must not suppress a task
+    forever after worker failure; expired claims need to be publishable again.
 
     Returns:
-        Snapshot der von diesem Prozess bereits publizierten Tasks.
+        Empty set; persistent claims are checked at publish time.
     """
-    return set(_queued_task_keys)
+    return set()
 
 
 def task_key(task: Dict[str, Any]) -> str:
     """Return the same deterministic key used while creating tasks."""
-    location = task['location']
-    lat, lon, elevation = normalize_location(
-        location['latitude'], location['longitude'], location['elevation']
-    )
-    loc = f"{lat:.4f}_{lon:.4f}_{elevation:.0f}"
-    kind = task['kind']
-    dt = datetime.fromisoformat(task['time_bucket'].replace('Z', '+00:00'))
-    bucket = dt.isoformat() if kind == 'sunpath' else time_bucket_utc(dt, 1)
-    return f"{kind}_{loc}_{bucket}"
+    return worker_utils.precompute_task_key(task)
+
+
+def task_priority(hour_offset: int) -> int:
+    """Prioritize the current bucket, then adjacent and near-future buckets."""
+    distance = abs(hour_offset)
+    if distance == 0:
+        return 10
+    if distance == 1:
+        return 9
+    if distance <= 6:
+        return 8
+    if distance <= 24:
+        return 7
+    if distance <= 72:
+        return 6
+    return 5
 
 
 def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset: int, include_yearly: bool = True) -> List[Dict]:
@@ -291,14 +307,13 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
             asteroid_task_key = f"asteroids_{loc_key_dup}_{bucket}"
             comet_task_key = f"comets_{loc_key_dup}_{bucket}"
 
-            # Priorität: Nächste 24h = HIGH (10), danach NORMAL (5)
-            priority = 10 if hour_offset < 24 else 5
+            priority = task_priority(hour_offset)
 
             # Prüfe ob Asteroiden-Daten schon vorhanden
             asteroid_cached = False
             try:
                 cached = get_asteroid_positions(loc_key, bucket)
-                asteroid_cached = cached is not None and len(cached) > 0
+                asteroid_cached = cached is not None
             except Exception:
                 pass
 
@@ -328,7 +343,7 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
             comet_cached = False
             try:
                 cached = get_comet_positions(loc_key, bucket)
-                comet_cached = cached is not None and len(cached) > 0
+                comet_cached = cached is not None
             except Exception:
                 pass
 
@@ -385,9 +400,21 @@ def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
 
         # Publiziere Tasks
         published = 0
+        failed = 0
+        # Stable sort ensures current/adjacent buckets enter the priority queue
+        # before distant work even when priorities are tied.
+        tasks = sorted(
+            tasks,
+            key=lambda item: (-item.get('priority', 5), item['time_bucket'], item['kind']),
+        )
+        claim_ttl = int(os.getenv('PRECOMPUTE_TASK_CLAIM_TTL', '86400'))
         for i, task in enumerate(tasks):
+            key = None
             try:
                 key = task_key(task)
+                if not claim_precompute_task(key, ttl_seconds=claim_ttl):
+                    logger.debug("Skipping already claimed precompute task %s", key)
+                    continue
                 channel.basic_publish(
                     exchange='',
                     routing_key='precompute.tasks',
@@ -406,10 +433,16 @@ def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
                     logger.info(f"Published {i + 1}/{len(tasks)} tasks...")
 
             except Exception as e:
+                failed += 1
+                if key is not None:
+                    try:
+                        release_precompute_task(key)
+                    except Exception:
+                        logger.exception("Could not release failed publication claim %s", key)
                 logger.error(f"Failed to publish task {i}: {e}")
 
         logger.info(f"✅ Published {published}/{len(tasks)} tasks to RabbitMQ")
-        return published == len(tasks)
+        return failed == 0
 
     except Exception as e:
         logger.error(f"Failed to publish tasks: {e}")
@@ -490,7 +523,9 @@ def main():
                 continue
 
             if should_produce:
-                start_offset = current_horizon
+                # Include the previous hour in the first cycle so simulated or
+                # slightly delayed requests hit an adjacent cache bucket.
+                start_offset = -1 if current_horizon == 0 else current_horizon
                 end_offset = min(current_horizon + BATCH_SIZE_HOURS, hours_ahead)
 
                 # Sunpath nur im ersten Batch (Stunde 0-24) mitberechnen

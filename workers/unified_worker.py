@@ -37,6 +37,9 @@ import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import (
+    get_asteroid_positions,
+    get_comet_positions,
+    get_sunpath_year,
     store_asteroid_positions,
     store_comet_positions,
     store_sunpath_year,
@@ -343,6 +346,17 @@ class UnifiedWorker:
             with computation_lock(computation_key, ttl_seconds=300):
                 logger.debug(f"Acquired Advisory Lock for: {computation_key}")
 
+                tb = time_bucket_utc(dt_utc)
+                existing = (
+                    get_asteroid_positions(loc_key, tb) if kind == 'asteroids'
+                    else get_comet_positions(loc_key, tb) if kind == 'comets'
+                    else get_sunpath_year(loc_key, str(dt_utc.year)) if kind == 'sunpath'
+                    else None
+                )
+                if existing is not None:
+                    logger.info("Skipping duplicate cached task %s", computation_key)
+                    return True
+
                 if kind == 'asteroids':
                     # Nutze shared resources und globale Magnituden-Limits
                     max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
@@ -357,7 +371,6 @@ class UnifiedWorker:
                     calculation_seconds = time.perf_counter() - calculation_started
 
                     if asteroids_data:
-                        tb = time_bucket_utc(dt_utc)
                         store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
                         count = len(asteroids_data)
                     else:
@@ -377,7 +390,6 @@ class UnifiedWorker:
                     calculation_seconds = time.perf_counter() - calculation_started
 
                     if comets_data:
-                        tb = time_bucket_utc(dt_utc)
                         store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
                         count = len(comets_data)
                     else:
@@ -534,6 +546,12 @@ class UnifiedWorker:
             success = self.process_task(task)
 
             if success:
+                if task.get('type', 'precompute') == 'precompute':
+                    try:
+                        from db_utils import release_precompute_task
+                        release_precompute_task(worker_utils.precompute_task_key(task))
+                    except Exception:
+                        logger.exception("Could not release precompute claim")
                 self._safe_ack(ch, method.delivery_tag)
             else:
                 # Intelligent Retry mit exponential backoff

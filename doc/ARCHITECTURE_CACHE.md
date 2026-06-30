@@ -129,4 +129,8 @@ A PostgreSQL position-cache hit avoids orbit propagation and event calculation. 
 
 Cached rows are not physically immortal: `cleanup_cached_positions()` and the SQL `cleanup_old_positions()` function can prune them. Lookup functions also apply the astronomy module's cache TTL (currently 31 days), even though the underlying row remains until cleanup.
 
+The nightly updater compares the newly serialized MPC DataFrame with the current
+one. It invalidates only `asteroid` or `comet` rows when that corresponding source
+dataset changed; an unchanged nightly download retains computed positions.
+
 Last reviewed against the code: 2026-06-30.

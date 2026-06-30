@@ -39,6 +39,10 @@ tables, `cached_positions`, updater history, and the `users` / `user_settings`
 tables. The active DataFrame helpers use filesystem files rather than the legacy
 `asteroid_dataframes` and `comet_dataframes` tables.
 
+`precompute_task_claims` stores expiring, cross-process publication claims. Its
+primary key is the normalized task key; workers remove a claim after successful
+processing and an expired claim can be replaced after a publisher/worker crash.
+
 ### 2. cached_positions (Position cache)
 
 Stores computed results for specific location/time combinations.

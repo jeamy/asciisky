@@ -31,6 +31,9 @@ import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import (
+    get_asteroid_positions,
+    get_comet_positions,
+    get_sunpath_year,
     store_asteroid_positions,
     store_comet_positions,
     store_sunpath_year,
@@ -130,6 +133,17 @@ def process_task(task: Dict[str, Any]) -> bool:
             with computation_lock(computation_key, ttl_seconds=300):
                 logger.debug(f"[{WORKER_ID}] Acquired advisory lock for {computation_key}")
 
+                tb = time_bucket_utc(dt_utc)
+                existing = (
+                    get_asteroid_positions(loc_key, tb) if kind == 'asteroids'
+                    else get_comet_positions(loc_key, tb) if kind == 'comets'
+                    else get_sunpath_year(loc_key, str(dt_utc.year)) if kind == 'sunpath'
+                    else None
+                )
+                if existing is not None:
+                    logger.info("[%s] Skipping duplicate cached task %s", WORKER_ID, computation_key)
+                    return True
+
                 if kind == 'asteroids':
                     # Use shared resources
                     loader, ts, eph, asteroid_df, _ = shared_resources.get_resources()
@@ -152,7 +166,6 @@ def process_task(task: Dict[str, Any]) -> bool:
                     )
 
                     if asteroids_data:
-                        tb = time_bucket_utc(dt_utc)
                         store_asteroid_positions(
                             0,
                             loc_key,
@@ -186,7 +199,6 @@ def process_task(task: Dict[str, Any]) -> bool:
                     )
 
                     if comets_data:
-                        tb = time_bucket_utc(dt_utc)
                         store_comet_positions(
                             0,
                             loc_key,
@@ -235,6 +247,11 @@ def callback(ch, method, properties, body):
         success = process_task(task)
 
         if success:
+            try:
+                from db_utils import release_precompute_task
+                release_precompute_task(worker_utils.precompute_task_key(task))
+            except Exception:
+                logger.exception("Could not release precompute claim")
             # ACK (Task erfolgreich)
             ch.basic_ack(delivery_tag=method.delivery_tag)
         else:

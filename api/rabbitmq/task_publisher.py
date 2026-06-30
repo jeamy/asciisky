@@ -10,9 +10,12 @@ import logging
 import uuid
 import time
 import threading
+import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import settings
+from db_utils import claim_precompute_task, release_precompute_task
+from workers.worker_utils import precompute_task_key
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +128,7 @@ class TaskPublisher:
         Returns:
             Task-ID
         """
-        task_id = f"{kind}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        
         task_data = {
-            'task_id': task_id,
             'type': 'precompute',  # Task-Typ für unified_worker
             'kind': kind,
             'location': location,
@@ -137,6 +137,9 @@ class TaskPublisher:
             'created_at': datetime.now(timezone.utc).isoformat(),
             'priority': priority
         }
+        key = precompute_task_key(task_data)
+        task_id = f"{kind}_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+        task_data['task_id'] = task_id
         
         # Routing Key basierend auf Kind (singular!)
         kind_singular = {
@@ -148,6 +151,9 @@ class TaskPublisher:
         routing_key = f'compute.{kind_singular}'
         
         try:
+            if not claim_precompute_task(key):
+                logger.debug("Task already queued/active: %s", key)
+                return task_id
             # Hole thread-local Connection
             connection, channel = self._get_connection()
             
@@ -156,7 +162,9 @@ class TaskPublisher:
                 routing_key=routing_key,
                 properties=pika.BasicProperties(
                     delivery_mode=2,  # Persistent
-                    content_type='application/json'
+                    content_type='application/json',
+                    message_id=task_id,
+                    priority=priority,
                 ),
                 body=json.dumps(task_data)
             )
@@ -165,6 +173,10 @@ class TaskPublisher:
             return task_id
             
         except Exception as e:
+            try:
+                release_precompute_task(key)
+            except Exception:
+                logger.exception("Could not release failed task claim %s", key)
             logger.error(f"Failed to publish task: {e}")
             # Cleanup thread-local bei Fehler
             if hasattr(_thread_local, 'connection'):

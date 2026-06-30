@@ -430,6 +430,7 @@ Notes:
 ### Precompute Configuration
 - `ASCII_SKY_PRECOMPUTE_HOURS` – Number of hours into the future that the precompute coordinator generates tasks for (default: 720 = 30 days)
 - `ASCII_SKY_PRECOMPUTE_LOCATIONS` – Optional JSON array of locations (`latitude`, `longitude`, `elevation`, `name`) used by the precompute coordinator in addition to the last global location, static `precompute_locations.json`, and all user locations from the database.
+- `PRECOMPUTE_TASK_CLAIM_TTL` – Expiry for persistent duplicate-publication claims (default: 86400 seconds)
 
 ### Legacy Duplicate-Work Settings
 - `ENABLE_HYBRID_DEDUPLICATION`, `ASCII_SKY_DEDUPLICATION_TTL`, and
@@ -449,6 +450,7 @@ Notes:
 - `ASCII_SKY_COMET_MAX_APPARENT_MAG` – Maximum apparent magnitude for comets (default: 14.0)
 - `ASCII_SKY_ASTEROIDS_EVENTS_MAX` – Max rise/set/transit computations per asteroid (default: 50)
 - `ASCII_SKY_COMET_EVENTS_MAX` – Max rise/set/transit computations per comet (Docker default: 50, code fallback: 300)
+- `ASCII_SKY_EVENT_GRID_MINUTES` – Event sampling interval; rise/set crossings are interpolated (default: 10)
 
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)
@@ -505,26 +507,24 @@ Notes:
 
 ## Performance Optimizations
 
-### Benchmark Results (2026-06-30)
+### Current Local Measurement (2026-06-30)
 
-Measured on the full MPCORB dataset (1 479 868 asteroids, 1 220 comets) using `test_positions_local.py`
-on Python 3.14.6 / NumPy 2.5.0 / Skyfield 1.54, observer Vienna (48.2°N 16.4°E):
+Measured with the repository data (1,552,856 asteroids and 958 comets), Vienna,
+2026-06-28 12:00 UTC, Python 3.14.6 / NumPy 2.5.0. DataFrames were already loaded,
+matching a long-running worker:
 
-| Step | Before | After | Speedup |
-|------|--------|-------|---------|
-| Asteroid total (H ≤ 12, 4 550 candidates) | 259 s | **29 s** | **8.9×** |
-| — Orbit building (4 550 orbits) | 131 s | 0.44 s | 297× |
-| — Distance / phase-angle pass | 125 s | 28 s | 4.5× |
-| — Rise / set / transit (7 results) | 0.42 s | 0.43 s | — |
-| Comet total (1 167 candidates, 20 results) | crashed | **33 s** | fixed |
+| Pipeline | Candidates/results | Wall time |
+|---|---:|---:|
+| Asteroids, magnitude ≤ 10 | 5,399 / 7 | 1.66 s |
+| Comets, top results | 939 / 20 | 2.48 s |
 
-*Hardware: single-core equivalent, no GPU. Results are representative; exact times vary with hardware.*
+These are current-path measurements, not a controlled before/after claim. Exact
+times vary with data, event limits, cache state, and hardware.
 
 ### What Changed
 
 **Asteroid pipeline (`bright_asteroids.py`):**
-- Replaced two `observer.at(t).observe(target)` loops (22 ms/object × 6 000+ objects = ~250 s)
-  with a single `target.at(t)` loop (6 ms/object) plus vectorised NumPy position arithmetic
+- Replaced bulk `observe(target)` loops with vectorised NumPy position arithmetic
   for heliocentric distance `r`, geocentric distance `δ`, and phase angle `α`.
 - `observer.at(t)` is now called only for the small final output set (≤ 50 objects) to produce
   RA / Dec / Alt / Az — not for every candidate.
@@ -541,7 +541,7 @@ on Python 3.14.6 / NumPy 2.5.0 / Skyfield 1.54, observer Vienna (48.2°N 16.4°E
   `ts.tt(y, m, d)`; previously truncated to integer).
 - Same `target.at(t)` vectorisation as asteroids: `observe()` eliminated from the first pass,
   deferred to the final output loop only.
-- First-pass orbit building runs via `ThreadPoolExecutor` (orbit normalisation + `_make_comet_orbit_cached`).
+- Perihelion epochs are prepared during ingestion; full Skyfield targets are built only for final results.
 
 ### Vectorized Computations
 ASCII Sky uses NumPy vectorization to reduce Python-loop and per-object astronomy overhead:
@@ -557,11 +557,15 @@ ASCII Sky uses NumPy vectorization to reduce Python-loop and per-object astronom
 - Asteroid pipeline: absolute-magnitude filter → rough apparent-magnitude filter (+1.5 mag margin) → vectorized precise calculation
 - Comet pipeline: absolute-magnitude filter → vectorized calculation → apparent-magnitude selection
 - Event-time calculations are capped via `ASCII_SKY_ASTEROIDS_EVENTS_MAX` and `ASCII_SKY_COMET_EVENTS_MAX`
+- Event-grid resolution is controlled by `ASCII_SKY_EVENT_GRID_MINUTES` (default 10 minutes; crossings are interpolated)
 
 ### Database Optimization
 - DataFrame-first loading from filesystem cache (pickled MPC DataFrames) instead of reparsing raw MPC text files
 - Intelligent caching with TTL and precompute windows
 - PostgreSQL advisory locks for database consistency
+- Persistent precompute claims reduce duplicate queue publications across coordinator restarts
+- Current and adjacent hourly buckets receive the highest precompute priority
+- MPC updates invalidate only the changed asteroid/comet cache type, and unchanged datasets retain cached positions
 
 ## Skyfield 
 

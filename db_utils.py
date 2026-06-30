@@ -405,6 +405,49 @@ def invalidate_cached_positions(object_types: List[str]) -> int:
     logger.info("Invalidated %s cached_positions rows for %s", deleted_rows, object_types)
     return deleted_rows
 
+
+def claim_precompute_task(task_key: str, ttl_seconds: int = 86400) -> bool:
+    """Atomically reserve a precompute key across coordinator processes.
+
+    Expired claims can be replaced, covering publisher crashes without keeping
+    a separate cleanup daemon.
+    """
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS precompute_task_claims (
+                task_key TEXT PRIMARY KEY,
+                claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO precompute_task_claims (task_key, claimed_at, expires_at)
+            VALUES (%s, NOW(), NOW() + (%s * INTERVAL '1 second'))
+            ON CONFLICT (task_key) DO UPDATE
+            SET claimed_at = EXCLUDED.claimed_at,
+                expires_at = EXCLUDED.expires_at
+            WHERE precompute_task_claims.expires_at <= NOW()
+            RETURNING task_key
+        """, (task_key, max(1, int(ttl_seconds))))
+        return cursor.fetchone() is not None
+
+
+def release_precompute_task(task_key: str) -> None:
+    """Release a persistent precompute publication claim."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS precompute_task_claims (
+                task_key TEXT PRIMARY KEY,
+                claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+        """)
+        cursor.execute("""
+            DELETE FROM precompute_task_claims WHERE task_key = %s
+        """, (task_key,))
+
 # ===== Data Update Tracking =====
 
 def record_data_update(update_type: str, status: str, message: str = None) -> None:

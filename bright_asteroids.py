@@ -39,6 +39,7 @@ MAX_ASTEROIDS = 5000
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG', '12.0'))
 # V-limit for final apparent magnitude filtering
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_APPARENT_MAG', '10.0'))
+ASTEROID_EVENTS_MAX = max(0, int(os.environ.get('ASCII_SKY_ASTEROIDS_EVENTS_MAX', '50')))
 
 # Module-specific cache granularity for per-location/time asteroid list.
 # Use a 1-hour time bucket; TTL must cover the 30-day precompute window
@@ -79,6 +80,40 @@ def vectorized_asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):
 
     value = H + 5.0 * np.log10(distance_term) - 2.5 * np.log10(flux_term)
     return value
+
+
+def _packed_mpc_epochs_tt(values) -> np.ndarray:
+    """Decode MPC five-character packed epochs to Julian dates (TT scale).
+
+    This mirrors ``skyfield.data.mpc.mpcorb_orbit`` without constructing one
+    Skyfield orbit per bulk candidate.
+    """
+    epochs = np.empty(len(values), dtype=float)
+
+    def packed_number(char: str) -> int:
+        return ord(char) - (48 if char.isdigit() else 55)
+
+    for pos, raw in enumerate(values):
+        value = str(raw)
+        if len(value) != 5:
+            raise ValueError(f"invalid MPC packed epoch: {value!r}")
+        year = 100 * packed_number(value[0]) + int(value[1:3])
+        month = packed_number(value[3])
+        day = packed_number(value[4])
+        # Gregorian calendar to Julian day at midnight; identical convention
+        # to Skyfield's julian_day(...)-0.5 for modern MPC epochs.
+        a = (14 - month) // 12
+        y = year + 4800 - a
+        m = month + 12 * a - 3
+        jdn = day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
+        epochs[pos] = float(jdn) - 0.5
+    return epochs
+
+
+def _build_asteroid_target(row, ts, sun):
+    orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
+    center_code = int(getattr(orbit, "center", 10))
+    return orbit, ((sun + orbit) if center_code != 0 else orbit)
 
 def download_mpcorb_file():
     """Laedt die MPCORB.DAT.gz-Datei von der Minor Planet Center-Website herunter.
@@ -234,28 +269,29 @@ def _compute_asteroids_vectorized(
     observer_at_t = observer.at(t)
     observer_xyz = observer_at_t.position.au  # (3,)
 
-    # --- Build orbits (serial — GIL prevents thread speedup here) ---
-    orbits = []
-    targets = []
-    index_map = {}
-
-    for idx, row in df_filtered.iterrows():
-        try:
-            orbit = mpc.mpcorb_orbit(row, ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
-            center_code = int(getattr(orbit, "center", 10))
-            target = (sun + orbit) if center_code != 0 else orbit
-            index_map[idx] = len(orbits)
-            orbits.append(orbit)
-            targets.append(target)
-        except Exception:
-            continue
-
-    if not orbits:
+    # Bulk propagation works directly from prepared DataFrame columns. Build a
+    # single representative orbit for Skyfield's rotation/GM constants; full
+    # targets are created only for the final bright result set below.
+    required = [
+        "semimajor_axis_au", "eccentricity", "mean_anomaly_degrees",
+        "inclination_degrees", "longitude_of_ascending_node_degrees",
+        "argument_of_perihelion_degrees", "epoch_packed",
+    ]
+    numeric_required = required[:-1]
+    valid_mask = df_filtered[numeric_required].notna().all(axis=1)
+    candidates_df = df_filtered.loc[valid_mask].copy()
+    if candidates_df.empty:
         return []
 
-    # Restrict DataFrame to successfully processed rows.
-    valid_indices = list(index_map.keys())
-    candidates_df = df_filtered.loc[valid_indices].copy()
+    representative_orbit = None
+    for _, row in candidates_df.head(16).iterrows():
+        try:
+            representative_orbit, _ = _build_asteroid_target(row, ts, sun)
+            break
+        except Exception:
+            continue
+    if representative_orbit is None:
+        return []
 
     # Propagate all elliptical MPCORB elements in one NumPy batch. This follows
     # the same two-body equations as Skyfield's per-object Kepler propagator,
@@ -267,8 +303,11 @@ def _compute_asteroids_vectorized(
             raise ValueError("batch propagation requires finite elliptical elements")
 
         mean_anomaly = np.radians(candidates_df["mean_anomaly_degrees"].to_numpy(dtype=float))
-        epochs_tt = np.array([orbit.epoch.tt for orbit in orbits], dtype=float)
-        mean_motion = np.sqrt(orbits[0].mu_au3_d2 / (a ** 3))
+        if "epoch_tt" in candidates_df.columns and candidates_df["epoch_tt"].notna().all():
+            epochs_tt = candidates_df["epoch_tt"].to_numpy(dtype=float)
+        else:
+            epochs_tt = _packed_mpc_epochs_tt(candidates_df["epoch_packed"].to_numpy())
+        mean_motion = np.sqrt(representative_orbit.mu_au3_d2 / (a ** 3))
         mean_anomaly = (mean_anomaly + mean_motion * (t.tt - epochs_tt) + np.pi) % (2.0 * np.pi) - np.pi
 
         # Robust vectorized Newton solve of M = E - e*sin(E).
@@ -297,10 +336,25 @@ def _compute_asteroids_vectorized(
             + (-sin_node * sin_peri + cos_node * cos_peri * cos_inc) * y_orbit,
             sin_peri * sin_inc * x_orbit + cos_peri * sin_inc * y_orbit,
         ])
-        tgt_xyz = orbits[0]._rotation @ ecliptic_xyz + sun_xyz[:, None]
+        tgt_xyz = representative_orbit._rotation @ ecliptic_xyz + sun_xyz[:, None]
     except Exception as exc:
-        logger.debug("Falling back to per-object asteroid propagation: %s", exc)
-        tgt_xyz = np.array([target.at(t).position.au for target in targets]).T
+        logger.warning(
+            "Falling back to per-object asteroid propagation for %d candidates: %s",
+            len(candidates_df), exc,
+        )
+        fallback_targets = []
+        fallback_indices = []
+        for idx, row in candidates_df.iterrows():
+            try:
+                _, target = _build_asteroid_target(row, ts, sun)
+                fallback_indices.append(idx)
+                fallback_targets.append(target)
+            except Exception:
+                continue
+        if not fallback_targets:
+            return []
+        candidates_df = candidates_df.loc[fallback_indices].copy()
+        tgt_xyz = np.array([target.at(t).position.au for target in fallback_targets]).T
 
     diff_sun = tgt_xyz - sun_xyz[:, None]    # (3, N) heliocentric vectors
     diff_observer = tgt_xyz - observer_xyz[:, None]  # (3, N) topocentric vectors
@@ -356,13 +410,9 @@ def _compute_asteroids_vectorized(
     observer_at_grid = observer.at(t_grid)
 
     asteroid_list = []
-    for idx, row in top_df.iterrows():
+    for result_pos, (idx, row) in enumerate(top_df.iterrows()):
         try:
-            pos = index_map.get(idx)
-            if pos is None:
-                continue
-
-            target = targets[pos]
+            _, target = _build_asteroid_target(row, ts, sun)
 
             # 1. Current position (single time point) - reuses cached observer_at_t
             apparent = observer_at_t.observe(target).apparent()
@@ -370,10 +420,12 @@ def _compute_asteroids_vectorized(
             alt, az, _ = apparent.altaz()
 
             # 2. Grid-based rise/set/transit (linear interpolation of alt - horizon)
-            grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
-            rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
-                grid_alt.degrees, times_dt, minutes_step
-            )
+            rise_time = set_time = transit_time = None
+            if result_pos < ASTEROID_EVENTS_MAX:
+                grid_alt, _grid_az, _ = observer_at_grid.observe(target).apparent().altaz()
+                rise_time, set_time, transit_time = compute_rise_set_transit_from_altitudes(
+                    grid_alt.degrees, times_dt, minutes_step
+                )
 
             asteroid_list.append(
                 {

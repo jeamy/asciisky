@@ -53,6 +53,7 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 # Task-Daten
                 task = {
                     'task_id': task_id,
+                    'type': 'precompute',
                     'kind': 'comets',  # Required for unified_worker (plural!)
                     'location': {
                         'latitude': lat,
@@ -64,6 +65,13 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                 }
                 
                 logger.info(f"📤 Publishing task: {task['task_id']}")
+                from db_utils import claim_precompute_task, release_precompute_task
+                from workers.worker_utils import precompute_task_key
+                key = precompute_task_key(task)
+                if not claim_precompute_task(key):
+                    logger.info("Equivalent comet task already queued: %s", key)
+                    connection.close()
+                    return
                 
                 # Publiziere an computation.direct Exchange mit routing_key compute.comet
                 # On-Demand Tasks für aktuellen Standort/Zeitpunkt mit höchster Priorität
@@ -73,13 +81,19 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                     body=json.dumps(task),
                     properties=pika.BasicProperties(
                         delivery_mode=2,  # persistent
-                        priority=10
+                        priority=10,
+                        message_id=key,
                     )
                 )
                 
                 connection.close()
                 logger.info(f"✅ Published comet task {task['task_id']} to comet.compute queue")
             except Exception as e:
+                if 'key' in locals():
+                    try:
+                        release_precompute_task(key)
+                    except Exception:
+                        logger.exception("Could not release comet task claim")
                 logger.error(f"❌ Error in publish_task: {e}", exc_info=True)
                 raise
         

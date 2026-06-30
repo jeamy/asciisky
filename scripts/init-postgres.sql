@@ -102,6 +102,18 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 CREATE INDEX IF NOT EXISTS idx_user_settings_updated ON user_settings(last_updated);
 
+-- Cross-process publication claims prevent coordinators/restarts from flooding
+-- precompute.tasks with equivalent work. Workers remove claims after success;
+-- expired claims can be replaced after publisher/worker failure.
+CREATE TABLE IF NOT EXISTS precompute_task_claims (
+    task_key TEXT PRIMARY KEY,
+    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_precompute_claims_expires
+ON precompute_task_claims(expires_at);
+
 -- Cleanup old entries periodically
 CREATE OR REPLACE FUNCTION cleanup_old_positions(retention_days INTEGER DEFAULT 60)
 RETURNS void AS $$
