@@ -43,8 +43,8 @@ MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_APPARENT_M
 # Module-specific cache granularity for per-location/time asteroid list.
 # Use a 1-hour time bucket; TTL must cover the 30-day precompute window
 # so that snapshots created up to 30 days earlier remain valid.
-ASTEROID_CACHE_BUCKET_HOURS = 1
-ASTEROID_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
+ASTEROID_CACHE_BUCKET_HOURS = int(os.environ.get('ASTEROID_CACHE_BUCKET_HOURS', '1'))
+ASTEROID_CACHE_TTL_SECONDS = int(os.environ.get('ASTEROID_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))
 
 # IAU H-G asteroid magnitude system
 def vectorized_asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):

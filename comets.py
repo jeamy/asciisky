@@ -41,9 +41,9 @@ from timezone_utils import get_tzinfo
 COMETS_FILE = Path(COMET_ELEMENTS_PATH)
 
 
-COMET_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days (longer than 30-day precompute window)
-COMET_CACHE_BUCKET_HOURS = 1
-COMET_DF_CACHE_TTL_SECONDS = 31 * 24 * 3600  # 31 days
+COMET_CACHE_TTL_SECONDS = int(os.environ.get('COMET_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))  # 31 days
+COMET_CACHE_BUCKET_HOURS = int(os.environ.get('COMET_CACHE_BUCKET_HOURS', '1'))
+COMET_DF_CACHE_TTL_SECONDS = int(os.environ.get('COMET_DF_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))  # 31 days
 MAX_COMETS_DEFAULT = 1000
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
