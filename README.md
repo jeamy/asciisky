@@ -564,7 +564,7 @@ ASCII Sky uses NumPy vectorization to reduce Python-loop and per-object astronom
 - Intelligent caching with TTL and precompute windows
 - PostgreSQL advisory locks for database consistency
 - Persistent precompute claims reduce duplicate queue publications across coordinator restarts
-- Current and adjacent hourly buckets receive the highest precompute priority
+- Current, previous two, and next two hourly buckets receive the highest precompute priorities
 - MPC updates invalidate only the changed asteroid/comet cache type, and unchanged datasets retain cached positions
 
 ## Skyfield 

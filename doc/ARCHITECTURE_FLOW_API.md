@@ -98,8 +98,8 @@ In addition to on-demand workers there is a precompute pipeline:
     - Checks `cached_positions` via `get_asteroid_positions` / `get_comet_positions`.
     - Skips buckets that are already cached or already queued.
     - Enqueues missing buckets as tasks to `precompute.tasks` (classic queue, with priorities).
-    - Prioritizes the current hour, then ±1 hour, the next six hours, and the
-      remaining horizon in progressively lower classes.
+    - Prioritizes the current hour, then ±1 hour and ±2 hours, followed by the
+      next six hours and the remaining horizon in progressively lower classes.
     - Claims a normalized key in PostgreSQL before publishing, preventing a
       second coordinator/restart from publishing the same task until completion
       or claim expiry.

@@ -140,7 +140,11 @@ def process_task(task: Dict[str, Any]) -> bool:
                     else get_sunpath_year(loc_key, str(dt_utc.year)) if kind == 'sunpath'
                     else None
                 )
-                if existing is not None:
+                cache_complete = (
+                    existing is not None if kind == 'sunpath'
+                    else isinstance(existing, list) and len(existing) > 0
+                )
+                if cache_complete:
                     logger.info("[%s] Skipping duplicate cached task %s", WORKER_ID, computation_key)
                     return True
 
@@ -177,7 +181,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                         )
                         count = len(asteroids_data)
                     else:
-                        count = 0
+                        logger.error("[%s] Asteroid computation returned no objects for %s", WORKER_ID, computation_key)
+                        return False
 
                 elif kind == 'comets':
                     # Use shared resources
@@ -210,7 +215,8 @@ def process_task(task: Dict[str, Any]) -> bool:
                         )
                         count = len(comets_data)
                     else:
-                        count = 0
+                        logger.error("[%s] Comet computation returned no objects for %s", WORKER_ID, computation_key)
+                        return False
 
                 elif kind == 'sunpath':
                     year = dt_utc.year

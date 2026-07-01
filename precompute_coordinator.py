@@ -212,13 +212,15 @@ def task_priority(hour_offset: int) -> int:
         return 10
     if distance == 1:
         return 9
-    if distance <= 6:
+    if distance == 2:
         return 8
-    if distance <= 24:
+    if distance <= 6:
         return 7
-    if distance <= 72:
+    if distance <= 24:
         return 6
-    return 5
+    if distance <= 72:
+        return 5
+    return 4
 
 
 def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset: int, include_yearly: bool = True) -> List[Dict]:
@@ -313,7 +315,7 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
             asteroid_cached = False
             try:
                 cached = get_asteroid_positions(loc_key, bucket)
-                asteroid_cached = cached is not None
+                asteroid_cached = isinstance(cached, list) and len(cached) > 0
             except Exception:
                 pass
 
@@ -343,7 +345,7 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
             comet_cached = False
             try:
                 cached = get_comet_positions(loc_key, bucket)
-                comet_cached = cached is not None
+                comet_cached = isinstance(cached, list) and len(cached) > 0
             except Exception:
                 pass
 
@@ -542,9 +544,10 @@ def main():
                 continue
 
             if should_produce:
-                # Include the previous hour in the first cycle so simulated or
-                # slightly delayed requests hit an adjacent cache bucket.
-                start_offset = -1 if current_horizon == 0 else current_horizon
+                # Include two previous hours in the first cycle. Together with
+                # priorities 10/9/8 this fills 0h, ±1h and ±2h before the wider
+                # future horizon for every location.
+                start_offset = -2 if current_horizon == 0 else current_horizon
                 end_offset = min(current_horizon + BATCH_SIZE_HOURS, hours_ahead)
 
                 # Sunpath nur im ersten Batch (Stunde 0-24) mitberechnen

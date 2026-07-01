@@ -7,6 +7,7 @@ from skyfield.data import mpc
 
 import bright_asteroids
 import precompute_coordinator
+from api import smart_interpolation
 from astronomy_utils import build_event_time_grid
 
 
@@ -38,6 +39,8 @@ def test_precompute_prioritizes_current_and_adjacent_hours():
     assert precompute_coordinator.task_priority(0) == 10
     assert precompute_coordinator.task_priority(-1) == 9
     assert precompute_coordinator.task_priority(1) == 9
+    assert precompute_coordinator.task_priority(-2) == 8
+    assert precompute_coordinator.task_priority(2) == 8
     assert precompute_coordinator.task_priority(6) > precompute_coordinator.task_priority(72)
 
 
@@ -48,3 +51,28 @@ def test_event_grid_step_is_configurable(monkeypatch):
     _, times, step = build_event_time_grid(ts, anchor, days=2)
     assert step == 15
     assert len(times) == 193
+
+
+def test_smart_interpolation_uses_claimed_high_priority_publisher(monkeypatch):
+    published = {}
+
+    def fake_publish(self, **kwargs):
+        published.update(kwargs)
+        return "comets-test"
+
+    monkeypatch.setattr(
+        "api.rabbitmq.task_publisher.TaskPublisher.publish_precompute_task",
+        fake_publish,
+    )
+    smart_interpolation._trigger_background_worker(
+        "comets", 46.7632, 14.8417, 405, datetime(2026, 7, 3, 3, tzinfo=timezone.utc)
+    )
+    assert published["kind"] == "comets"
+    assert published["priority"] == 10
+    assert published["location"]["latitude"] == 46.7632
+
+
+def test_comet_frontend_url_uses_ampersand_after_nocache():
+    source = open("static/js/skyRenderer.js", encoding="utf-8").read()
+    assert "`${API_ENDPOINTS.COMETS}?nocache=1`" in source
+    assert "url += `&lat=${this.location.latitude}" in source

@@ -353,7 +353,11 @@ class UnifiedWorker:
                     else get_sunpath_year(loc_key, str(dt_utc.year)) if kind == 'sunpath'
                     else None
                 )
-                if existing is not None:
+                cache_complete = (
+                    existing is not None if kind == 'sunpath'
+                    else isinstance(existing, list) and len(existing) > 0
+                )
+                if cache_complete:
                     logger.info("Skipping duplicate cached task %s", computation_key)
                     return True
 
@@ -374,7 +378,8 @@ class UnifiedWorker:
                         store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
                         count = len(asteroids_data)
                     else:
-                        count = 0
+                        logger.error("Asteroid computation returned no objects for %s", computation_key)
+                        return False
 
                 elif kind == 'comets':
                     # Nutze konfigurierbare Limits
@@ -393,7 +398,8 @@ class UnifiedWorker:
                         store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
                         count = len(comets_data)
                     else:
-                        count = 0
+                        logger.error("Comet computation returned no objects for %s", computation_key)
+                        return False
 
                 elif kind == 'sunpath':
                     # Precompute yearly sunpath curve for this location

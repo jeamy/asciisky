@@ -418,62 +418,20 @@ def _trigger_background_worker(
     Does not block - worker will compute and cache the bucket.
     """
     try:
-        import pika
-        import json
         import os
-        import uuid
-        import time
+        from api.rabbitmq.task_publisher import TaskPublisher
 
-        rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
-
-        # Determine routing key based on object type
-        if object_type == 'asteroids':
-            routing_key = 'compute.asteroid'
-            kind = 'asteroids'
-        else:  # comets
-            routing_key = 'compute.comet'
-            kind = 'comets'
-
-        task_id = f"{object_type}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
-        # Task data
-        task = {
-            'task_id': task_id,
-            'kind': kind,
-            'location': {
-                'latitude': lat,
-                'longitude': lon,
-                'elevation': elevation
-            },
-            'time_bucket': dt_utc.isoformat(),
-            'magnitude': 20.0 if object_type == 'asteroids' else None,
-            'max_comets': 1000 if object_type == 'comets' else None
-        }
-
-        # Publish to RabbitMQ
-        params = pika.URLParameters(rabbitmq_url)
-        connection = pika.BlockingConnection(params)
-        channel = connection.channel()
-
-        # Declare exchange
-        channel.exchange_declare(
-            exchange='computation.direct',
-            exchange_type='direct',
-            durable=True
+        kind = 'asteroids' if object_type == 'asteroids' else 'comets'
+        publisher = TaskPublisher(
+            os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
         )
-
-        # Publish task
-        channel.basic_publish(
-            exchange='computation.direct',
-            routing_key=routing_key,
-            body=json.dumps(task),
-            properties=pika.BasicProperties(
-                delivery_mode=2,  # persistent
-                priority=5
-            )
+        task_id = publisher.publish_precompute_task(
+            kind=kind,
+            location={'latitude': lat, 'longitude': lon, 'elevation': elevation},
+            time_bucket=dt_utc.isoformat(),
+            magnitude=20.0 if object_type == 'asteroids' else 14.0,
+            priority=10,
         )
-
-        connection.close()
         logger.info(f"✅ Triggered background worker for {object_type}: task_id={task_id}, bucket={dt_utc.isoformat()}")
 
     except Exception as e:

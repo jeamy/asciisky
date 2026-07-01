@@ -2318,7 +2318,7 @@ export class SkyRenderer {
 
             // Verwende die gespeicherten Standortdaten
             if (this.location) {
-                url += `?lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+                url += `&lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
             }
 
             url = this.appendTimeParam(url);
