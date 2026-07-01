@@ -228,7 +228,7 @@ def _apply_smart_strategy(
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket2
             logger.info(f"Only previous bucket available for {object_type} → triggering background worker for bucket2")
-            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt, bucket_hours)
 
             # EINFACHE LÖSUNG: Extrapoliere aus list1!
             # Wenn wir bei factor=0.5 sind (30min nach bucket1), extrapoliere 30min vorwärts
@@ -256,7 +256,7 @@ def _apply_smart_strategy(
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket1
             logger.info(f"Only future bucket available for {object_type} → triggering background worker for bucket1")
-            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt, bucket_hours)
 
             # Check if future bucket is within acceptable time range
             time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
@@ -292,8 +292,8 @@ def _apply_smart_strategy(
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ workers for both buckets
             logger.info(f"No buckets available for {object_type} → triggering background workers for both buckets")
-            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt)
-            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt)
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt, bucket_hours)
+            _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt, bucket_hours)
             # Return None (user gets empty response, next request will have data)
             logger.info(f"Background workers triggered, returning None (data will be available soon)")
             return None
@@ -424,7 +424,8 @@ def _trigger_background_worker(
     lat: float,
     lon: float,
     elevation: float,
-    dt_utc: datetime
+    dt_utc: datetime,
+    bucket_hours: int = 1,
 ) -> None:
     """
     Trigger RabbitMQ worker for background computation (ASYNC).
@@ -444,6 +445,7 @@ def _trigger_background_worker(
             time_bucket=dt_utc.isoformat(),
             magnitude=20.0 if object_type == 'asteroids' else 14.0,
             priority=10,
+            bucket_hours=bucket_hours,
         )
         logger.info(f"✅ Triggered background worker for {object_type}: task_id={task_id}, bucket={dt_utc.isoformat()}")
 

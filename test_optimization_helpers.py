@@ -55,9 +55,45 @@ def test_precompute_prioritizes_current_and_adjacent_hours():
     assert precompute_coordinator.task_priority(6) > precompute_coordinator.task_priority(72)
 
 
+def test_coordinator_tasks_use_configured_bucket_boundary(monkeypatch):
+    monkeypatch.setattr(precompute_coordinator.bright_asteroids, "ASTEROID_CACHE_BUCKET_HOURS", 6)
+    monkeypatch.setattr(precompute_coordinator.comets, "COMET_CACHE_BUCKET_HOURS", 3)
+    monkeypatch.setattr(precompute_coordinator, "get_asteroid_positions", lambda *args: None)
+    monkeypatch.setattr(precompute_coordinator, "get_comet_positions", lambda *args: None)
+
+    tasks = precompute_coordinator.create_precompute_tasks(
+        [{"latitude": 46.7632, "longitude": 14.8417, "elevation": 405}],
+        0,
+        1,
+        include_yearly=False,
+    )
+    asteroid_task = next(task for task in tasks if task["kind"] == "asteroids")
+    comet_task = next(task for task in tasks if task["kind"] == "comets")
+
+    assert asteroid_task["bucket_hours"] == 6
+    assert datetime.fromisoformat(asteroid_task["time_bucket"]).hour % 6 == 0
+    assert comet_task["bucket_hours"] == 3
+    assert datetime.fromisoformat(comet_task["time_bucket"]).hour % 3 == 0
+
+
 def test_worker_position_bucket_is_hourly_not_legacy_six_hour():
     dt = datetime(2026, 7, 1, 22, 37, tzinfo=timezone.utc)
     assert worker_utils.position_time_bucket(dt) == "20260701T22"
+
+
+def test_worker_position_bucket_uses_task_bucket_hours():
+    dt = datetime(2026, 7, 1, 22, 37, tzinfo=timezone.utc)
+    assert worker_utils.position_time_bucket(dt, 6) == "20260701T18"
+
+
+def test_precompute_task_key_includes_bucket_size():
+    task = {
+        "kind": "comets",
+        "location": {"latitude": 46.7632, "longitude": 14.8417, "elevation": 405},
+        "time_bucket": "2026-07-01T22:37:00+00:00",
+        "bucket_hours": 6,
+    }
+    assert worker_utils.precompute_task_key(task).endswith("20260701T18_6h")
 
 
 def test_smart_interpolation_stores_with_configured_bucket_hours(monkeypatch):
@@ -101,10 +137,16 @@ def test_smart_interpolation_uses_claimed_high_priority_publisher(monkeypatch):
         fake_publish,
     )
     smart_interpolation._trigger_background_worker(
-        "comets", 46.7632, 14.8417, 405, datetime(2026, 7, 3, 3, tzinfo=timezone.utc)
+        "comets",
+        46.7632,
+        14.8417,
+        405,
+        datetime(2026, 7, 3, 3, tzinfo=timezone.utc),
+        bucket_hours=6,
     )
     assert published["kind"] == "comets"
     assert published["priority"] == 10
+    assert published["bucket_hours"] == 6
     assert published["location"]["latitude"] == 46.7632
 
 

@@ -61,7 +61,8 @@ async def trigger_comet_worker(lat, lon, elevation, dt_utc):
                         'elevation': elevation
                     },
                     'time_bucket': dt_utc.isoformat(),
-                    'magnitude': 14.0  # Max magnitude for comets
+                    'magnitude': 14.0,  # Max magnitude for comets
+                    'bucket_hours': comets.COMET_CACHE_BUCKET_HOURS,
                 }
                 
                 logger.info(f"📤 Publishing task: {task['task_id']}")

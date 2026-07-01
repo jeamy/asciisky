@@ -124,10 +124,10 @@ def round_to_bucket_boundary(time_bucket_str: str) -> datetime:
     return time_bucket_dt
 
 
-def position_time_bucket(dt: datetime) -> str:
-    """Return the canonical one-hour asteroid/comet position bucket."""
+def position_time_bucket(dt: datetime, bucket_hours: int = 1) -> str:
+    """Return the canonical asteroid/comet position bucket."""
     from cache_utils import time_bucket_utc
-    return time_bucket_utc(dt, 1)
+    return time_bucket_utc(dt, bucket_hours)
 
 
 def precompute_task_key(task: Dict[str, Any]) -> str:
@@ -140,8 +140,11 @@ def precompute_task_key(task: Dict[str, Any]) -> str:
     )
     kind = task['kind']
     dt = datetime.fromisoformat(task['time_bucket'].replace('Z', '+00:00'))
-    bucket = dt.isoformat() if kind == 'sunpath' else time_bucket_utc(dt, 1)
-    return f"{kind}_{lat:.4f}_{lon:.4f}_{elevation:.0f}_{bucket}"
+    bucket_hours = int(task.get('bucket_hours', 1))
+    if kind == 'sunpath':
+        return f"{kind}_{lat:.4f}_{lon:.4f}_{elevation:.0f}_{dt.isoformat()}"
+    bucket = time_bucket_utc(dt, bucket_hours)
+    return f"{kind}_{lat:.4f}_{lon:.4f}_{elevation:.0f}_{bucket}_{bucket_hours}h"
 
 
 def publish_worker_status(

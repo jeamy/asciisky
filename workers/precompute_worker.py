@@ -119,6 +119,7 @@ def process_task(task: Dict[str, Any]) -> bool:
         # Stelle sicher dass Timezone gesetzt ist
         if dt_utc.tzinfo is None:
             dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        bucket_hours = int(task.get('bucket_hours', 1))
 
         logger.info(f"[{WORKER_ID}] Processing {kind} for {name} ({lat:.4f}, {lon:.4f}) at {time_bucket_str}")
 
@@ -135,7 +136,7 @@ def process_task(task: Dict[str, Any]) -> bool:
             with computation_lock(computation_key, ttl_seconds=300):
                 logger.debug(f"[{WORKER_ID}] Acquired advisory lock for {computation_key}")
 
-                tb = worker_utils.position_time_bucket(dt_utc)
+                tb = worker_utils.position_time_bucket(dt_utc, bucket_hours)
                 existing = (
                     get_asteroid_positions(loc_key, tb) if kind == 'asteroids'
                     else get_comet_positions(loc_key, tb) if kind == 'comets'

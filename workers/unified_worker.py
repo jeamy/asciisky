@@ -326,6 +326,7 @@ class UnifiedWorker:
         dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
         if dt_utc.tzinfo is None:
             dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        bucket_hours = int(task.get('bucket_hours', 1))
 
         logger.info(f"Processing precompute {kind} for {location_name} at {dt_utc.strftime('%Y-%m-%d %H:%M UTC')}")
 
@@ -348,7 +349,7 @@ class UnifiedWorker:
             with computation_lock(computation_key, ttl_seconds=300):
                 logger.debug(f"Acquired Advisory Lock for: {computation_key}")
 
-                tb = worker_utils.position_time_bucket(dt_utc)
+                tb = worker_utils.position_time_bucket(dt_utc, bucket_hours)
                 existing = (
                     get_asteroid_positions(loc_key, tb) if kind == 'asteroids'
                     else get_comet_positions(loc_key, tb) if kind == 'comets'

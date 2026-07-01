@@ -31,6 +31,8 @@ import pika
 
 # Settings
 import settings
+import bright_asteroids
+import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import (
     claim_precompute_task,
@@ -305,16 +307,21 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
         # Erstelle Tasks für jede Stunde im Fenster
         for hour_offset in range(start_offset, end_offset):
             target_time = current_hour + timedelta(hours=hour_offset)
-            bucket = time_bucket_utc(target_time, 1)  # 1-hour buckets
-            asteroid_task_key = f"asteroids_{loc_key_dup}_{bucket}"
-            comet_task_key = f"comets_{loc_key_dup}_{bucket}"
+            asteroid_bucket_hours = bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS
+            comet_bucket_hours = comets.COMET_CACHE_BUCKET_HOURS
+            asteroid_bucket = time_bucket_utc(target_time, asteroid_bucket_hours)
+            comet_bucket = time_bucket_utc(target_time, comet_bucket_hours)
+            asteroid_bucket_dt = datetime.strptime(asteroid_bucket, "%Y%m%dT%H").replace(tzinfo=timezone.utc)
+            comet_bucket_dt = datetime.strptime(comet_bucket, "%Y%m%dT%H").replace(tzinfo=timezone.utc)
+            asteroid_task_key = f"asteroids_{loc_key_dup}_{asteroid_bucket}_{asteroid_bucket_hours}h"
+            comet_task_key = f"comets_{loc_key_dup}_{comet_bucket}_{comet_bucket_hours}h"
 
             priority = task_priority(hour_offset)
 
             # Prüfe ob Asteroiden-Daten schon vorhanden
             asteroid_cached = False
             try:
-                cached = get_asteroid_positions(loc_key, bucket)
+                cached = get_asteroid_positions(loc_key, asteroid_bucket)
                 asteroid_cached = isinstance(cached, list) and len(cached) > 0
             except Exception:
                 pass
@@ -331,9 +338,10 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
                             'elevation': elevation,
                             'name': name
                         },
-                        'time_bucket': target_time.isoformat(),
+                        'time_bucket': asteroid_bucket_dt.isoformat(),
                         'magnitude': 20.0,  # Default max magnitude
-                        'priority': priority
+                        'priority': priority,
+                        'bucket_hours': asteroid_bucket_hours,
                     })
                 else:
                     skipped_queue += 1
@@ -344,7 +352,7 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
             # Prüfe ob Kometen-Daten schon vorhanden
             comet_cached = False
             try:
-                cached = get_comet_positions(loc_key, bucket)
+                cached = get_comet_positions(loc_key, comet_bucket)
                 comet_cached = isinstance(cached, list) and len(cached) > 0
             except Exception:
                 pass
@@ -361,9 +369,10 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
                             'elevation': elevation,
                             'name': name
                         },
-                        'time_bucket': target_time.isoformat(),
+                        'time_bucket': comet_bucket_dt.isoformat(),
                         'magnitude': 14.0,  # Comet max magnitude
-                        'priority': priority
+                        'priority': priority,
+                        'bucket_hours': comet_bucket_hours,
                     })
                 else:
                     skipped_queue += 1

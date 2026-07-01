@@ -113,7 +113,8 @@ class TaskPublisher:
         location: Dict[str, float],
         time_bucket: str,
         magnitude: Optional[float] = None,
-        priority: int = 5
+        priority: int = 5,
+        bucket_hours: int = 1,
     ) -> str:
         """
         Publiziert einen Precompute-Task
@@ -124,6 +125,7 @@ class TaskPublisher:
             time_bucket: ISO-Format Zeitstempel
             magnitude: Optional max magnitude
             priority: Task-Priorität (0-10, höher = wichtiger)
+            bucket_hours: Cache-Bucketgröße in Stunden
             
         Returns:
             Task-ID
@@ -135,7 +137,8 @@ class TaskPublisher:
             'time_bucket': time_bucket,
             'magnitude': magnitude,
             'created_at': datetime.now(timezone.utc).isoformat(),
-            'priority': priority
+            'priority': priority,
+            'bucket_hours': bucket_hours,
         }
         key = precompute_task_key(task_data)
         task_id = f"{kind}_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
@@ -265,7 +268,8 @@ class TaskPublisher:
                     location=task['location'],
                     time_bucket=task['time_bucket'],
                     magnitude=task.get('magnitude'),
-                    priority=task.get('priority', 5)
+                    priority=task.get('priority', 5),
+                    bucket_hours=task.get('bucket_hours', 1),
                 )
                 task_ids.append(task_id)
             except Exception as e:

@@ -61,7 +61,8 @@ async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
                         'elevation': elevation
                     },
                     'time_bucket': dt_utc.isoformat(),
-                    'magnitude': 20.0  # Max magnitude for asteroids
+                    'magnitude': 20.0,  # Max magnitude for asteroids
+                    'bucket_hours': bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
                 }
                 
                 logger.info(f"📤 Publishing task: {task['task_id']}")
