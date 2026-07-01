@@ -94,19 +94,24 @@ def _packed_mpc_epochs_tt(values) -> np.ndarray:
         return ord(char) - (48 if char.isdigit() else 55)
 
     for pos, raw in enumerate(values):
-        value = str(raw)
-        if len(value) != 5:
-            raise ValueError(f"invalid MPC packed epoch: {value!r}")
-        year = 100 * packed_number(value[0]) + int(value[1:3])
-        month = packed_number(value[3])
-        day = packed_number(value[4])
-        # Gregorian calendar to Julian day at midnight; identical convention
-        # to Skyfield's julian_day(...)-0.5 for modern MPC epochs.
-        a = (14 - month) // 12
-        y = year + 4800 - a
-        m = month + 12 * a - 3
-        jdn = day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
-        epochs[pos] = float(jdn) - 0.5
+        try:
+            value = str(raw).strip()
+            if len(value) != 5 or not value[1:3].isdigit():
+                raise ValueError
+            year = 100 * packed_number(value[0]) + int(value[1:3])
+            month = packed_number(value[3])
+            day = packed_number(value[4])
+            if not (1 <= month <= 12 and 1 <= day <= 31 and 1800 <= year <= 2199):
+                raise ValueError
+            # Gregorian calendar to Julian day at midnight; identical convention
+            # to Skyfield's julian_day(...)-0.5 for modern MPC epochs.
+            a = (14 - month) // 12
+            y = year + 4800 - a
+            m = month + 12 * a - 3
+            jdn = day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
+            epochs[pos] = float(jdn) - 0.5
+        except (TypeError, ValueError, IndexError):
+            epochs[pos] = np.nan
     return epochs
 
 
@@ -307,6 +312,8 @@ def _compute_asteroids_vectorized(
             epochs_tt = candidates_df["epoch_tt"].to_numpy(dtype=float)
         else:
             epochs_tt = _packed_mpc_epochs_tt(candidates_df["epoch_packed"].to_numpy())
+        if not np.all(np.isfinite(epochs_tt)):
+            raise ValueError("batch propagation encountered invalid packed epochs")
         mean_motion = np.sqrt(representative_orbit.mu_au3_d2 / (a ** 3))
         mean_anomaly = (mean_anomaly + mean_motion * (t.tt - epochs_tt) + np.pi) % (2.0 * np.pi) - np.pi
 

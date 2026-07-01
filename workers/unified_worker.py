@@ -348,7 +348,7 @@ class UnifiedWorker:
             with computation_lock(computation_key, ttl_seconds=300):
                 logger.debug(f"Acquired Advisory Lock for: {computation_key}")
 
-                tb = time_bucket_utc(dt_utc)
+                tb = worker_utils.position_time_bucket(dt_utc)
                 existing = (
                     get_asteroid_positions(loc_key, tb) if kind == 'asteroids'
                     else get_comet_positions(loc_key, tb) if kind == 'comets'

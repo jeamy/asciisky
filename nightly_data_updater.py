@@ -249,12 +249,12 @@ def update_asteroid_data():
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
         df['magnitude_G'] = df['magnitude_G'].fillna(0.15)
-        valid_epoch = df['epoch_packed'].astype(str).str.len().eq(5)
-        df['epoch_tt'] = float('nan')
-        if valid_epoch.any():
-            df.loc[valid_epoch, 'epoch_tt'] = bright_asteroids._packed_mpc_epochs_tt(
-                df.loc[valid_epoch, 'epoch_packed'].to_numpy()
-            )
+        # MPC parser output can contain header/meta rows (for example "ORBIT").
+        # The tolerant decoder records NaN for those rows; numeric H/orbit
+        # filtering removes them before computation.
+        df['epoch_tt'] = bright_asteroids._packed_mpc_epochs_tt(
+            df['epoch_packed'].to_numpy()
+        )
 
         # Store only changed source data; unchanged nightly downloads must not
         # invalidate every computed bucket.

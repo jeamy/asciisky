@@ -8,6 +8,7 @@ from skyfield.data import mpc
 import bright_asteroids
 import precompute_coordinator
 from api import smart_interpolation
+from workers import worker_utils
 from astronomy_utils import build_event_time_grid
 
 
@@ -35,6 +36,16 @@ def test_packed_epoch_decoder_matches_skyfield():
     np.testing.assert_allclose(decoded, expected, rtol=0.0, atol=0.0)
 
 
+def test_packed_epoch_decoder_ignores_mpc_header_rows():
+    decoded = bright_asteroids._packed_mpc_epochs_tt(
+        np.array(["ORBIT", "This ", "K239N", None], dtype=object)
+    )
+    assert np.isnan(decoded[0])
+    assert np.isnan(decoded[1])
+    assert np.isfinite(decoded[2])
+    assert np.isnan(decoded[3])
+
+
 def test_precompute_prioritizes_current_and_adjacent_hours():
     assert precompute_coordinator.task_priority(0) == 10
     assert precompute_coordinator.task_priority(-1) == 9
@@ -42,6 +53,11 @@ def test_precompute_prioritizes_current_and_adjacent_hours():
     assert precompute_coordinator.task_priority(-2) == 8
     assert precompute_coordinator.task_priority(2) == 8
     assert precompute_coordinator.task_priority(6) > precompute_coordinator.task_priority(72)
+
+
+def test_worker_position_bucket_is_hourly_not_legacy_six_hour():
+    dt = datetime(2026, 7, 1, 22, 37, tzinfo=timezone.utc)
+    assert worker_utils.position_time_bucket(dt) == "20260701T22"
 
 
 def test_event_grid_step_is_configurable(monkeypatch):

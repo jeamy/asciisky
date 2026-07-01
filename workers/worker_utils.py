@@ -124,6 +124,12 @@ def round_to_bucket_boundary(time_bucket_str: str) -> datetime:
     return time_bucket_dt
 
 
+def position_time_bucket(dt: datetime) -> str:
+    """Return the canonical one-hour asteroid/comet position bucket."""
+    from cache_utils import time_bucket_utc
+    return time_bucket_utc(dt, 1)
+
+
 def precompute_task_key(task: Dict[str, Any]) -> str:
     """Return the canonical persistent claim/message key for a precompute task."""
     from cache_utils import normalize_location, time_bucket_utc

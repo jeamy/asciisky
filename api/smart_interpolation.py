@@ -22,7 +22,13 @@ from enum import Enum
 
 # Existing imports
 from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import get_asteroid_positions, get_comet_positions, store_asteroid_positions, store_comet_positions
+from db_utils import (
+    database_target,
+    get_asteroid_positions,
+    get_comet_positions,
+    store_asteroid_positions,
+    store_comet_positions,
+)
 from api.interpolation import get_interpolation_buckets, interpolate_object_list
 import bright_asteroids
 import comets
@@ -400,7 +406,6 @@ def _load_bucket(
 
             if isinstance(positions, list) and positions:
                 return positions
-            from db_utils import database_target
             logger.warning(
                 "Missing/empty %s cache row: key=%s bucket=%s db=%s",
                 object_type, loc_key, bucket, database_target(),
