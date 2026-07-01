@@ -187,10 +187,11 @@ def _load_with_smart_interpolation(
     # Apply adaptive strategy based on bucket availability
     if _config.strategy == InterpolationStrategy.SMART_INTERPOLATION:
         return _apply_smart_strategy(object_type, lat, lon, elevation, dt_utc,
-                                    bucket1_dt, bucket2_dt, factor, list1, list2)
+                                    bucket1_dt, bucket2_dt, factor, list1, list2,
+                                    bucket_hours)
     elif _config.strategy == InterpolationStrategy.ON_DEMAND_ONLY:
         return _apply_on_demand_strategy(object_type, lat, lon, elevation, dt_utc,
-                                        bucket1_dt, bucket2_dt, factor)
+                                        bucket1_dt, bucket2_dt, factor, bucket_hours)
     else:
         # Fallback to nearest bucket
         return _apply_nearest_bucket_strategy(list1, list2, factor, bucket2_dt, dt_utc)
@@ -206,7 +207,8 @@ def _apply_smart_strategy(
     bucket2_dt: datetime,
     factor: float,
     list1: Optional[List[Dict[str, Any]]],
-    list2: Optional[List[Dict[str, Any]]]
+    list2: Optional[List[Dict[str, Any]]],
+    bucket_hours: int,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Apply smart interpolation strategy with on-demand computation.
@@ -241,7 +243,7 @@ def _apply_smart_strategy(
             list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
             if list2:
                 if _config.cache_computed:
-                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
+                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
             logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
             return list1
@@ -270,7 +272,7 @@ def _apply_smart_strategy(
             list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
             if list1:
                 if _config.cache_computed:
-                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
+                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
             # Fallback: Check if future bucket is within acceptable time range
@@ -303,8 +305,8 @@ def _apply_smart_strategy(
 
             if list1 and list2:
                 if _config.cache_computed:
-                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
-                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
+                    _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
+                    _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
             # Return whatever we could compute
@@ -323,7 +325,8 @@ def _apply_on_demand_strategy(
     dt_utc: datetime,
     bucket1_dt: datetime,
     bucket2_dt: datetime,
-    factor: float
+    factor: float,
+    bucket_hours: int,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Apply on-demand only strategy (compute everything fresh).
@@ -336,8 +339,8 @@ def _apply_on_demand_strategy(
 
     if list1 and list2:
         if _config.cache_computed:
-            _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1)
-            _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2)
+            _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
+            _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
     return list1 or list2 or None
@@ -491,7 +494,8 @@ def _store_bucket(
     lon: float,
     elevation: float,
     dt_utc: datetime,
-    objects: List[Dict[str, Any]]
+    objects: List[Dict[str, Any]],
+    bucket_hours: int,
 ) -> None:
     """
     Store computed bucket in cache.
@@ -499,7 +503,7 @@ def _store_bucket(
     try:
         lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
-        bucket = time_bucket_utc(dt_utc, 1)
+        bucket = time_bucket_utc(dt_utc, bucket_hours)
 
         if object_type == 'asteroids':
             store_asteroid_positions(0, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)

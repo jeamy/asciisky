@@ -60,6 +60,26 @@ def test_worker_position_bucket_is_hourly_not_legacy_six_hour():
     assert worker_utils.position_time_bucket(dt) == "20260701T22"
 
 
+def test_smart_interpolation_stores_with_configured_bucket_hours(monkeypatch):
+    stored = {}
+
+    def fake_store(user_id, loc_key, bucket, lat, lon, elevation, objects):
+        stored["bucket"] = bucket
+
+    monkeypatch.setattr(smart_interpolation, "store_asteroid_positions", fake_store)
+    smart_interpolation._store_bucket(
+        "asteroids",
+        46.7632,
+        14.8417,
+        405,
+        datetime(2026, 7, 1, 22, 37, tzinfo=timezone.utc),
+        [{"name": "test"}],
+        bucket_hours=6,
+    )
+
+    assert stored["bucket"] == "20260701T18"
+
+
 def test_event_grid_step_is_configurable(monkeypatch):
     monkeypatch.setenv("ASCII_SKY_EVENT_GRID_MINUTES", "15")
     ts = Loader("data").timescale()
