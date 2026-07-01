@@ -3,9 +3,11 @@ from typing import Any, Dict, Optional
 import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from psycopg.errors import ForeignKeyViolation
 
 from settings import DEFAULT_SETTINGS, get_default_magnitude_filters
 from db_utils import get_user_settings as db_get_user_settings, save_user_settings as db_save_user_settings
+from api.routes.auth import _get_user_by_id, _session_clear_user
 
 
 logger = logging.getLogger(__name__)
@@ -62,16 +64,30 @@ def _merge_settings(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str,
     return result
 
 
+def _require_authenticated_user(request: Request) -> int:
+    """Return a live user id or clear a stale/disabled session and raise 401."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        user = _get_user_by_id(int(user_id))
+    except (TypeError, ValueError):
+        user = None
+    if not user or not user.get("is_active", True):
+        _session_clear_user(request)
+        raise HTTPException(status_code=401, detail="Session user no longer exists")
+    return int(user["id"])
+
+
 @router.get("/user/settings")
 async def get_user_settings(request: Request) -> Dict[str, Any]:
     """Return settings JSON for the currently authenticated user.
 
     The user_id is taken from the session; unauthenticated callers receive 401.
     """
-    user_id = request.session.get("user_id")
+    user_id = _require_authenticated_user(request)
     logger.info("GET /user/settings user_id=%s", user_id)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
         stored = db_get_user_settings(int(user_id))
@@ -94,10 +110,8 @@ async def update_user_settings(
     Partial updates are allowed; missing fields fall back to existing values or
     defaults.
     """
-    user_id = request.session.get("user_id")
+    user_id = _require_authenticated_user(request)
     logger.info("PUT /user/settings user_id=%s", user_id)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
         current = db_get_user_settings(int(user_id)) or {}
@@ -108,5 +122,10 @@ async def update_user_settings(
         db_save_user_settings(int(user_id), final_settings)
         logger.info("PUT /user/settings user_id=%s saved", user_id)
         return final_settings
+    except ForeignKeyViolation:
+        # User may have been deleted by an administrator after session
+        # validation but before the settings upsert.
+        _session_clear_user(request)
+        raise HTTPException(status_code=401, detail="Session user no longer exists")
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=500, detail=str(exc))

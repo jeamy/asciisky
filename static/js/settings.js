@@ -296,6 +296,7 @@ export class SettingsManager {
 
     // Speichert aktuelle Einstellungen in der Datenbank (falls ein authentifizierter Benutzer bekannt ist)
     async saveUserSettingsToServer() {
+        if (!this.authenticatedUserId) return;
         try {
             const url = `${API_ENDPOINTS.USER_SETTINGS_SET}?nocache=1`;
             const resp = await fetch(url, {

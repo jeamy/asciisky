@@ -221,8 +221,8 @@ async def me(request: Request):
         return {"authenticated": False, "user": None}
 
     user = _get_user_by_id(int(user_id))
-    if not user:
-        # Session refers to a non-existing user; clear it
+    if not user or not user.get("is_active", True):
+        # Session refers to a missing or disabled user; clear it.
         _session_clear_user(request)
         return {"authenticated": False, "user": None}
 
