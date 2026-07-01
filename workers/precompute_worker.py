@@ -31,6 +31,8 @@ import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import (
+    database_target,
+    database_identity,
     get_asteroid_positions,
     get_comet_positions,
     get_sunpath_year,
@@ -274,6 +276,7 @@ def main():
     """Hauptfunktion - Worker Loop"""
     logger.info("=" * 60)
     logger.info(f"Precompute Worker [{WORKER_ID}] - Starting")
+    logger.info("PostgreSQL target: %s", database_target())
     logger.info("=" * 60)
 
     # Konfiguration
@@ -282,6 +285,10 @@ def main():
     logger.info(f"Configuration:")
     logger.info(f"  - Worker ID: {WORKER_ID}")
     logger.info(f"  - Prefetch Count: {prefetch_count}")
+    try:
+        logger.info("Actual PostgreSQL server: %s", database_identity())
+    except Exception as exc:
+        logger.warning("Could not read PostgreSQL server identity: %s", exc)
 
     # Initialize Shared Resources
     global shared_resources, _active_connection, _active_channel

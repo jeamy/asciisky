@@ -12,11 +12,17 @@ from fastapi.staticfiles import StaticFiles
 # Import routers from the new modules
 from api.routes import session, celestial, asteroids, comets, config, zodiac, filters, user_settings, auth, admin_users, messier
 from api.routes.auth import _get_user_by_id
+from db_utils import database_identity, database_target
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     app.state.precompute_tasks = {}
+    print(f"AsciiSky web PostgreSQL target: {database_target()}", flush=True)
+    try:
+        print(f"AsciiSky web actual PostgreSQL server: {database_identity()}", flush=True)
+    except Exception as exc:
+        print(f"AsciiSky web PostgreSQL identity unavailable: {exc}", flush=True)
     yield
     # Shutdown (nothing to clean up currently)
 

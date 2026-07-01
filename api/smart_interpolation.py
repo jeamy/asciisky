@@ -400,6 +400,11 @@ def _load_bucket(
 
             if isinstance(positions, list) and positions:
                 return positions
+            from db_utils import database_target
+            logger.warning(
+                "Missing/empty %s cache row: key=%s bucket=%s db=%s",
+                object_type, loc_key, bucket, database_target(),
+            )
         except Exception as e:
             logger.error(f"Error loading {object_type} bucket {bucket}: {e}")
 

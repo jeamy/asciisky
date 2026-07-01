@@ -37,6 +37,8 @@ import bright_asteroids
 import comets
 from cache_utils import normalize_location, location_key, time_bucket_utc
 from db_utils import (
+    database_target,
+    database_identity,
     get_asteroid_positions,
     get_comet_positions,
     get_sunpath_year,
@@ -828,11 +830,16 @@ def main():
 
     logger.info("=" * 60)
     logger.info(f"Unified Worker [{worker_id}] - Starting")
+    logger.info("PostgreSQL target: %s", database_target())
     logger.info("=" * 60)
 
     # Warte auf Datenbank
     if not wait_for_database(worker_id):
         sys.exit(1)
+    try:
+        logger.info("Actual PostgreSQL server: %s", database_identity())
+    except Exception as exc:
+        logger.warning("Could not read PostgreSQL server identity: %s", exc)
 
     # Starte Worker
     worker = UnifiedWorker(worker_id, rabbitmq_url)

@@ -32,6 +32,33 @@ POSTGRES_DB = os.environ.get('POSTGRES_DB', 'asciisky')
 POSTGRES_USER = os.environ.get('POSTGRES_USER', 'asciisky')
 POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'changeme')
 
+
+def database_target() -> str:
+    """Non-sensitive configured database target for diagnostics."""
+    return f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB} user={POSTGRES_USER}"
+
+
+def database_identity() -> str:
+    """Return the actual PostgreSQL server identity reached by this process."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT current_database() AS database,
+                       inet_server_addr()::text AS server_addr,
+                       inet_server_port() AS server_port,
+                       pg_postmaster_start_time()::text AS server_started
+            """)
+            row = cursor.fetchone()
+        conn.commit()
+        return (
+            f"{row['server_addr']}:{row['server_port']}/{row['database']} "
+            f"started={row['server_started']}"
+        )
+    except Exception:
+        conn.rollback()
+        raise
+
 # Thread-local storage for database connections
 _thread_local = threading.local()
 
