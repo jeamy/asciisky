@@ -5,6 +5,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/docker-build.sh"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -41,6 +45,7 @@ show_help() {
     echo "  production Deploy to production with Hybrid Deduplication"
     echo "  update    Update production with Hybrid verification"
     echo "  test      Run Hybrid Deduplication tests"
+    echo "  build     Multi-stage image build + verify only (no deploy)"
     echo "  summary   Show implementation summary"
     echo "  help      Show this help"
     echo ""
@@ -170,8 +175,16 @@ EOF
         docker compose down 2>/dev/null || true
     fi
     
-    print_info "Step 2: Building images with Hybrid Deduplication..."
-    docker compose build
+    print_info "Step 2: Building multi-stage images..."
+    asciisky_prepare_data_dirs .
+    asciisky_compose_build docker-compose.yml . || { print_error "Build failed"; exit 1; }
+    asciisky_tag_aliases asciisky-web:latest
+    # Dev compose may tag image as asciisky-web (no :latest) — verify best-effort
+    if docker image inspect asciisky-web:latest >/dev/null 2>&1; then
+        asciisky_verify_image asciisky-web:latest || print_warning "verify warnings"
+    elif docker image inspect asciisky-web >/dev/null 2>&1; then
+        asciisky_verify_image asciisky-web || print_warning "verify warnings"
+    fi
     
     print_info "Step 3: Starting services..."
     docker compose up -d
@@ -597,6 +610,27 @@ COMMAND="${1:-help}"
 shift
 
 case "$COMMAND" in
+    "build")
+        print_info "Multi-stage build + verify (no service start)"
+        COMPOSE="${1:-docker-compose.production.yml}"
+        if [[ ! -f "$COMPOSE" ]]; then
+            COMPOSE="docker-compose.yml"
+        fi
+        asciisky_prepare_data_dirs .
+        BUILD_NO_CACHE="${BUILD_NO_CACHE:-0}"
+        asciisky_compose_build "$COMPOSE" . || exit 1
+        asciisky_tag_aliases asciisky-web:latest
+        if docker image inspect asciisky-web:latest >/dev/null 2>&1; then
+            asciisky_verify_image asciisky-web:latest
+        elif docker image inspect asciisky-web >/dev/null 2>&1; then
+            asciisky_verify_image asciisky-web
+        else
+            print_error "Built image not found under asciisky-web[:latest]"
+            docker images | head -20
+            exit 1
+        fi
+        print_status "Build-only finished (compose=$COMPOSE)"
+        ;;
     "local")
         setup_local "$@"
         ;;

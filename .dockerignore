@@ -1,0 +1,60 @@
+# VCS / IDE
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+*.swp
+*~
+
+# Docs & local ops (not needed in runtime image)
+doc
+docs
+*.md
+!requirements.txt
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python junk
+__pycache__
+*/__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.venv
+venv
+env
+
+# data/ IS required at runtime (de421.bsp, hip_main.dat, catalogs).
+# Exclude only bulky generated/cache artifacts inside data/.
+data/cache
+data/*.pkl
+data/**/*.pkl
+*.bsp.part
+*.tmp
+tmp
+temp
+
+# Host / docker leftovers
+Dockerfile*
+!Dockerfile
+docker-compose*.yml
+.compose
+*.log
+
+# Scripts used on the host, not inside the app process
+scripts
+
+# Tests (optional — remove this line if tests must ship in the image)
+tests
+test

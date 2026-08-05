@@ -4,6 +4,11 @@
 
 set -e
 
+# Multi-stage build helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/docker-build.sh"
+
 # Hostnames (can be provided via environment or .env); fall back to example.org
 RABBITMQ_MAIN="${RABBITMQ_MAIN:-asciisky.example.org}"
 RABBITMQ_B="${RABBITMQ_B:-rabbit-b.example.org}"
@@ -69,8 +74,13 @@ setup_host() {
     
     if [ "$HOST" == "localhost" ]; then
         # Local setup
-        echo "📦 Building Docker image..."
-        docker compose -f "$COMPOSE_FILE" build || error_exit "Build failed on $HOST"
+        echo "📦 Building multi-stage Docker image..."
+        asciisky_prepare_data_dirs .
+        asciisky_compose_build "$COMPOSE_FILE" . || error_exit "Build failed on $HOST"
+        # Prefer production image name; also tag worker alias for mixed compose files
+        PRIMARY=$(docker compose -f "$COMPOSE_FILE" images -q 2>/dev/null | head -1 || true)
+        asciisky_tag_aliases "asciisky-web:latest"
+        asciisky_verify_image "asciisky-web:latest" || warning "Image verify reported issues (continuing)"
         
         echo "🚀 Starting services with worker scaling..."
         # Worker scaling via --scale (from .env)
@@ -142,8 +152,11 @@ setup_host() {
             scp .env "$HOST:~/asciisky/.env" || error_exit "Failed to copy .env to $HOST"
         fi
         
-        echo "🐳 Building images (always rebuild to ensure latest code)..."
-        ssh "$HOST" "cd ~/asciisky && docker compose -f $COMPOSE_FILE build" || error_exit "Build failed on $HOST"
+        echo "🐳 Building multi-stage images on $HOST..."
+        # Copy helper lib if missing on older checkouts (git pull should bring it)
+        ssh "$HOST" "cd ~/asciisky && mkdir -p scripts/lib data cache"
+        scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$HOST:~/asciisky/scripts/lib/docker-build.sh" || true
+        ssh "$HOST" "cd ~/asciisky && source scripts/lib/docker-build.sh && asciisky_prepare_data_dirs . && BUILD_NO_CACHE=${BUILD_NO_CACHE:-0} asciisky_compose_build $COMPOSE_FILE . && asciisky_tag_aliases asciisky-web:latest && asciisky_verify_image asciisky-web:latest"             || error_exit "Build/verify failed on $HOST"
         
         # Verify the unified_worker service exists in the compose file
         echo "🔍 Verifying unified_worker service in compose file..."

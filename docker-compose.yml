@@ -43,14 +43,13 @@ services:
 
   # ===== Web Service =====
   web:
-    image: asciisky-web
+    image: asciisky-web:latest
     build: .
     pull_policy: never
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
@@ -97,7 +96,7 @@ services:
 
   # ===== Data Updater =====
   data_updater:
-    image: asciisky-worker
+    image: asciisky-web:latest
     build: .
     pull_policy: never
     command: ["python", "nightly_data_updater.py"]
@@ -128,7 +127,7 @@ services:
 
   # ===== Precompute Coordinator =====
   precompute_coordinator:
-    image: asciisky-worker
+    image: asciisky-web:latest
     build: .
     pull_policy: never
     command: ["python", "precompute_coordinator.py"]
@@ -159,7 +158,7 @@ services:
   # Verarbeitet alle Task-Typen in einem Worker
   # HYBRID DEDUPLICATION: RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
   unified_worker:
-    image: asciisky-worker
+    image: asciisky-web:latest
     build: .
     pull_policy: never
     command: ["python", "workers/unified_worker.py"]

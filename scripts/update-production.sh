@@ -4,6 +4,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/docker-build.sh"
+
 # Check if .env exists
 if [ ! -f .env ]; then
     echo "❌ Error: .env file not found! Please create it first."
@@ -56,8 +60,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 git pull || error_exit "Git pull failed"
 
-echo "🔨 Building new images (no cache to ensure latest code)..."
-docker compose -f docker-compose.production.yml build || error_exit "Build failed"
+echo "🔨 Building multi-stage images..."
+# Default production updates to no-cache unless overridden
+BUILD_NO_CACHE="${BUILD_NO_CACHE:-1}"
+asciisky_prepare_data_dirs .
+asciisky_compose_build docker-compose.production.yml . || error_exit "Build failed"
+asciisky_tag_aliases asciisky-web:latest
+asciisky_verify_image asciisky-web:latest || warning "Image verify reported issues (continuing)"
 
 echo "🚀 Restarting services with Hybrid Deduplication..."
 docker compose -f docker-compose.production.yml up -d --scale precompute_worker=${PRECOMPUTE_WORKERS:-4} || error_exit "Restart failed"
@@ -94,9 +103,11 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh "$RABBITMQ_B" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker B"
-    ssh "$RABBITMQ_B" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker B"
-    # UNIFIED_WORKERS können ALLE Tasks übernehmen - keine Addition mehr!
-    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker B"
+    scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_B:~/asciisky/scripts/lib/docker-build.sh" 2>/dev/null ||       ssh "$RABBITMQ_B" "mkdir -p ~/asciisky/scripts/lib"
+    scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_B:~/asciisky/scripts/lib/docker-build.sh" || true
+    ssh "$RABBITMQ_B" "cd ~/asciisky && source scripts/lib/docker-build.sh && asciisky_prepare_data_dirs . && BUILD_NO_CACHE=${BUILD_NO_CACHE:-1} asciisky_compose_build docker-compose.workers.yml . && asciisky_tag_aliases asciisky-web:latest && asciisky_verify_image asciisky-web:latest"         || error_exit "Build/verify failed on worker B"
+    # worker_monitor is commented out in docker-compose.workers.yml — do not --scale it
+    ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}}"         || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
     echo ""
@@ -111,9 +122,10 @@ if [ "$UPDATE_WORKER_C" != "false" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     ssh "$RABBITMQ_C" "cd ~/asciisky && git pull" || error_exit "Git pull failed on worker C"
-    ssh "$RABBITMQ_C" "cd ~/asciisky && docker compose -f docker-compose.workers.yml build" || error_exit "Build failed on worker C"
-    # UNIFIED_WORKERS können ALLE Tasks übernehmen - keine Addition mehr!
-    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}} --scale worker_monitor=\${WORKER_MONITOR:-1}" || error_exit "Restart failed on worker C"
+    scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_C:~/asciisky/scripts/lib/docker-build.sh" 2>/dev/null ||       ssh "$RABBITMQ_C" "mkdir -p ~/asciisky/scripts/lib"
+    scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_C:~/asciisky/scripts/lib/docker-build.sh" || true
+    ssh "$RABBITMQ_C" "cd ~/asciisky && source scripts/lib/docker-build.sh && asciisky_prepare_data_dirs . && BUILD_NO_CACHE=${BUILD_NO_CACHE:-1} asciisky_compose_build docker-compose.workers.yml . && asciisky_tag_aliases asciisky-web:latest && asciisky_verify_image asciisky-web:latest"         || error_exit "Build/verify failed on worker C"
+    ssh "$RABBITMQ_C" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}}"         || error_exit "Restart failed on worker C"
     
     success "Worker C updated"
     echo ""
@@ -140,7 +152,7 @@ echo "📝 Useful commands:"
 echo "   docker logs -f asciisky-precompute-coordinator  # Precompute coordinator"
 echo "   docker compose -f docker-compose.production.yml logs -f precompute_worker  # Precompute worker (main)"
 echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
-echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f worker_monitor'  # Worker monitor dashboard"
+echo "   # worker_monitor service is currently disabled in docker-compose.workers.yml"
 echo "   ssh $RABBITMQ_C 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
 echo ""
 echo "🔒 Hybrid Deduplication Commands:"

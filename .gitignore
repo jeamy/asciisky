@@ -48,6 +48,7 @@ docker-compose.override.yml
 *.swp
 *.swo
 *~
+.kiro/
 .DS_Store
 
 # Astronomie-Daten (optional)
