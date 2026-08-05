@@ -5,7 +5,7 @@
 services:
   # ===== PostgreSQL Database =====
   postgres:
-    image: postgres:16.4-alpine
+    image: postgres:16-alpine
     container_name: asciisky-postgres
     ports:
       - "5432:5432"
