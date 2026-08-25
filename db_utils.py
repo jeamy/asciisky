@@ -584,8 +584,10 @@ def computation_lock(computation_key: str, wait_seconds: float = 5.0):
     try:
         cursor = conn.cursor()
         # ``lock_timeout`` applies to the following blocking lock statement.
+        # ``SET`` does not accept bind parameters; ``set_config(..., true)``
+        # is the equivalent of ``SET LOCAL`` and accepts a parameterized value.
         timeout_ms = max(1, int(wait_seconds * 1000))
-        cursor.execute("SET LOCAL lock_timeout = %s", (f"{timeout_ms}ms",))
+        cursor.execute("SELECT set_config('lock_timeout', %s, true)", (f"{timeout_ms}ms",))
         cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
 
         yield conn
