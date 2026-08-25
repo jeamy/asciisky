@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import os
@@ -118,20 +119,12 @@ def _session_clear_user(request: Request) -> None:
             pass
 
 
-# ===== Routes =====
+def _register_user_sync(email: str, username: str, password: str) -> dict:
+    """Blocking registration work (PBKDF2 hashing + DB transaction).
 
-
-@router.post("/auth/register")
-async def register(payload: RegisterPayload, request: Request):
-    email = payload.email.strip().lower()
-    username = payload.username.strip()
-    password = payload.password
-
-    if len(username) < 3:
-        raise HTTPException(status_code=400, detail="Username too short")
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="Password too short")
-
+    Run via ``asyncio.to_thread`` so neither the CPU-bound hash nor the
+    synchronous psycopg calls block the ASGI event loop.
+    """
     password_hash = _hash_password(password)
 
     with db_transaction() as conn:
@@ -163,7 +156,40 @@ async def register(payload: RegisterPayload, request: Request):
         )
         row = cursor.fetchone()
 
-    user = dict(row)
+    return dict(row)
+
+
+def _authenticate_sync(identifier: str, password: str) -> dict:
+    """Blocking login work (DB lookup + PBKDF2 verification)."""
+    user = _get_user_by_identifier(identifier)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="User is disabled")
+
+    stored_hash = user.get("password_hash")
+    if not stored_hash or not _verify_password(password, stored_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return user
+
+
+# ===== Routes =====
+
+
+@router.post("/auth/register")
+async def register(payload: RegisterPayload, request: Request):
+    email = payload.email.strip().lower()
+    username = payload.username.strip()
+    password = payload.password
+
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username too short")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password too short")
+
+    user = await asyncio.to_thread(_register_user_sync, email, username, password)
     _session_set_user(request, user)
 
     return {
@@ -185,17 +211,7 @@ async def login(payload: LoginPayload, request: Request):
     if not identifier or not password:
         raise HTTPException(status_code=400, detail="Missing credentials")
 
-    user = _get_user_by_identifier(identifier)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=403, detail="User is disabled")
-
-    stored_hash = user.get("password_hash")
-    if not stored_hash or not _verify_password(password, stored_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
+    user = await asyncio.to_thread(_authenticate_sync, identifier, password)
     _session_set_user(request, user)
 
     return {
@@ -221,7 +237,7 @@ async def me(request: Request):
     if not user_id:
         return {"authenticated": False, "user": None}
 
-    user = _get_user_by_id(int(user_id))
+    user = await asyncio.to_thread(_get_user_by_id, int(user_id))
     if not user or not user.get("is_active", True):
         # Session refers to a missing or disabled user; clear it.
         _session_clear_user(request)

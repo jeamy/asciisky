@@ -2,6 +2,8 @@
 API routes for magnitude filter settings
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -76,30 +78,73 @@ def _resolve_session_user_id(request: Request) -> int | None:
     return int(user["id"])
 
 
+def _get_filters_sync(request: Request) -> dict:
+    """Blocking body of GET /filters (session/DB lookup + optional file read)."""
+    user_id = _resolve_session_user_id(request)
+
+    if user_id is not None:
+        filters = get_user_filters_from_db(user_id)
+        if filters:
+            return {"success": True, "filters": filters, "source": "database"}
+
+    filters = settings.get_magnitude_filters()
+    return {"success": True, "filters": filters, "source": "file"}
+
+
+def _set_filters_sync(request: Request, filters: MagnitudeFilters) -> dict:
+    """Blocking body of POST /filters (session/DB lookup + DB or file write)."""
+    user_id = _resolve_session_user_id(request)
+
+    if user_id is not None:
+        old_filters = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
+    else:
+        old_filters = settings.get_magnitude_filters()
+
+    old_asteroid = old_filters.get("asteroidMaxMagnitude")
+    old_comet = old_filters.get("cometMaxMagnitude")
+
+    updated_filters = old_filters.copy()
+    if filters.asteroidMaxMagnitude is not None:
+        updated_filters["asteroidMaxMagnitude"] = float(filters.asteroidMaxMagnitude)
+    if filters.cometMaxMagnitude is not None:
+        updated_filters["cometMaxMagnitude"] = float(filters.cometMaxMagnitude)
+
+    if user_id is not None:
+        success = save_user_filters_to_db(user_id, updated_filters)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save filters to database")
+        storage = "database"
+    else:
+        settings.set_magnitude_filters(
+            asteroid_max=filters.asteroidMaxMagnitude,
+            comet_max=filters.cometMaxMagnitude
+        )
+        storage = "file"
+
+    filters_changed = (
+        (filters.asteroidMaxMagnitude is not None and
+         old_asteroid != filters.asteroidMaxMagnitude) or
+        (filters.cometMaxMagnitude is not None and
+         old_comet != filters.cometMaxMagnitude)
+    )
+
+    if filters_changed:
+        print(f"Filters changed from {old_filters} to {updated_filters} (storage: {storage})")
+        print("No cache invalidation needed - filtering happens at API level")
+
+    return {
+        "success": True,
+        "filters": updated_filters,
+        "cache_invalidated": False,  # No cache invalidation needed - filtering at API level
+        "storage": storage
+    }
+
+
 @router.get("/filters")
 async def get_filters(request: Request):
     """Get current magnitude filter settings"""
     try:
-        # Check if user is logged in
-        user_id = _resolve_session_user_id(request)
-
-        if user_id is not None:
-            # Load from database
-            filters = get_user_filters_from_db(user_id)
-            if filters:
-                return {
-                    "success": True,
-                    "filters": filters,
-                    "source": "database"
-                }
-        
-        # Fallback to file-based settings
-        filters = settings.get_magnitude_filters()
-        return {
-            "success": True,
-            "filters": filters,
-            "source": "file"
-        }
+        return await asyncio.to_thread(_get_filters_sync, request)
     except HTTPException:
         raise
     except Exception as e:
@@ -109,59 +154,7 @@ async def get_filters(request: Request):
 async def set_filters(filters: MagnitudeFilters, request: Request):
     """Set magnitude filter settings and invalidate cache"""
     try:
-        # Check if user is logged in
-        user_id = _resolve_session_user_id(request)
-
-        if user_id is not None:
-            # Get old filters from database
-            old_filters = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
-        else:
-            # Get old filters from file
-            old_filters = settings.get_magnitude_filters()
-        
-        old_asteroid = old_filters.get("asteroidMaxMagnitude")
-        old_comet = old_filters.get("cometMaxMagnitude")
-        
-        # Build updated filters
-        updated_filters = old_filters.copy()
-        if filters.asteroidMaxMagnitude is not None:
-            updated_filters["asteroidMaxMagnitude"] = float(filters.asteroidMaxMagnitude)
-        if filters.cometMaxMagnitude is not None:
-            updated_filters["cometMaxMagnitude"] = float(filters.cometMaxMagnitude)
-        
-        # Save to appropriate storage
-        if user_id is not None:
-            # Save to database
-            success = save_user_filters_to_db(user_id, updated_filters)
-            if not success:
-                raise HTTPException(status_code=500, detail="Failed to save filters to database")
-            storage = "database"
-        else:
-            # Save to file
-            settings.set_magnitude_filters(
-                asteroid_max=filters.asteroidMaxMagnitude,
-                comet_max=filters.cometMaxMagnitude
-            )
-            storage = "file"
-        
-        # Check if filters actually changed
-        filters_changed = (
-            (filters.asteroidMaxMagnitude is not None and 
-             old_asteroid != filters.asteroidMaxMagnitude) or
-            (filters.cometMaxMagnitude is not None and 
-             old_comet != filters.cometMaxMagnitude)
-        )
-        
-        if filters_changed:
-            print(f"Filters changed from {old_filters} to {updated_filters} (storage: {storage})")
-            print("No cache invalidation needed - filtering happens at API level")
-        
-        return {
-            "success": True,
-            "filters": updated_filters,
-            "cache_invalidated": False,  # No cache invalidation needed - filtering at API level
-            "storage": storage
-        }
+        return await asyncio.to_thread(_set_filters_sync, request, filters)
     except HTTPException:
         raise
     except Exception as e:

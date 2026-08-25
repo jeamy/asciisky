@@ -293,11 +293,16 @@ def test_admin_check_revalidates_the_live_database_role(monkeypatch):
     assert exc_info.value.status_code == 403
 
 
-def test_ensure_utc_normalizes_naive_and_keeps_aware():
+def test_ensure_utc_normalizes_naive_and_aware_to_utc():
     naive = datetime(2026, 6, 21, 12, 0)
     assert _ensure_utc(naive).tzinfo is timezone.utc
+    assert _ensure_utc(naive) == datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc)
     aware = datetime(2026, 6, 21, 14, 0, tzinfo=timezone(timedelta(hours=2)))
-    assert _ensure_utc(aware) is aware
+    normalized = _ensure_utc(aware)
+    assert normalized.tzinfo is timezone.utc
+    assert normalized == datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc)
+    already_utc = datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc)
+    assert _ensure_utc(already_utc) == already_utc
 
 
 def test_to_hours_converts_and_handles_none():

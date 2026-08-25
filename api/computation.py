@@ -60,7 +60,7 @@ def moon_apparent_magnitude(phase_factor: float) -> float:
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
-    return dt
+    return dt.astimezone(timezone.utc)
 
 
 def _compute_body_position(body, observer, t):

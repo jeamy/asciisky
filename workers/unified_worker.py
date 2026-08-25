@@ -539,6 +539,20 @@ class UnifiedWorker:
             'last_task': last_task,
         }
 
+    # Task types that go through a persistent publication claim.  ``kind``
+    # (precompute/sunpath) or ``object_type`` (on-demand pre-warm) is
+    # resolved by ``precompute_task_key`` itself.
+    _CLAIMED_TASK_TYPES = frozenset({'precompute', 'on_demand'})
+
+    def _release_claim(self, task: dict[str, Any], context: str) -> None:
+        if task.get('type', 'precompute') not in self._CLAIMED_TASK_TYPES:
+            return
+        try:
+            from db_utils import release_precompute_task
+            release_precompute_task(worker_utils.precompute_task_key(task))
+        except Exception:
+            logger.exception("Could not release %s claim", context)
+
     def callback(self, ch, method, _properties, body):
         """RabbitMQ Callback mit optimierter Fehlerbehandlung"""
         try:
@@ -546,25 +560,18 @@ class UnifiedWorker:
             success = self.process_task(task)
 
             if success:
-                if task.get('type', 'precompute') == 'precompute':
-                    try:
-                        from db_utils import release_precompute_task
-                        release_precompute_task(worker_utils.precompute_task_key(task))
-                    except Exception:
-                        logger.exception("Could not release precompute claim")
+                self._release_claim(task, "completed")
                 self._safe_ack(ch, method.delivery_tag)
             else:
                 # One immediate retry.  A second failure is routed to the
-                # configured DLQ; release the publication claim so a later
-                # healthy request may schedule fresh work.
+                # configured DLQ; the publication claim is released only once
+                # the task is truly finished (DLQ delivery confirmed) so a
+                # message stuck retrying because the DLQ itself is down does
+                # not leave its bucket unclaimed and open to a duplicate
+                # concurrent publish.
                 if hasattr(method, 'redelivered') and method.redelivered:
-                    if task.get('type', 'precompute') == 'precompute':
-                        try:
-                            from db_utils import release_precompute_task
-                            release_precompute_task(worker_utils.precompute_task_key(task))
-                        except Exception:
-                            logger.exception("Could not release failed precompute claim")
                     if self._publish_dead_task(ch, task, "failed after retry"):
+                        self._release_claim(task, "failed")
                         self._safe_ack(ch, method.delivery_tag)
                         logger.error("Task failed after retry and was routed to the DLQ")
                     else:

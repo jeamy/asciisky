@@ -20,7 +20,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -30,7 +30,12 @@ import comets
 from api.computation import LOADER, eph, ts
 from api.rabbitmq.task_publisher import get_task_publisher
 from cache_utils import location_key, normalize_location, time_bucket_utc
-from db_utils import store_asteroid_positions, store_comet_positions
+from db_utils import (
+    claim_precompute_task,
+    release_precompute_task,
+    store_asteroid_positions,
+    store_comet_positions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -378,34 +383,55 @@ class OnDemandComputationService:
         dt_utc: datetime
     ) -> None:
         """
-        Trigger background computation for related buckets.
+        Pre-warm the *next* hourly bucket so it is already cached before it is
+        requested.
+
+        Must never target ``dt_utc`` itself: that bucket was just computed and
+        stored by the caller, so republishing it would only recompute the same
+        data.  The claim uses the same persistent-claim key format as regular
+        precompute/on-demand tasks for this bucket, so a concurrent precompute
+        task already in flight for the next bucket is also respected instead
+        of triggering redundant work.
         """
         try:
-            # Create task for background processing
+            next_dt = dt_utc + timedelta(hours=1)
             task_id = f"{object_type}_ondemand_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            
-            # Trigger via RabbitMQ if available
-            task_publisher = get_task_publisher()
-            if task_publisher:
-                task_data = {
-                    'task_id': task_id,
-                    'type': 'on_demand',
-                    'object_type': object_type,
-                    'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
-                    'time_bucket': dt_utc.isoformat(),
-                    'magnitude': self.config.max_magnitude_asteroids if object_type == 'asteroids' else 14.0,
-                    'priority': 5  # Medium priority for on-demand triggered tasks
-                }
-                
-                task_publisher.publish_on_demand_task(task_data)
+            task_data = {
+                'task_id': task_id,
+                'type': 'on_demand',
+                'kind': object_type,
+                'object_type': object_type,
+                'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+                'time_bucket': next_dt.isoformat(),
+                'magnitude': self.config.max_magnitude_asteroids if object_type == 'asteroids' else 14.0,
+                'priority': 5  # Medium priority for on-demand triggered tasks
+            }
 
-                with self._lock:
-                    self.metrics.background_tasks_triggered += 1
-                logger.info(f"Triggered background computation for {object_type}: task_id={task_id}")
-            else:
-                # Fallback: trigger via existing API mechanisms
+            from workers.worker_utils import precompute_task_key
+            claim_key = precompute_task_key(task_data)
+            if not claim_precompute_task(claim_key):
+                logger.debug("Background %s bucket already queued/active: %s", object_type, claim_key)
+                return
+
+            task_publisher = get_task_publisher()
+            if not task_publisher:
+                release_precompute_task(claim_key)
                 logger.debug(f"No task publisher available for {object_type} background computation")
-                
+                return
+
+            try:
+                task_publisher.publish_on_demand_task(task_data)
+            except Exception:
+                release_precompute_task(claim_key)
+                raise
+
+            with self._lock:
+                self.metrics.background_tasks_triggered += 1
+            logger.info(
+                "Triggered background computation for %s: task_id=%s, bucket=%s",
+                object_type, task_id, next_dt.isoformat(),
+            )
+
         except Exception as e:
             logger.error(f"Failed to trigger background {object_type} computation: {e}")
     

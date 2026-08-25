@@ -80,14 +80,20 @@ def position_time_bucket(dt: datetime, bucket_hours: int = 1) -> str:
 
 
 def precompute_task_key(task: dict[str, Any]) -> str:
-    """Return the canonical persistent claim/message key for a precompute task."""
+    """Return the canonical persistent claim/message key for a precompute task.
+
+    On-demand tasks carry ``object_type`` instead of ``kind``; falling back to
+    it keeps on-demand and precompute tasks for the same object/location/
+    bucket in the same claim namespace so they deduplicate against each
+    other instead of racing.
+    """
     from cache_utils import normalize_location, time_bucket_utc
 
     location = task['location']
     lat, lon, elevation = normalize_location(
         location['latitude'], location['longitude'], location.get('elevation', 0)
     )
-    kind = task['kind']
+    kind = task.get('kind') or task['object_type']
     dt = datetime.fromisoformat(task['time_bucket'].replace('Z', '+00:00'))
     bucket_hours = int(task.get('bucket_hours', 1))
     if kind == 'sunpath':

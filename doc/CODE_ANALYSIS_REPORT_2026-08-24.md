@@ -17,13 +17,13 @@ historische Bestandsaufnahme weiter unten.
 | L02–L03 | Erledigt | API-No-op-Locks entfernt; persistente, atomare Claims sind die einheitliche Publish-Koordination. Der Worker verwendet einen realen Advisory-Lock mit DB-Timeout. |
 | L04 | Erledigt | Worker prüft atomisch ersetzte DataFrame-Dateien auf geänderte `mtime` und lädt sie kontrolliert neu. |
 | L05 | Erledigt | `None` bedeutet Cache-Miss, `[]` ist ein erfolgreicher Cacheeintrag – in Loadern, Routen und Workern. |
-| L06 | Erledigt | Einheitlicher Retry, Claim-Freigabe und persistente `computation.dead`-Queue statt Verwerfen bzw. Endlosschleife. |
+| L06 | Erledigt | Einheitlicher Retry, Claim-Freigabe und persistente `computation.dead`-Queue statt Verwerfen bzw. Endlosschleife. Die Claim-Freigabe erfolgt erst nach bestätigter DLQ-Zustellung, nicht mehr davor (siehe Nachprüfung 25.08.). |
 | L07–L08 | Erledigt | Strikter ISO-Parser (Offset → UTC, ungültig → 422), `HTTPException` wird nicht maskiert; defekter Zodiac-Fallback entfernt. |
 | L09 | Erledigt | Eine zentrale Interpolationskonfiguration, stabiler SHA-256-Rollout, geschützte und registrierte Adminroute. |
-| L10 | Erledigt | On-Demand-Publisher erzeugt ein validiertes `type=on_demand`; `cached` gilt im Worker als Erfolg. |
+| L10 | Erledigt | On-Demand-Publisher erzeugt ein validiertes `type=on_demand`; `cached` gilt im Worker als Erfolg. Die anfangs verbliebene Selbst-Republikation desselben Buckets wurde entfernt (siehe Nachprüfung 25.08.): der Hintergrund-Trigger zielt jetzt auf den nächsten Bucket und läuft über einen echten Claim. |
 | L11–L12 | Erledigt | Adminrechte werden pro Request gegen die DB geprüft; produktiver Start verlangt ein Secret; die erste Adminregistrierung wird unter DB-Lock serialisiert. |
 | L13 | Erledigt | Mondhelligkeit ist für die Neumondphase endlich und monoton statt diskontinuierlich. |
-| L14–L15 | Erledigt | CPU-/DB-lastige Routen und Sunpath-Hintergrundarbeit werden in Threads ausgeführt; Sunpath-Tasks werden gecacht, per Claim dedupliziert und verfolgt. |
+| L14–L15 | Erledigt | CPU-/DB-lastige Routen und Sunpath-Hintergrundarbeit werden in Threads ausgeführt; Sunpath-Tasks werden gecacht, per Claim dedupliziert und verfolgt. Ursprünglich nicht erfasst waren `auth.py` (Register/Login inkl. PBKDF2-Hashing), die `admin_users`-Routen (inkl. `_require_admin`), die `/admin`-Seite und `filters.py`; auch diese laufen jetzt über `asyncio.to_thread` (siehe Nachprüfung 25.08.). |
 | L16–L17 | Erledigt | DDL wurde aus dem Claim-Hot-Path entfernt; veraltete DataFrames ergeben einen expliziten Miss statt unbemerkt veralteter Berechnung. |
 | L18–L19 | Erledigt | RabbitMQ Publisher Confirms mit Claim-Rollback; JSON-Einstellungen sind gelockt, tief kopiert und atomisch geschrieben. GET-Routen ändern keinen Standort mehr. |
 | L20–L21 | Erledigt | Einmalige Frontend-Initialisierung, bedarfsgeladener Zodiac-Layer, produktionsgerechtes Revalidieren statischer Dateien und lazy Hipparcos-Initialisierung. |
@@ -65,6 +65,58 @@ Parametern. Diese Punkte wurden korrigiert und regressionsgetestet. Die gezielte
 Ruff-Prüfung auf undefinierte Namen, Syntax-/Importfehler und kritische
 Strukturfehler sowie Vulture mit mindestens 80 Prozent Konfidenz melden keine
 Befunde im versionierten Produktions- und Testcode.
+
+### Zweite unabhängige Nachprüfung (25. August 2026)
+
+Eine zweite, vom ersten Umsetzungsdurchlauf unabhängige Codeprüfung hat den
+oben dokumentierten Umsetzungsstand gegen den tatsächlichen Arbeitsbaum
+verifiziert (Lesen des Codes, gezielte Testläufe inkl. der PostgreSQL-/
+RabbitMQ-Integrationstests gegen die lokale Docker-Compose-Instanz, erneutes
+Ruff/Vulture). Der überwiegende Teil der Tabelle oben hat sich bestätigt.
+Vier Stellen waren zu optimistisch als "Erledigt" markiert und wurden in
+diesem Durchlauf zusätzlich korrigiert:
+
+1. **L10 – Selbst-Republikation blieb im Code.** `_trigger_background_computation`
+   in `api/on_demand_computation.py` publizierte nach jeder On-Demand-Berechnung
+   unbedingt einen neuen Task für **denselben** Bucket, den sie gerade berechnet
+   und persistiert hatte; `TaskPublisher.publish_on_demand_task` hatte anders
+   als die übrigen Publisher-Methoden keinen Claim-basierten Dedup. Der Pfad war
+   nur deshalb unauffällig, weil in Produktion nichts sonst einen ersten
+   `on_demand`-Task erzeugte. **Fix:** Der Hintergrund-Trigger zielt jetzt auf
+   den *nächsten* Bucket und erwirbt vorher einen `claim_precompute_task`-Claim
+   im selben Namensraum wie reguläre Precompute-Tasks, sodass er sich mit
+   ihnen dedupliziert statt sie zu duplizieren.
+2. **L06 – Claim-Freigabe vor bestätigter DLQ-Zustellung.** In
+   `workers/unified_worker.py::callback` wurde der persistente Claim beim
+   zweiten Fehlschlag freigegeben, bevor geprüft wurde, ob `_publish_dead_task`
+   überhaupt erfolgreich war. Schlug die DLQ-Publikation fehl, lief die
+   Nachricht per `requeue=True` weiter, während der Bucket bereits wieder für
+   einen parallelen Duplikat-Publish offen war. **Fix:** Die Freigabe (jetzt
+   einheitlich über `_release_claim`/`_CLAIMED_TASK_TYPES` für `precompute`
+   und `on_demand`) erfolgt erst nach bestätigter DLQ-Zustellung.
+3. **L14 – Blockierende Aufrufe in einigen `async def`-Routen übersehen.**
+   Die Statuszeile deckte `celestial.py`/`messier.py` korrekt ab, aber
+   `api/routes/auth.py` (`register`, `login`, `me`, inkl. PBKDF2-Passwort-
+   Hashing/-Verifikation mit 390.000 Iterationen), alle Routen in
+   `api/routes/admin_users.py` (inkl. der dort direkt aufgerufenen, nicht per
+   `Depends()` eingebundenen `_require_admin`), die `/admin`-Seite in
+   `main.py` sowie `api/routes/filters.py` riefen synchrones psycopg bzw.
+   CPU-gebundenes Hashing weiterhin direkt im Event-Loop-Thread auf. **Fix:**
+   Alle genannten Stellen laufen jetzt über `asyncio.to_thread`, analog zum
+   bereits korrekten Muster in `celestial.py`/`messier.py`.
+4. **D03 – Umfang des On-Demand-Subsystems unterschätzt.** Die Liste toter
+   Kandidaten nannte nur "Convenience-Funktionen am Ende von
+   `api/on_demand_computation.py`"; tatsächlich war der gesamte On-Demand-
+   Berechnungspfad (In-Memory-Cache, Metriken, Selbst-Trigger) in Produktion
+   nur über sich selbst erreichbar, da kein Request-Pfad je einen ersten
+   `on_demand`-Task erzeugte. Mit dem Fix zu L10 ist der Pfad kein latenter
+   Selbstlauf-Bug mehr, sondern korrektes, geclaimtes Pre-Warming; die
+   Einordnung als bloße Alt-Hilfsfunktionen war damit nicht zutreffend.
+
+Alle vier Korrekturen sind mit der vollständigen lokalen Suite (60 Tests,
+inklusive der beiden PostgreSQL-/RabbitMQ-Integrationstests gegen die aktive
+Docker-Compose-Instanz) sowie mit `ruff --select F821` und `vulture
+--min-confidence 80` gegengeprüft; alle Prüfungen sind grün.
 
 > Hinweis: Die folgenden Abschnitte dokumentieren den Befund **vor** der
 > Umsetzung und bleiben zur Nachvollziehbarkeit unverändert.

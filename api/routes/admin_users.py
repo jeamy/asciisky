@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -58,16 +59,9 @@ def _row_to_user(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get("")
-async def list_users(
-    request: Request,
-    q: str | None = None,
-    active_only: bool = False,
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-) -> dict[str, list[dict[str, Any]]]:
-    _require_admin(request)
-
+def _list_users_sync(
+    q: str | None, active_only: bool, limit: int, offset: int
+) -> list[dict[str, Any]]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -94,20 +88,14 @@ async def list_users(
 
         cursor.execute(sql, tuple(params))
         rows = cursor.fetchall()
-        users = [_row_to_user(row) for row in rows]
-        return {"users": users}
+        return [_row_to_user(row) for row in rows]
     finally:
         conn.close()
 
 
-@router.post("")
-async def create_user(payload: AdminUserCreate, request: Request) -> dict[str, dict[str, Any]]:
-    _require_admin(request)
-
-    email = payload.email.strip().lower()
-    username = payload.username.strip()
-    password = payload.password
-
+def _create_user_sync(
+    email: str, username: str, password: str, is_admin: bool, is_active: bool
+) -> dict[str, Any]:
     if len(username) < 3:
         raise HTTPException(status_code=400, detail="Username too short")
     if len(password) < 6:
@@ -134,25 +122,14 @@ async def create_user(payload: AdminUserCreate, request: Request) -> dict[str, d
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id, email, username, is_active, is_admin, created_at, updated_at
             """,
-            (email, username, password_hash, payload.is_active, payload.is_admin, now, now),
+            (email, username, password_hash, is_active, is_admin, now, now),
         )
         row = cursor.fetchone()
 
-    return {"user": _row_to_user(row)}
+    return _row_to_user(row)
 
 
-@router.patch("/{user_id}")
-async def update_user(
-    user_id: int,
-    payload: AdminUserUpdate,
-    request: Request,
-) -> dict[str, dict[str, Any]]:
-    _require_admin(request)
-
-    data = payload.model_dump(exclude_unset=True)
-    if not data:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
+def _update_user_sync(user_id: int, data: dict[str, Any]) -> dict[str, Any]:
     with db_transaction() as conn:
         cursor = conn.cursor()
 
@@ -219,18 +196,10 @@ async def update_user(
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
 
-    return {"user": _row_to_user(row)}
+    return _row_to_user(row)
 
 
-@router.delete("/{user_id}")
-async def delete_user(user_id: int, request: Request) -> dict[str, Any]:
-    """Permanently delete a user from the database.
-
-    This performs a hard delete from the users table. Related rows in
-    user_settings are removed automatically via ON DELETE CASCADE.
-    """
-    _require_admin(request)
-
+def _delete_user_sync(user_id: int) -> int:
     with db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -244,5 +213,59 @@ async def delete_user(user_id: int, request: Request) -> dict[str, Any]:
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
+        return row["id"]
 
-    return {"deleted": True, "id": row["id"]}
+
+@router.get("")
+async def list_users(
+    request: Request,
+    q: str | None = None,
+    active_only: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, list[dict[str, Any]]]:
+    await asyncio.to_thread(_require_admin, request)
+    users = await asyncio.to_thread(_list_users_sync, q, active_only, limit, offset)
+    return {"users": users}
+
+
+@router.post("")
+async def create_user(payload: AdminUserCreate, request: Request) -> dict[str, dict[str, Any]]:
+    await asyncio.to_thread(_require_admin, request)
+
+    email = payload.email.strip().lower()
+    username = payload.username.strip()
+
+    user = await asyncio.to_thread(
+        _create_user_sync, email, username, payload.password, payload.is_admin, payload.is_active
+    )
+    return {"user": user}
+
+
+@router.patch("/{user_id}")
+async def update_user(
+    user_id: int,
+    payload: AdminUserUpdate,
+    request: Request,
+) -> dict[str, dict[str, Any]]:
+    await asyncio.to_thread(_require_admin, request)
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    user = await asyncio.to_thread(_update_user_sync, user_id, data)
+    return {"user": user}
+
+
+@router.delete("/{user_id}")
+async def delete_user(user_id: int, request: Request) -> dict[str, Any]:
+    """Permanently delete a user from the database.
+
+    This performs a hard delete from the users table. Related rows in
+    user_settings are removed automatically via ON DELETE CASCADE.
+    """
+    await asyncio.to_thread(_require_admin, request)
+
+    deleted_id = await asyncio.to_thread(_delete_user_sync, user_id)
+    return {"deleted": True, "id": deleted_id}

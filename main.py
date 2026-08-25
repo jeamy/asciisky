@@ -1,6 +1,7 @@
 """
 AsciiSky - ASCII Art Celestial Position Tracker
 """
+import asyncio
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -122,7 +123,7 @@ def _require_admin_page(request: Request) -> dict | None:
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 async def admin_page(request: Request):
     """Render the admin user management page (admins only)."""
-    user = _require_admin_page(request)
+    user = await asyncio.to_thread(_require_admin_page, request)
     if not user:
         return RedirectResponse("/", status_code=302)
 
