@@ -9,12 +9,10 @@ import logging
 import os
 import pickle
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
-import pandas as pd
 from skyfield.api import wgs84
 from skyfield.constants import GM_SUN_Pitjeva_2005_km3_s2
 from skyfield.data import mpc
@@ -24,7 +22,7 @@ from astronomy_utils import (
     compute_rise_set_transit_from_altitudes,
     format_time,
 )
-from cache_utils import normalize_location, location_key, time_bucket_utc
+from cache_utils import location_key, normalize_location, time_bucket_utc
 from data_paths import MPCORB_PATH
 from db_utils import get_asteroid_dataframe, store_asteroid_positions
 from timezone_utils import get_tzinfo
@@ -162,7 +160,7 @@ def download_mpcorb_file():
 
 
 def load_bright_asteroids(loader, ts, eph, observer_location, max_magnitude=MAX_APPARENT_MAGNITUDE,
-                          use_cache=True, current_dt: Optional[datetime] = None, dataframe=None):
+                          use_cache=True, current_dt: datetime | None = None, dataframe=None):
     """
     Load and calculate positions, magnitudes, and rise/set times of the brightest minor planets
     """

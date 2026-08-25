@@ -9,11 +9,11 @@ Optimiertes Start-Skript für den Unified Worker mit:
 - Graceful Shutdown
 """
 
+import logging
 import os
-import sys
 import signal
 import socket
-import logging
+import sys
 from pathlib import Path
 
 # Pfad anpassen für Imports
@@ -96,7 +96,7 @@ def main():
         worker = UnifiedWorker(worker_id, rabbitmq_url)
 
         # Graceful Shutdown Handler
-        def signal_handler(signum, frame):
+        def signal_handler(signum, _frame):
             logger.info(f"Received signal {signum} - shutting down gracefully...")
             worker.stop()
 

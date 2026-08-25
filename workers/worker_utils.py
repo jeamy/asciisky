@@ -10,12 +10,12 @@ Zentrale Sammlung von wiederverwendbaren Funktionen für:
 - Error Handling
 """
 
-import time
-import json
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+import time
+from datetime import datetime
+from typing import Any
+
 import pika
 
 logger = logging.getLogger(__name__)
@@ -73,64 +73,13 @@ def wait_for_database(worker_id: str, check_both: bool = True) -> bool:
     return False
 
 
-def compute_lock_key(object_type: str, location: Dict[str, float], time_bucket_str: str) -> str:
-    """
-    Berechne Lock-Key für Computation Lock.
-
-    Args:
-        object_type: 'asteroid' oder 'comet'
-        location: Dict mit latitude, longitude, elevation
-        time_bucket_str: ISO-Format Zeitstempel
-
-    Returns:
-        Lock-Key String im Format: "computing:{type}:{location_key}:{bucket_key}"
-    """
-    from cache_utils import normalize_location, location_key, time_bucket_utc
-
-    # Parse und runde Zeit auf Bucket-Boundary
-    bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
-    bucket_dt = bucket_dt.replace(minute=0, second=0, microsecond=0)
-
-    # Normalisiere Location
-    lat_norm, lon_norm, elev_norm = normalize_location(
-        location['latitude'],
-        location['longitude'],
-        location.get('elevation', 0)
-    )
-
-    # Erstelle Keys
-    loc_key = location_key(lat_norm, lon_norm, elev_norm)
-    bucket_key = time_bucket_utc(bucket_dt, 1)
-
-    return f"computing:{object_type}:{loc_key}:{bucket_key}"
-
-
-def round_to_bucket_boundary(time_bucket_str: str) -> datetime:
-    """
-    Runde Zeitstempel auf Stunden-Boundary.
-
-    Args:
-        time_bucket_str: ISO-Format Zeitstempel (z.B. "2024-10-31T20:15:00Z")
-
-    Returns:
-        datetime gerundet auf volle Stunde (z.B. 20:15 → 20:00)
-    """
-    # Parse Zeit
-    time_bucket_dt = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
-
-    # Runde auf Stunden-Boundary
-    time_bucket_dt = time_bucket_dt.replace(minute=0, second=0, microsecond=0)
-
-    return time_bucket_dt
-
-
 def position_time_bucket(dt: datetime, bucket_hours: int = 1) -> str:
     """Return the canonical asteroid/comet position bucket."""
     from cache_utils import time_bucket_utc
     return time_bucket_utc(dt, bucket_hours)
 
 
-def precompute_task_key(task: Dict[str, Any]) -> str:
+def precompute_task_key(task: dict[str, Any]) -> str:
     """Return the canonical persistent claim/message key for a precompute task."""
     from cache_utils import normalize_location, time_bucket_utc
 
@@ -147,53 +96,7 @@ def precompute_task_key(task: Dict[str, Any]) -> str:
     return f"{kind}_{lat:.4f}_{lon:.4f}_{elevation:.0f}_{bucket}_{bucket_hours}h"
 
 
-def publish_worker_status(
-    channel: pika.channel.Channel,
-    worker_id: str,
-    task_id: str,
-    status: str,
-    progress: int,
-    correlation_id: Optional[str] = None
-) -> None:
-    """
-    Publiziere Worker-Status zu RabbitMQ.
-
-    Args:
-        channel: RabbitMQ Channel
-        worker_id: Worker-ID
-        task_id: Task-ID
-        status: Status ('started', 'progress', 'completed', 'failed')
-        progress: Fortschritt (0-100)
-        correlation_id: Optional Correlation-ID
-    """
-    try:
-        status_msg = {
-            'task_id': task_id,
-            'status': status,
-            'progress': progress,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'worker_id': worker_id
-        }
-
-        props = pika.BasicProperties(
-            delivery_mode=1,  # non-persistent
-            content_type='application/json'
-        )
-        if correlation_id:
-            props.correlation_id = correlation_id
-
-        channel.basic_publish(
-            exchange='',
-            routing_key='computation.status',
-            properties=props,
-            body=json.dumps(status_msg)
-        )
-
-    except Exception as e:
-        logger.error(f"Error publishing status: {e}")
-
-
-def setup_rabbitmq_connection(rabbitmq_url: str, heartbeat: int = 0) -> Optional[pika.BlockingConnection]:
+def setup_rabbitmq_connection(rabbitmq_url: str, heartbeat: int = 0) -> pika.BlockingConnection | None:
     """
     Erstelle RabbitMQ-Verbindung mit optimierten Einstellungen.
 
@@ -224,6 +127,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
     Args:
         channel: RabbitMQ Channel
     """
+    channel.queue_declare(queue='computation.dead', durable=True)
     # Precompute Queue
     channel.queue_declare(
         queue='precompute.tasks',
@@ -238,7 +142,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         arguments={
             'x-queue-type': 'classic',
             'x-max-priority': 10,
-            'x-message-ttl': 3600000
+            'x-message-ttl': 3600000,
         }
     )
 
@@ -248,7 +152,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         arguments={
             'x-queue-type': 'classic',
             'x-max-priority': 10,
-            'x-message-ttl': 3600000
+            'x-message-ttl': 3600000,
         }
     )
 
@@ -280,35 +184,6 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
 
     logger.info("✅ All computation queues and exchanges declared")
 
-
-def handle_task_error(
-    channel: pika.channel.Channel,
-    method: pika.spec.Basic.Deliver,
-    error: Exception,
-    task_id: str = "unknown"
-) -> None:
-    """
-    Standardisierte Fehlerbehandlung für Worker Tasks.
-
-    Args:
-        channel: RabbitMQ Channel
-        method: Delivery Method
-        error: Exception die aufgetreten ist
-        task_id: Task-ID für Logging
-    """
-    logger.error(f"❌ Task {task_id} failed: {error}", exc_info=True)
-
-    # NACK mit Requeue-Logik
-    if hasattr(method, 'redelivered') and method.redelivered:
-        # Bereits redelivered -> nicht mehr requeuen
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-        logger.error(f"Task {task_id} failed after retry, moved to DLQ")
-    else:
-        # Ersten Fehler -> requeuen
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-        logger.warning(f"Task {task_id} failed, requeued for retry")
-
-
 class SharedSkyfieldResources:
     """Shared Skyfield Resources für alle Worker-Instanzen (Singleton)"""
 
@@ -333,8 +208,9 @@ class SharedSkyfieldResources:
     def _initialize_resources(self):
         """Initialisiere Skyfield Resources einmalig mit Memory-Optimierung"""
         try:
-            from data_paths import DATA_DIR, ensure_data_dirs
             from skyfield.api import Loader
+
+            from data_paths import DATA_DIR, ensure_data_dirs
 
             logger.info("Initializing shared Skyfield resources...")
             start_time = time.time()
@@ -349,24 +225,10 @@ class SharedSkyfieldResources:
             load_time = time.time() - start_time
             logger.info(f"Skyfield resources loaded in {load_time:.2f}s")
 
-            try:
-                import pickle
-                from db_utils import get_asteroid_dataframe, get_comet_dataframe
-
-                asteroid_pickle = get_asteroid_dataframe()
-                comet_pickle = get_comet_dataframe()
-
-                self.asteroid_df = pickle.loads(asteroid_pickle) if asteroid_pickle else None
-                self.comet_df = pickle.loads(comet_pickle) if comet_pickle else None
-
-                if self.asteroid_df is not None and self.comet_df is not None:
-                    logger.info(f"Pre-loaded {len(self.asteroid_df)} asteroids, {len(self.comet_df)} comets")
-                else:
-                    logger.warning("Could not pre-load dataframes from database")
-            except Exception as e:
-                logger.warning(f"Could not pre-load dataframes: {e}")
-                self.asteroid_df = None
-                self.comet_df = None
+            self.asteroid_df = None
+            self.comet_df = None
+            self._dataframe_mtimes = {}
+            self._reload_dataframes(force=True)
 
             import psutil
             process = psutil.Process()
@@ -377,8 +239,42 @@ class SharedSkyfieldResources:
             logger.error(f"Failed to initialize shared resources: {e}")
             raise
 
+    def _reload_dataframes(self, force: bool = False) -> None:
+        """Reload source data when the nightly updater atomically replaces it."""
+        import pickle
+
+        from data_paths import DATA_DIR
+        from db_utils import get_asteroid_dataframe, get_comet_dataframe
+
+        sources = {
+            "asteroid": (DATA_DIR / "asteroid_dataframe.pkl", get_asteroid_dataframe, "asteroid_df"),
+            "comet": (DATA_DIR / "comet_dataframe.pkl", get_comet_dataframe, "comet_df"),
+        }
+        for kind, (path, loader, attribute) in sources.items():
+            try:
+                mtime = path.stat().st_mtime_ns
+            except FileNotFoundError:
+                mtime = None
+            if not force and self._dataframe_mtimes.get(kind) == mtime:
+                continue
+            try:
+                payload = loader()
+                setattr(self, attribute, pickle.loads(payload) if payload else None)
+                self._dataframe_mtimes[kind] = mtime
+                dataframe = getattr(self, attribute)
+                logger.info(
+                    "Reloaded %s dataframe after source version change (%s rows)",
+                    kind,
+                    len(dataframe) if dataframe is not None else 0,
+                )
+            except Exception:
+                # Retain the last known-good in-memory dataframe on a partial
+                # or corrupt update; the next task will retry the reload.
+                logger.exception("Could not reload %s dataframe", kind)
+
     def get_resources(self):
-        """Gibt die shared Resources zurück"""
+        """Return shared resources and refresh dataframes after a file update."""
+        self._reload_dataframes()
         return self.loader, self.ts, self.eph, self.asteroid_df, self.comet_df
 
     def get_memory_usage(self) -> float:

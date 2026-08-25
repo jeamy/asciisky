@@ -14,22 +14,22 @@ Features:
 - ✅ Alerting bei Problemen
 """
 
-import os
-import sys
-import time
 import json
 import logging
-import psutil
+import os
+import sys
 import threading
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
+import time
 from collections import deque
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 import pika
+import psutil
 
 # ASCII Sky Imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.interpolation_config import get_config_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +53,7 @@ class WorkerStats:
     cpu_usage_percent: float
     last_heartbeat: datetime
     queue_name: str
-    current_task: Optional[str] = None
+    current_task: str | None = None
 
 
 @dataclass
@@ -65,9 +65,9 @@ class SystemStats:
     total_tasks_failed: int
     system_memory_usage_mb: float
     system_cpu_usage_percent: float
-    queue_sizes: Dict[str, int]
+    queue_sizes: dict[str, int]
     avg_worker_success_rate: float
-    recommendations: List[str]
+    recommendations: list[str]
 
 
 class WorkerMonitor:
@@ -81,7 +81,7 @@ class WorkerMonitor:
         self.channel = None
 
         # Worker Registry
-        self.workers: Dict[str, WorkerStats] = {}
+        self.workers: dict[str, WorkerStats] = {}
         self.system_stats = SystemStats(
             total_workers=0,
             active_workers=0,
@@ -205,7 +205,7 @@ class WorkerMonitor:
                 durable=True
             )
 
-            def callback(ch, method, properties, body):
+            def callback(ch, method, _properties, body):
                 try:
                     status_msg = json.loads(body)
                     self._process_worker_status(status_msg)
@@ -238,7 +238,7 @@ class WorkerMonitor:
             except Exception as e:
                 logger.error(f"Error closing consumer connection: {e}")
 
-    def _process_worker_status(self, status_msg: Dict[str, Any]):
+    def _process_worker_status(self, status_msg: dict[str, Any]):
         """Verarbeite Worker Status Message"""
         try:
             worker_id = status_msg.get('worker_id', 'unknown')
@@ -318,7 +318,7 @@ class WorkerMonitor:
         except Exception as e:
             logger.error(f"❌ Error updating system stats: {e}", exc_info=True)
 
-    def _get_queue_sizes(self) -> Dict[str, int]:
+    def _get_queue_sizes(self) -> dict[str, int]:
         """Hole Queue Größen von RabbitMQ (thread-safe mit eigener Connection)"""
         queue_sizes = {}
         connection = None
@@ -419,7 +419,7 @@ class WorkerMonitor:
         except Exception as e:
             logger.error(f"Error saving performance snapshot: {e}")
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    def get_dashboard_data(self) -> dict[str, Any]:
         """Gibt Dashboard-Daten zurück"""
         return {
             'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -428,13 +428,13 @@ class WorkerMonitor:
             'performance_trend': list(self.performance_history)[-10:]  # Letzte 10 Datenpunkte
         }
 
-    def get_worker_details(self, worker_id: str) -> Optional[Dict[str, Any]]:
+    def get_worker_details(self, worker_id: str) -> dict[str, Any] | None:
         """Gibt detaillierte Worker-Informationen zurück"""
         if worker_id in self.workers:
             return asdict(self.workers[worker_id])
         return None
 
-    def get_optimization_report(self) -> Dict[str, Any]:
+    def get_optimization_report(self) -> dict[str, Any]:
         """Gibt detaillierten Optimierungs-Report zurück"""
         # Analysiere Performance-Trends
         if len(self.performance_history) < 2:

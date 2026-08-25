@@ -2,17 +2,33 @@
 AsciiSky - ASCII Art Celestial Position Tracker
 """
 import os
+import secrets
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 # Import routers from the new modules
-from api.routes import session, celestial, asteroids, comets, config, zodiac, filters, user_settings, auth, admin_users, messier
+from api.routes import (
+    admin_users,
+    asteroids,
+    auth,
+    celestial,
+    comets,
+    config,
+    filters,
+    interpolation_admin,
+    messier,
+    session,
+    user_settings,
+    zodiac,
+)
 from api.routes.auth import _get_user_by_id
 from db_utils import database_identity, database_target
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,19 +50,30 @@ app = FastAPI(
 )
 
 # Add session middleware
-SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET", "dev-secret-please-change")
+SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET")
+if not SESSION_SECRET:
+    if os.environ.get("ASCII_SKY_ENV", "development").lower() in {"production", "prod"}:
+        raise RuntimeError("ASCII_SKY_SESSION_SECRET must be set in production")
+    # Never fall back to a public, predictable signing key.  Development
+    # sessions intentionally expire on process restart when no secret is set.
+    SESSION_SECRET = secrets.token_urlsafe(48)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
-# Prevent stale JS/CSS in browsers during rapid iteration: disable caching for static modules
+# Development favors immediate iteration; production keeps static assets in the
+# browser cache and revalidates them periodically.
+_development_mode = os.environ.get("ASCII_SKY_ENV", "development").lower() not in {"production", "prod"}
 @app.middleware("http")
 async def add_no_cache_headers(request: Request, call_next):
     response = await call_next(request)
     try:
         path = request.url.path or ""
-        if path.startswith("/static/") and (path.endswith(".js") or path.endswith(".css")):
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
+        if path.startswith("/static/") and path.endswith((".js", ".css")):
+            if _development_mode:
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
     except Exception:
         pass
     return response
@@ -66,6 +93,7 @@ app.include_router(filters.router, prefix="/api", tags=["filters"])
 app.include_router(user_settings.router, prefix="/api", tags=["user_settings"])
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(admin_users.router, prefix="/api", tags=["admin-users"])
+app.include_router(interpolation_admin.router, prefix="/api", tags=["interpolation-admin"])
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def read_root(request: Request):

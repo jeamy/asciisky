@@ -4,15 +4,18 @@ RabbitMQ Task Publisher für asynchrone Precompute-Tasks
 Sendet Tasks an Worker-Queues ohne auf Antwort zu warten.
 Worker speichern Ergebnisse in Cache/DB.
 """
-import pika
+import asyncio
+import hashlib
 import json
 import logging
-import uuid
-import time
 import threading
-import hashlib
+import time
+import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Any
+
+import pika
+
 import settings
 from db_utils import claim_precompute_task, release_precompute_task
 from workers.worker_utils import precompute_task_key
@@ -21,6 +24,27 @@ logger = logging.getLogger(__name__)
 
 # Thread-local storage für Connections
 _thread_local = threading.local()
+
+
+async def trigger_precompute_task(
+    kind: str,
+    location: dict[str, float],
+    time_bucket: str,
+    magnitude: float,
+    bucket_hours: int,
+    priority: int = 10,
+) -> None:
+    """Publish a deduplicated minor-body task without blocking an ASGI worker."""
+    publisher = TaskPublisher(settings.RABBITMQ_URL)
+    await asyncio.to_thread(
+        publisher.publish_precompute_task,
+        kind,
+        location,
+        time_bucket,
+        magnitude,
+        priority,
+        bucket_hours,
+    )
 
 
 class TaskPublisher:
@@ -58,6 +82,7 @@ class TaskPublisher:
                     exchange_type='direct',
                     durable=True
                 )
+                _thread_local.channel.queue_declare(queue='computation.dead', durable=True)
                 
                 # Queues deklarieren (RabbitMQ 4.x kompatibel)
                 # Idempotent: Wenn Queue existiert, passiert nichts
@@ -67,7 +92,7 @@ class TaskPublisher:
                     arguments={
                         'x-queue-type': 'classic',
                         'x-max-priority': 10,
-                        'x-message-ttl': 3600000
+                        'x-message-ttl': 3600000,
                     }
                 )
                 
@@ -77,7 +102,7 @@ class TaskPublisher:
                     arguments={
                         'x-queue-type': 'classic',
                         'x-max-priority': 10,
-                        'x-message-ttl': 3600000
+                        'x-message-ttl': 3600000,
                     }
                 )
                 
@@ -93,6 +118,7 @@ class TaskPublisher:
                     queue='asteroid.compute',
                     routing_key='compute.asteroid'
                 )
+                _thread_local.channel.confirm_delivery()
                 
                 _thread_local.channel.queue_bind(
                     exchange='computation.direct',
@@ -110,9 +136,9 @@ class TaskPublisher:
     def publish_precompute_task(
         self,
         kind: str,
-        location: Dict[str, float],
+        location: dict[str, float],
         time_bucket: str,
-        magnitude: Optional[float] = None,
+        magnitude: float | None = None,
         priority: int = 5,
         bucket_hours: int = 1,
     ) -> str:
@@ -160,7 +186,7 @@ class TaskPublisher:
             # Hole thread-local Connection
             connection, channel = self._get_connection()
             
-            channel.basic_publish(
+            confirmed = channel.basic_publish(
                 exchange='computation.direct',
                 routing_key=routing_key,
                 properties=pika.BasicProperties(
@@ -172,6 +198,8 @@ class TaskPublisher:
                 body=json.dumps(task_data)
             )
             
+            if confirmed is False:
+                raise RuntimeError(f"Broker did not confirm task {task_id}")
             logger.debug(f"Published task {task_id} to {routing_key}")
             return task_id
             
@@ -193,7 +221,7 @@ class TaskPublisher:
 
     def publish_sunpath_task(
         self,
-        location: Dict[str, float],
+        location: dict[str, float],
         year: int,
         priority: int = 5
     ) -> str:
@@ -221,10 +249,13 @@ class TaskPublisher:
             'priority': priority
         }
 
+        key = precompute_task_key(task_data)
         try:
+            if not claim_precompute_task(key):
+                return task_id
             connection, channel = self._get_connection()
 
-            channel.basic_publish(
+            confirmed = channel.basic_publish(
                 exchange='',
                 routing_key='precompute.tasks',
                 properties=pika.BasicProperties(
@@ -234,11 +265,17 @@ class TaskPublisher:
                 ),
                 body=json.dumps(task_data)
             )
+            if confirmed is False:
+                raise RuntimeError(f"Broker did not confirm task {task_id}")
 
             logger.debug(f"Published sunpath task {task_id} to precompute.tasks for year={year}")
             return task_id
 
         except Exception as e:
+            try:
+                release_precompute_task(key)
+            except Exception:
+                logger.exception("Could not release failed sunpath claim %s", key)
             logger.error(f"Failed to publish sunpath task: {e}")
             if hasattr(_thread_local, 'connection'):
                 try:
@@ -247,6 +284,38 @@ class TaskPublisher:
                     pass
                 _thread_local.connection = None
                 _thread_local.channel = None
+            raise
+
+    def publish_on_demand_task(self, task_data: dict[str, Any]) -> str:
+        """Publish a validated on-demand task with broker confirmation."""
+        object_type = task_data.get("object_type")
+        if object_type not in {"asteroids", "comets"}:
+            raise ValueError("object_type must be 'asteroids' or 'comets'")
+        if not isinstance(task_data.get("location"), dict) or not task_data.get("time_bucket"):
+            raise ValueError("on-demand task requires location and time_bucket")
+
+        task_data = dict(task_data)
+        task_data["type"] = "on_demand"
+        task_id = task_data.setdefault("task_id", f"{object_type}_ondemand_{uuid.uuid4().hex[:12]}")
+        routing_key = f"compute.{object_type[:-1]}"
+        try:
+            _, channel = self._get_connection()
+            confirmed = channel.basic_publish(
+                exchange="computation.direct",
+                routing_key=routing_key,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,
+                    content_type="application/json",
+                    message_id=task_id,
+                    priority=int(task_data.get("priority", 5)),
+                ),
+                body=json.dumps(task_data),
+            )
+            if confirmed is False:
+                raise RuntimeError(f"Broker did not confirm task {task_id}")
+            return task_id
+        except Exception:
+            logger.exception("Failed to publish on-demand task %s", task_id)
             raise
     
     def publish_batch(self, tasks: list) -> list:
@@ -292,7 +361,7 @@ class TaskPublisher:
 # Singleton Instance
 _publisher = None
 
-def get_task_publisher() -> Optional[TaskPublisher]:
+def get_task_publisher() -> TaskPublisher | None:
     """
     Lazy initialization von Task Publisher
     

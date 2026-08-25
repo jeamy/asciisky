@@ -1,34 +1,41 @@
-from typing import Optional
-from datetime import datetime, timezone
 import asyncio
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException
-from api.helpers import parse_time_param, get_location_params
-from api.computation import compute_celestial_snapshot, CELESTIAL_BODIES, compute_sunpath_year
-from cache_utils import normalize_location, location_key
-from db_utils import get_sunpath_year as get_cached_sunpath_year, store_sunpath_year
+from fastapi import APIRouter, HTTPException, Request
+
+from api.computation import (
+    CELESTIAL_BODIES,
+    compute_celestial_snapshot,
+    compute_sunpath_year,
+)
+from api.helpers import get_location_params, parse_time_param
+from cache_utils import location_key, normalize_location
+from db_utils import get_sunpath_year as get_cached_sunpath_year
+from db_utils import store_sunpath_year
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/celestial")
-async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
+async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None):
     """Get positions of celestial objects. Always computed in real-time."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
         
         # Always compute fresh - no caching for celestial objects
-        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+        snapshot = await asyncio.to_thread(compute_celestial_snapshot, lat, lon, elevation, dt_utc)
         # No background tasks needed - celestial is always computed fresh
         return snapshot
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
  
 @router.get("/celestial/sunpath")
-async def get_sunpath_year(request: Request, lat: float = None, lon: float = None, elevation: float = None, year: int = None, time: Optional[str] = None):
+async def get_sunpath_year(request: Request, lat: float = None, lon: float = None, elevation: float = None, year: int = None, time: str | None = None):
     """Return sunrise/sunset curve for a full year at the given or session location.
 
     The result contains one entry per calendar day with local sunrise/sunset and day length
@@ -49,7 +56,7 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         if nocache:
             cached = None
         else:
-            cached = get_cached_sunpath_year(loc_key, year_bucket)
+            cached = await asyncio.to_thread(get_cached_sunpath_year, loc_key, year_bucket)
 
         if cached is not None:
             logger.info("Sunpath cache HIT for loc_key=%s year=%s", loc_key, year_bucket)
@@ -83,19 +90,29 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         )
 
         try:
-            store_sunpath_year(loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data)
+            await asyncio.to_thread(
+                store_sunpath_year,
+                loc_key,
+                year_bucket,
+                lat_norm,
+                lon_norm,
+                elev_norm,
+                sunpath_data,
+            )
         except Exception:
             # Caching is best-effort; computation result is still returned
             pass
 
         return sunpath_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error while handling sunpath request: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/celestial/{body_id}")
-async def get_celestial_object(body_id: str, request: Request, lat: float = None, lon: float = None, elevation: float = None, time: Optional[str] = None):
+async def get_celestial_object(body_id: str, request: Request, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None):
     """Get position of a specific celestial object. Always computed in real-time."""
     try:
         if body_id not in CELESTIAL_BODIES:
@@ -105,7 +122,7 @@ async def get_celestial_object(body_id: str, request: Request, lat: float = None
         dt_utc = parse_time_param(time)
         
         # Always compute fresh - no caching for celestial objects
-        snapshot = compute_celestial_snapshot(lat, lon, elevation, dt_utc)
+        snapshot = await asyncio.to_thread(compute_celestial_snapshot, lat, lon, elevation, dt_utc)
         
         # No background tasks needed - celestial is always computed fresh
         if body_id in snapshot["bodies"]:

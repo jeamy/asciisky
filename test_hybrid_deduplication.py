@@ -10,21 +10,24 @@ This script tests the Phase 3 implementation:
 
 import os
 import sys
-import json
 import time
-import hashlib
-from datetime import datetime, timezone
+
+import psycopg
+import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from workers.unified_worker import (
-    generate_computation_message_id, 
-    generate_precompute_message_id,
-    UnifiedWorker
+from cache_utils import location_key
+from db_utils import (
+    POSTGRES_DB,
+    POSTGRES_HOST,
+    POSTGRES_PASSWORD,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+    _advisory_lock_id,
 )
-from cache_utils import location_key, time_bucket_utc
-from db_utils import is_computation_in_progress, computation_lock
+from workers.unified_worker import UnifiedWorker, generate_precompute_message_id
 
 
 def test_message_id_generation():
@@ -43,36 +46,41 @@ def test_message_id_generation():
     assert len(id1) == 64, "SHA256 should be 64 characters"
     
     print(f"✅ Message ID generation works: {id1[:16]}...")
-    return True
 
 
+@pytest.mark.integration
 def test_advisory_locks():
-    """Test PostgreSQL Advisory Locks"""
-    print("🧪 Testing PostgreSQL Advisory Locks...")
-    
+    """Verify real lock contention using two independent DB sessions."""
     computation_key = f"test_computation:{int(time.time())}"
-    
-    # Initially no computation should be in progress
-    assert not is_computation_in_progress(computation_key), "No computation should be in progress initially"
-    
-    # Acquire lock
+    connection_args = {
+        "host": POSTGRES_HOST,
+        "port": POSTGRES_PORT,
+        "dbname": POSTGRES_DB,
+        "user": POSTGRES_USER,
+        "password": POSTGRES_PASSWORD,
+        "autocommit": True,
+    }
     try:
-        with computation_lock(computation_key, ttl_seconds=5):
-            # While we hold the lock, another check should show computation in progress
-            # Note: This test is limited because we're using the same connection
-            # In real multi-process scenarios, this would work correctly
-            print(f"✅ Advisory Lock acquired for: {computation_key}")
-            
-            # Try to acquire same lock (should block/timeout in real scenario)
-            # For this test, we'll just verify the lock mechanism exists
-            assert True, "Lock mechanism exists"
-            
-    except Exception as e:
-        print(f"❌ Advisory Lock test failed: {e}")
-        return False
-    
-    print("✅ Advisory Locks work correctly")
-    return True
+        first = psycopg.connect(**connection_args)
+        second = psycopg.connect(**connection_args)
+    except psycopg.OperationalError:
+        pytest.skip("PostgreSQL integration service is not available")
+    try:
+        lock_id = _advisory_lock_id(computation_key)
+        with first.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+        with second.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (lock_id,))
+            assert cursor.fetchone()["acquired"] is False
+        with first.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+        with second.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (lock_id,))
+            assert cursor.fetchone()["acquired"] is True
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+    finally:
+        first.close()
+        second.close()
 
 
 def test_deduplication_logic():
@@ -99,9 +107,9 @@ def test_deduplication_logic():
     assert message_id == message_id_2, "Message IDs should be deterministic"
     
     print("✅ Deduplication logic is consistent")
-    return True
 
 
+@pytest.mark.integration
 def test_hybrid_integration():
     """Test hybrid RabbitMQ + Advisory Locks integration"""
     print("🧪 Testing Hybrid Integration...")
@@ -134,8 +142,7 @@ def test_hybrid_integration():
         )
         
         if not worker.connect():
-            print("❌ Failed to connect to RabbitMQ")
-            return False
+            pytest.skip("RabbitMQ integration service is not available")
         
         # Test queue declaration with deduplication
         worker._declare_queues()
@@ -157,14 +164,11 @@ def test_hybrid_integration():
             print("✅ Task sent with RabbitMQ deduplication")
         else:
             print("❌ Failed to send task with deduplication")
-            return False
+            pytest.fail("Could not publish a deduplicated task")
         
         worker.disconnect()
-        return True
-        
     except Exception as e:
-        print(f"❌ Hybrid integration test failed: {e}")
-        return False
+        pytest.skip(f"RabbitMQ integration service is not available: {e}")
 
 
 def main():

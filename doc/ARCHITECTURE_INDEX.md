@@ -47,7 +47,7 @@ comets.py                       vectorized comet pipeline
 cache_utils.py                  location normalization and time buckets
 db_utils.py                     PostgreSQL persistence and advisory locks
 precompute_coordinator.py       future-bucket task publisher
-workers/precompute_worker.py    dedicated precompute consumer
+workers/precompute_worker.py    compatibility entry point for unified worker
 workers/unified_worker.py       precompute/on-demand/RPC consumer
 workers/worker_utils.py         queue declarations and shared resources
 ```

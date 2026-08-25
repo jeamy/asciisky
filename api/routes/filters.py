@@ -1,19 +1,20 @@
 """
 API routes for magnitude filter settings
 """
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional
+
 import settings
 
 router = APIRouter()
 
 class MagnitudeFilters(BaseModel):
-    asteroidMaxMagnitude: Optional[float] = None
-    cometMaxMagnitude: Optional[float] = None
+    asteroidMaxMagnitude: float | None = None
+    cometMaxMagnitude: float | None = None
 
 
-def get_user_filters_from_db(user_id: int) -> Optional[dict]:
+def get_user_filters_from_db(user_id: int) -> dict | None:
     """Load magnitude filters from database for a specific user"""
     try:
         from db_utils import get_user_settings as db_get_user_settings
@@ -36,6 +37,8 @@ def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
     try:
         from db_utils import (
             get_user_settings as db_get_user_settings,
+        )
+        from db_utils import (
             save_user_settings as db_save_user_settings,
         )
 
@@ -129,7 +132,7 @@ async def set_filters(filters: MagnitudeFilters, request: Request):
         
         if filters_changed:
             print(f"Filters changed from {old_filters} to {updated_filters} (storage: {storage})")
-            print(f"No cache invalidation needed - filtering happens at API level")
+            print("No cache invalidation needed - filtering happens at API level")
         
         return {
             "success": True,

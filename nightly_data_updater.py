@@ -3,16 +3,16 @@
 Nightly Data Updater
 Downloads and processes asteroid/comet data once per day at 2:00 AM
 """
+import hashlib
+import logging
 import os
+import signal
 import sys
 import time
-import signal
-import logging
 import traceback
-import hashlib
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime
 from ftplib import FTP, FTP_TLS
+from pathlib import Path
 
 from data_paths import COMET_ELEMENTS_PATH, MPCORB_PATH, ensure_data_dirs
 
@@ -200,11 +200,17 @@ def update_asteroid_data():
     try:
         import gzip
         import pickle
-        import pandas as pd
         from pathlib import Path
+
+        import pandas as pd
         from skyfield.data import mpc
-        from db_utils import store_asteroid_dataframe, get_asteroid_dataframe, get_database_stats
+
         import bright_asteroids
+        from db_utils import (
+            get_asteroid_dataframe,
+            get_database_stats,
+            store_asteroid_dataframe,
+        )
 
         # Download latest data
         ensure_data_dirs()
@@ -283,8 +289,13 @@ def update_comet_data():
     logger.info("Updating comet data...")
     try:
         import pickle
-        from db_utils import get_database_stats, get_comet_dataframe, store_comet_dataframe
+
         import comets
+        from db_utils import (
+            get_comet_dataframe,
+            get_database_stats,
+            store_comet_dataframe,
+        )
 
         ensure_data_dirs()
         comet_file = Path(COMET_ELEMENTS_PATH)

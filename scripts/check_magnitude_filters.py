@@ -4,9 +4,9 @@ Test script for magnitude filter functionality
 Tests cache invalidation and filter changes
 """
 
-import requests
 import time
-import json
+
+import requests
 
 BASE_URL = "http://localhost:8000"
 
@@ -67,7 +67,7 @@ def analyze_objects(objects, object_type="objects"):
     """Analyze magnitude distribution"""
     if not objects:
         print(f"  No {object_type} returned")
-        return
+        return False
     
     magnitudes = []
     for obj in objects:
@@ -89,7 +89,7 @@ def analyze_objects(objects, object_type="objects"):
             "16-18": len([m for m in magnitudes if 16 <= m < 18]),
             "> 18": len([m for m in magnitudes if m >= 18])
         }
-        print(f"  Distribution:")
+        print("  Distribution:")
         for bin_name, count in bins.items():
             if count > 0:
                 print(f"    {bin_name}: {count}")
@@ -107,7 +107,7 @@ def main():
         print(f"  Comet max magnitude: {current.get('cometMaxMagnitude')}")
     else:
         print("  ERROR: Could not get current filters")
-        return
+        return False
     
     # Step 2: Get objects with current filters
     print_section("Step 2: Objects with Current Filters")
@@ -212,14 +212,14 @@ def main():
     success = True
     if new_asteroid_count <= old_asteroid_count:
         print(f"  ⚠ WARNING: Asteroid count did not increase ({old_asteroid_count} → {new_asteroid_count})")
-        print(f"    Expected more asteroids with higher magnitude limit")
+        print("    Expected more asteroids with higher magnitude limit")
         success = False
     else:
         print(f"  ✓ Asteroid count increased ({old_asteroid_count} → {new_asteroid_count})")
     
     if new_comet_count <= old_comet_count:
         print(f"  ⚠ WARNING: Comet count did not increase ({old_comet_count} → {new_comet_count})")
-        print(f"    Expected more comets with higher magnitude limit")
+        print("    Expected more comets with higher magnitude limit")
         success = False
     else:
         print(f"  ✓ Comet count increased ({old_comet_count} → {new_comet_count})")
@@ -235,13 +235,15 @@ def main():
         print("    - Need to wait longer for recalculation")
     
     print()
+    return success
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(0 if main() else 1)
     except KeyboardInterrupt:
         print("\n\nTest interrupted by user")
     except Exception as e:
         print(f"\n\nERROR: {e}")
         import traceback
         traceback.print_exc()
+        raise SystemExit(1)

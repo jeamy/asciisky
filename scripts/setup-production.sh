@@ -52,7 +52,7 @@ if [ -z "$RABBITMQ_PASSWORD" ]; then
 fi
 
 if [ -z "$ASCII_SKY_SESSION_SECRET" ]; then
-    warning "ASCII_SKY_SESSION_SECRET not set in .env - using default (not recommended for production)"
+    error_exit "ASCII_SKY_SESSION_SECRET must be set in .env for production"
 fi
 
 echo "📋 Configuration loaded from .env"

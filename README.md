@@ -193,7 +193,7 @@ The application runs multiple services. In local development these are defined i
 - **`rabbitmq`** – RabbitMQ 4.1 message broker for task distribution (ports 5672, 15672)
 - **`data_updater`** – Nightly data update service (runs via `nightly_data_updater.py`)
 - **`precompute_coordinator`** – Coordinates creation of precompute tasks and publishes them to RabbitMQ
-- **`precompute_worker`** – Dedicated precompute workers that consume `precompute.tasks` and write asteroid/comet positions to PostgreSQL (production main server only)
+- **`precompute_worker`** – Stable production service name for unified workers on the main server; it consumes precompute and on-demand queues.
 
 **Unified Workers and monitoring (local + worker hosts):**
 
@@ -214,8 +214,8 @@ The application runs multiple services. In local development these are defined i
 
 **Worker Scaling** (via `.env`):
 ```bash
-# Main server (precompute_worker in docker-compose.production.yml)
-PRECOMPUTE_WORKERS=4  # Dedicated precompute workers on the main server
+# Main server (precompute_worker service runs the unified implementation)
+PRECOMPUTE_WORKERS=4  # Unified workers on the main server
 
 # Worker hosts (unified_worker in docker-compose.workers.yml)
 UNIFIED_WORKERS=8     # Number of unified workers per worker host (handles all task types)
@@ -293,7 +293,7 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # Passed to lock instrumentation; it does 
   - Handles all task types: precompute, asteroids, comets
   - Uses deterministic RabbitMQ message IDs + PostgreSQL Advisory Locks
   - Vectorized magnitude calculations for performance
-- `workers/precompute_worker.py` - Dedicated precompute worker consuming `precompute.tasks` and writing positions to PostgreSQL
+- `workers/precompute_worker.py` - Backward-compatible entry point for `unified_worker.py`
 - `precompute_coordinator.py` - Coordinates precomputation across workers (schedules tasks to RabbitMQ)
 
 ### Deployment Scripts
@@ -455,7 +455,7 @@ Notes:
 ### General Configuration
 - `PYTHONUNBUFFERED` - Python output buffering (default: 1)
 - `TZ` - Timezone for the application (default: Europe/Berlin)
-- `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (default: change-in-production)
+- `ASCII_SKY_SESSION_SECRET` - Secret key for session encryption (required in production; Compose refuses a missing value)
 
 ## Documentation
 

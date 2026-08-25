@@ -4,15 +4,12 @@ Timezone utilities: resolve IANA timezone from latitude/longitude and return tzi
 from functools import lru_cache
 from typing import Optional
 
-from datetime import timezone as dt_timezone
-
 try:
     from timezonefinder import TimezoneFinder
 except Exception:  # pragma: no cover - fallback if not installed
     TimezoneFinder = None  # type: ignore
 
 import pytz
-
 
 _tf_singleton = None
 

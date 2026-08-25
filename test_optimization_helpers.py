@@ -8,8 +8,8 @@ from skyfield.data import mpc
 import bright_asteroids
 import precompute_coordinator
 from api import smart_interpolation
-from workers import worker_utils
 from astronomy_utils import build_event_time_grid
+from workers import worker_utils
 
 
 def test_packed_epoch_decoder_matches_skyfield():
@@ -151,6 +151,7 @@ def test_smart_interpolation_uses_claimed_high_priority_publisher(monkeypatch):
 
 
 def test_comet_frontend_url_uses_ampersand_after_nocache():
-    source = open("static/js/skyRenderer.js", encoding="utf-8").read()
+    with open("static/js/skyRenderer.js", encoding="utf-8") as source_file:
+        source = source_file.read()
     assert "`${API_ENDPOINTS.COMETS}?nocache=1`" in source
     assert "url += `&lat=${this.location.latitude}" in source

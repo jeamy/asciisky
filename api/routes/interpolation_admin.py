@@ -14,39 +14,43 @@ Features:
 """
 
 import logging
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Body
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from config.interpolation_config import (
-    get_config_manager, 
-    get_interpolation_config,
-    InterpolationStrategy,
-    CorrectionLevel
-)
 from api.on_demand_computation import get_on_demand_service
-from api.smart_interpolation import get_interpolation_config as get_smart_interp_config
+from api.routes.admin_users import _require_admin
+from config.interpolation_config import (
+    CorrectionLevel,
+    InterpolationStrategy,
+    get_config_manager,
+    get_interpolation_config,
+)
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin/interpolation", tags=["interpolation-admin"])
+router = APIRouter(
+    prefix="/admin/interpolation",
+    tags=["interpolation-admin"],
+    dependencies=[Depends(_require_admin)],
+)
 
 
 class ConfigUpdateRequest(BaseModel):
     """Request model for configuration updates"""
-    enable_smart_interpolation: Optional[bool] = None
-    interpolation_strategy: Optional[str] = None
-    enable_on_demand_computation: Optional[bool] = None
-    enable_astronomical_corrections: Optional[bool] = None
-    correction_level: Optional[str] = None
-    max_computation_time: Optional[float] = None
-    cache_ttl_seconds: Optional[int] = None
-    max_future_hours: Optional[float] = None
-    enabled_percentage: Optional[float] = Field(None, ge=0, le=100)
+    enable_smart_interpolation: bool | None = None
+    interpolation_strategy: str | None = None
+    enable_on_demand_computation: bool | None = None
+    enable_astronomical_corrections: bool | None = None
+    correction_level: str | None = None
+    max_computation_time: float | None = None
+    cache_ttl_seconds: int | None = None
+    max_future_hours: float | None = None
+    enabled_percentage: float | None = Field(None, ge=0, le=100)
 
 
 class UserEnablementRequest(BaseModel):
     """Request model for user-specific enablement"""
-    user_ids: List[str] = Field(..., description="List of user IDs to enable/disable")
+    user_ids: list[str] = Field(..., description="List of user IDs to enable/disable")
     enable: bool = Field(True, description="Whether to enable or disable for users")
 
 
@@ -362,7 +366,6 @@ async def interpolation_health_check():
     Health check for interpolation system.
     """
     try:
-        config = get_interpolation_config()
         service = get_on_demand_service()
         metrics = service.get_metrics()
         

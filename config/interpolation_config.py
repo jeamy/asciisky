@@ -13,15 +13,15 @@ Features:
 - Configuration monitoring and logging
 """
 
-import os
+import hashlib
 import logging
-from typing import Dict, Any, Optional, List
+import os
+import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
 class InterpolationStrategy(Enum):
     """Available interpolation strategies"""
     NEAREST_BUCKET = "nearest_bucket"          # Original fallback strategy
@@ -104,7 +104,7 @@ class SmartInterpolationConfig:
         os.getenv('INTERPOLATION_LOG_PERFORMANCE_WARNINGS', 'true').lower() == 'true')
     
     # User-specific settings (for gradual rollout)
-    enabled_user_ids: List[str] = field(default_factory=lambda:
+    enabled_user_ids: list[str] = field(default_factory=lambda:
         os.getenv('INTERPOLATION_ENABLED_USER_IDS', '').split(',') if os.getenv('INTERPOLATION_ENABLED_USER_IDS') else [])
     
     enabled_percentage: float = field(default_factory=lambda:
@@ -135,7 +135,7 @@ class SmartInterpolationConfig:
     
     def _log_config(self):
         """Log current configuration"""
-        logger.info(f"Smart Interpolation Configuration:")
+        logger.info("Smart Interpolation Configuration:")
         logger.info(f"  - Enabled: {self.enable_smart_interpolation}")
         logger.info(f"  - Strategy: {self.interpolation_strategy.value}")
         logger.info(f"  - On-Demand: {self.enable_on_demand_computation}")
@@ -160,8 +160,12 @@ class SmartInterpolationConfig:
         
         # If percentage-based rollout
         if self.enabled_percentage > 0:
-            # Simple hash-based user selection for consistent rollout
-            user_hash = hash(user_id) % 100
+            # Built-in hash() is randomized per process.  A cryptographic
+            # digest keeps a user's rollout assignment stable across restarts
+            # and replicas without exposing the raw ID in logs.
+            user_hash = int.from_bytes(
+                hashlib.sha256(str(user_id).encode("utf-8")).digest()[:8], "big"
+            ) % 100
             return user_hash < self.enabled_percentage
         
         return False
@@ -181,7 +185,7 @@ class SmartInterpolationConfig:
         
         return self.interpolation_strategy
     
-    def update_from_dict(self, config_dict: Dict[str, Any]) -> None:
+    def update_from_dict(self, config_dict: dict[str, Any]) -> None:
         """
         Update configuration from dictionary.
         """
@@ -193,12 +197,12 @@ class SmartInterpolationConfig:
         self._validate_config()
         self._log_config()
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert configuration to dictionary.
         """
         result = {}
-        for field_name, field_def in self.__dataclass_fields__.items():
+        for field_name in self.__dataclass_fields__:
             value = getattr(self, field_name)
             if isinstance(value, Enum):
                 result[field_name] = value.value
@@ -229,7 +233,7 @@ class InterpolationConfigManager:
         """Reload configuration from environment variables"""
         old_config = self._config.to_dict()
         self._config = SmartInterpolationConfig()
-        self._config_timestamp = os.times()[4]  # Current time
+        self._config_timestamp = time.time()
         
         # Notify callbacks if configuration changed
         if old_config != self._config.to_dict():
@@ -240,10 +244,10 @@ class InterpolationConfigManager:
                 except Exception as e:
                     logger.error(f"Error in config update callback: {e}")
     
-    def update_config(self, config_dict: Dict[str, Any]) -> None:
+    def update_config(self, config_dict: dict[str, Any]) -> None:
         """Update configuration from dictionary"""
         self._config.update_from_dict(config_dict)
-        self._config_timestamp = os.times()[4]
+        self._config_timestamp = time.time()
         
         # Notify callbacks
         for callback in self._update_callbacks:
@@ -261,7 +265,7 @@ class InterpolationConfigManager:
         if callback in self._update_callbacks:
             self._update_callbacks.remove(callback)
     
-    def get_config_summary(self) -> Dict[str, Any]:
+    def get_config_summary(self) -> dict[str, Any]:
         """Get configuration summary for monitoring"""
         return {
             'enabled': self._config.enable_smart_interpolation,
@@ -348,28 +352,3 @@ def get_interpolation_strategy(user_id: str = 'anonymous') -> InterpolationStrat
     """Get interpolation strategy for user"""
     config = get_interpolation_config()
     return config.get_strategy_for_user(user_id)
-
-
-# Convenience functions for common operations
-def enable_smart_interpolation_for_all():
-    """Enable smart interpolation for all users"""
-    manager = get_config_manager()
-    manager.update_config({'enable_smart_interpolation': True, 'enabled_percentage': 100.0})
-
-
-def disable_smart_interpolation():
-    """Disable smart interpolation completely"""
-    manager = get_config_manager()
-    manager.update_config({'enable_smart_interpolation': False})
-
-
-def enable_for_percentage(percentage: float):
-    """Enable smart interpolation for percentage of users"""
-    manager = get_config_manager()
-    manager.set_enabled_percentage(percentage)
-
-
-def reload_interpolation_config():
-    """Reload configuration from environment"""
-    manager = get_config_manager()
-    manager.reload_config()

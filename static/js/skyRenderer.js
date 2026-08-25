@@ -93,8 +93,6 @@ export class SkyRenderer {
         // Initialize Messier renderer (always enabled; visibility controlled by toggle)
         this.messierRenderer = new MessierRenderer(this);
 
-        // Manuell update aufrufen, um die Daten zu laden und anzuzeigen
-        this.update();
     }
 
     initSky() {
@@ -1009,18 +1007,6 @@ export class SkyRenderer {
         } catch (_) {
             return url;
         }
-    }
-
-    // Legacy function - disabled after RabbitMQ migration
-    async checkCacheAvailability(location) {
-        // RabbitMQ handles caching automatically
-        return null;
-    }
-
-    // Legacy function - disabled after RabbitMQ migration
-    async triggerPrecomputeWindowIfNeeded(location, timeISO, kinds, locKey) {
-        // RabbitMQ triggers precompute automatically on cache miss
-        return;
     }
 
     // Prüft, ob ein Update-Token noch aktiv ist (verhindert Out-of-Order-Merges)
@@ -2357,23 +2343,6 @@ export class SkyRenderer {
         }
     }
 
-    startAutoUpdate() {
-        this.update();
-        this.updateInterval = setInterval(() => this.update(), CONFIG.UPDATE_INTERVAL_MS);
-    }
-
-    stopAutoUpdate() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-        }
-    }
-
-    // Lade Himmelsdaten und aktualisiere die Anzeige (deprecated – nutzt update())
-    async updateSkyData() {
-        // Vereinheitlichte Update-Logik verwenden, damit Renderpfad konsistent bleibt
-        return this.update();
-    }
-
     // Methode zum Aktualisieren der Himmelsdaten
     async update() {
         try {
@@ -2426,12 +2395,7 @@ export class SkyRenderer {
                 this.hideLoading();
             }
 
-            // Prüfe Cache-Verfügbarkeit und lade nur, was bereits vorliegt; fehlendes im Hintergrund anstoßen
-            const avail = await this.checkCacheAvailability(this.location);
-            const availableAsteroids = !!(avail && avail.available && avail.available.asteroids);
-            const availableComets = !!(avail && avail.available && avail.available.comets);
-            const timeISO = (avail && avail.time) ? avail.time : (settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO());
-            const locKey = (avail && avail.location && avail.location.loc_key) ? avail.location.loc_key : undefined;
+            const timeISO = settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO();
 
             const tasks = [];
             // ALWAYS load asteroids and comets, regardless of cache status
@@ -2439,22 +2403,14 @@ export class SkyRenderer {
             tasks.push(this.loadAsteroids(token));
             tasks.push(this.loadComets(token));
 
-            // Load zodiac constellations if enabled
-            if (this.zodiacRenderer) {
+            // The constellation button loads data on first activation.  Do not
+            // run the expensive Hipparcos request every minute while hidden.
+            if (this.zodiacRenderer && this.zodiacRenderer.visible) {
                 tasks.push(this.loadZodiacData(token, this.location, timeISO));
             }
             // Load Messier overlay
             if (this.messierRenderer && (this.messierRenderer.visible || this.messierRenderer.objects.length > 0)) {
                 tasks.push(this.loadMessierData(token, this.location, timeISO));
-            }
-
-            // If cache is missing, trigger background precompute for future
-            const missing = [];
-            if (!availableAsteroids) missing.push('asteroids');
-            if (!availableComets) missing.push('comets');
-            if (missing.length > 0) {
-                console.log(`Cache missing for: ${missing.join(', ')} - triggering background computation`);
-                this.triggerPrecomputeWindowIfNeeded(this.location, timeISO, missing, locKey);
             }
 
             // Warte optional auf geladene Zusatzdaten und rendere erneut

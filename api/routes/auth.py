@@ -1,4 +1,3 @@
-from typing import Optional
 import hashlib
 import hmac
 import os
@@ -7,8 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
-from db_utils import get_db_connection, db_transaction
-
+from db_utils import db_transaction, get_db_connection
 
 router = APIRouter()
 
@@ -67,7 +65,7 @@ class AuthUser(BaseModel):
 # ===== Helpers =====
 
 
-def _get_user_by_identifier(identifier: str) -> Optional[dict]:
+def _get_user_by_identifier(identifier: str) -> dict | None:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -86,7 +84,7 @@ def _get_user_by_identifier(identifier: str) -> Optional[dict]:
         conn.close()
 
 
-def _get_user_by_id(user_id: int) -> Optional[dict]:
+def _get_user_by_id(user_id: int) -> dict | None:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -138,6 +136,9 @@ async def register(payload: RegisterPayload, request: Request):
 
     with db_transaction() as conn:
         cursor = conn.cursor()
+        # Serialize the bootstrap decision.  Without this lock, two first
+        # registrations can both observe an empty users table and become admin.
+        cursor.execute("LOCK TABLE users IN EXCLUSIVE MODE")
         # Check duplicates
         cursor.execute(
             "SELECT id FROM users WHERE email = %s OR username = %s LIMIT 1",

@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Optional, Tuple
 
 DEFAULT_BUCKET_HOURS = 6
 DEFAULT_TTL_SECONDS = 6 * 3600  # 6 hours
 
 
 def normalize_location(lat: float, lon: float, elevation: float,
-                        latlon_decimals: int = 4, elevation_step: int = 10) -> Tuple[float, float, int]:
+                        latlon_decimals: int = 4, elevation_step: int = 10) -> tuple[float, float, int]:
     """Round lat/lon to 4 decimals (~11 m) and elevation to next higher 10 m step.
     Returns (lat_norm, lon_norm, elev_norm_int).
     """
@@ -38,7 +37,7 @@ def location_key(lat: float, lon: float, elevation: float) -> str:
     return f"lat{lat:+.4f}_lon{lon:+.4f}_el{int(elevation):+05d}"
 
 
-def time_bucket_utc(dt: Optional[datetime] = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:
+def time_bucket_utc(dt: datetime | None = None, bucket_hours: int = DEFAULT_BUCKET_HOURS) -> str:
     """Return a 6-hour UTC bucket label like 'YYYYMMDDTHH'. Aligns HH to 00/06/12/18.
     """
     if dt is None:

@@ -53,8 +53,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
+      - ASCII_SKY_ENV=development
       # Session Secret (für Prod sinnvoll ändern)
-      - ASCII_SKY_SESSION_SECRET=c93d3747775793487777579348777757
+      - ASCII_SKY_SESSION_SECRET=${SESSION_SECRET:-local-development-only}
       # Magnitude limits for asteroids and comets
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
       - ASCII_SKY_ASTEROID_MAX_APPARENT_MAG=${ASCII_SKY_ASTEROID_MAX_APPARENT_MAG:-10.0}

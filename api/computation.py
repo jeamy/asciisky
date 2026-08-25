@@ -1,11 +1,12 @@
 import math
 from datetime import datetime, timedelta, timezone
+
 from skyfield import almanac
-from skyfield.api import wgs84, Loader
+from skyfield.api import Loader, wgs84
 from skyfield.magnitudelib import planetary_magnitude
 
+from data_paths import DATA_DIR
 from timezone_utils import get_tzinfo
-from data_paths import DATA_DIR, DE421_PATH
 
 # Load Skyfield data
 LOADER = Loader(str(DATA_DIR))
@@ -39,6 +40,11 @@ BODY_SYMBOLS = {
     'asteroid': '⚸'
 }
 
+
+def moon_apparent_magnitude(phase_factor: float) -> float:
+    """Return a finite, continuous apparent magnitude for the Moon."""
+    return -12.7 - 2.5 * math.log10(max(float(phase_factor), 1e-6))
+
 def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc: datetime) -> dict:
     if dt_utc.tzinfo is None:
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
@@ -71,7 +77,11 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
                 moon_phase = almanac.moon_phase(eph, t)
                 moon_phase_angle = float(moon_phase.radians)
                 phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
-                mag = -12.7 + 2.5 * math.log10(phase_factor) if phase_factor > 0 else -12.7
+                # At full moon the apparent magnitude is about -12.7.  A
+                # smaller illuminated fraction must be dimmer (larger
+                # magnitude), including exactly at new moon.  The floor keeps
+                # the logarithm finite without introducing a discontinuity.
+                mag = moon_apparent_magnitude(phase_factor)
             elif name in ['mercury', 'venus', 'mars', 'jupiter', 'saturn']:
                 try:
                     mag = planetary_magnitude(astrometric)
@@ -151,7 +161,7 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
 
             result["bodies"][name] = body_entry
         except Exception as e:
-            print(f"Error calculating position for {name}: {str(e)}")
+            print(f"Error calculating position for {name}: {e!s}")
             continue
 
     return result
@@ -417,27 +427,3 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         },
         "points": points,
     }
-
-
-def load_constellations():
-    """
-    Lädt Constellation-Daten aus Stellarium
-    
-    Diese Funktion wird vom Constellation Worker genutzt.
-    Die eigentliche Berechnung erfolgt in api/routes/zodiac.py
-    
-    Returns:
-        Dict mit Constellation-Metadaten
-    """
-    from api.routes.zodiac import CONSTELLATION_NAMES, CONSTELLATION_TRANSLATIONS
-    
-    # Gebe nur Metadaten zurück - die eigentliche Berechnung
-    # erfolgt in zodiac.py mit Skyfield
-    constellations = {}
-    for name in CONSTELLATION_NAMES:
-        constellations[name] = {
-            'name': name,
-            'name_de': CONSTELLATION_TRANSLATIONS.get(name, name)
-        }
-    
-    return constellations

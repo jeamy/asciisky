@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
@@ -8,15 +9,14 @@ import threading
 import time as time_module
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from skyfield import almanac
 from skyfield.api import Star, wgs84
 
-from api.computation import ts, eph
+from api.computation import eph, ts
 from api.helpers import get_location_params, parse_time_param
-from cache_utils import normalize_location, location_key
+from cache_utils import location_key, normalize_location
 from data_paths import DATA_DIR
 from timezone_utils import get_tzinfo
 
@@ -70,7 +70,7 @@ def _ensure_catalog_downloaded(force: bool = False) -> None:
         raise RuntimeError(f"Failed to download Messier catalog: {e}") from e
 
 
-def _parse_ra_hours(entry: dict) -> Optional[float]:
+def _parse_ra_hours(entry: dict) -> float | None:
     keys_hours = ["ra_hours", "ra_hour", "ra_h"]
     keys_deg = ["ra_deg", "ra_degrees", "ra"]
     for k in keys_hours:
@@ -89,7 +89,7 @@ def _parse_ra_hours(entry: dict) -> Optional[float]:
     return None
 
 
-def _parse_dec_deg(entry: dict) -> Optional[float]:
+def _parse_dec_deg(entry: dict) -> float | None:
     for k in ["dec_deg", "dec", "decl", "dec_degrees"]:
         if k in entry:
             try:
@@ -99,7 +99,7 @@ def _parse_dec_deg(entry: dict) -> Optional[float]:
     return None
 
 
-def _parse_ra_from_tokens(ra_h: str, ra_m: Optional[str]) -> Optional[float]:
+def _parse_ra_from_tokens(ra_h: str, ra_m: str | None) -> float | None:
     """Return RA in hours from separated tokens."""
     try:
         h = float(ra_h.replace(",", "."))
@@ -109,7 +109,7 @@ def _parse_ra_from_tokens(ra_h: str, ra_m: Optional[str]) -> Optional[float]:
         return None
 
 
-def _parse_ra_compact(token: str) -> Optional[float]:
+def _parse_ra_compact(token: str) -> float | None:
     """
     Handle compact RA formats like '09.55.8' (== 09h 55.8m) by splitting on dots/spaces.
     """
@@ -126,7 +126,7 @@ def _parse_ra_compact(token: str) -> Optional[float]:
         return None
 
 
-def _parse_dec(dec_deg_token: Optional[str], dec_min_token: Optional[str]) -> Optional[float]:
+def _parse_dec(dec_deg_token: str | None, dec_min_token: str | None) -> float | None:
     if dec_deg_token is None:
         return None
     try:
@@ -249,7 +249,7 @@ def _load_catalog() -> list:
         return _catalog
 
 
-def _get_catalog_object(object_id: Optional[str]) -> Optional[dict]:
+def _get_catalog_object(object_id: str | None) -> dict | None:
     if not object_id:
         return None
     _load_catalog()
@@ -275,7 +275,7 @@ def _make_response_cache_key(
     elevation: float,
     dt_utc: datetime,
     details: bool,
-    object_id: Optional[str],
+    object_id: str | None,
 ) -> str:
     lat_n, lon_n, elev_n = normalize_location(lat, lon, elevation)
     loc_key = location_key(lat_n, lon_n, elev_n)
@@ -297,7 +297,7 @@ def _cleanup_response_cache(now_mono: float) -> None:
         _response_cache.pop(oldest_key, None)
 
 
-def _get_cached_response(cache_key: str) -> Optional[dict]:
+def _get_cached_response(cache_key: str) -> dict | None:
     if MESSIER_CACHE_TTL_SECONDS <= 0:
         return None
 
@@ -328,7 +328,7 @@ def _store_cached_response(cache_key: str, payload: dict) -> None:
         _cleanup_response_cache(now_mono)
 
 
-def _compute_daily_events(observer, location, star, tz, dt_utc: datetime) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _compute_daily_events(observer, location, star, tz, dt_utc: datetime) -> tuple[str | None, str | None, str | None]:
     rise_time = None
     set_time = None
     transit_time = None
@@ -371,74 +371,84 @@ def _compute_daily_events(observer, location, star, tz, dt_utc: datetime) -> tup
     return rise_time, set_time, transit_time
 
 
+def _compute_messier_payload(
+    lat: float,
+    lon: float,
+    elevation: float,
+    dt_utc: datetime,
+    object_id: str | None,
+    details: bool,
+) -> dict:
+    """CPU-bound Skyfield work, intentionally executed outside the event loop."""
+    catalog = _load_catalog()
+    if not catalog:
+        raise RuntimeError("Messier catalog is empty")
+
+    if object_id:
+        selected = _get_catalog_object(object_id)
+        if not selected:
+            raise KeyError(object_id)
+        catalog = [selected]
+
+    tz = get_tzinfo(lat, lon)
+    location = wgs84.latlon(lat, lon, elevation_m=elevation)
+    observer = eph["earth"] + location
+    t = ts.from_datetime(dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc))
+    observer_at_t = observer.at(t)
+    results = []
+    for obj in catalog:
+        try:
+            star = obj["star"]
+            app = observer_at_t.observe(star).apparent()
+            alt, az, _ = app.altaz()
+            payload = {
+                "id": obj["id"],
+                "name": obj["name"],
+                "type": obj.get("type"),
+                "magnitude": obj.get("mag"),
+                "ra": obj["ra_hours"] * 15.0,
+                "dec": obj["dec_deg"],
+                "altitude": alt.degrees,
+                "azimuth": az.degrees,
+                "symbol": "✦",
+            }
+            if details:
+                rise_time, set_time, transit_time = _compute_daily_events(observer, location, star, tz, dt_utc)
+                payload.update(rise_time=rise_time, set_time=set_time, transit_time=transit_time)
+            results.append(payload)
+        except Exception:
+            # A malformed catalog entry must not make the full catalog unusable.
+            continue
+    return {"objects": results, "catalog_size": len(catalog), "details": details}
+
+
 @router.get("/messier")
 async def get_messier_objects(
     request: Request,
     lat: float = None,
     lon: float = None,
     elevation: float = None,
-    time: Optional[str] = None,
-    object_id: Optional[str] = None,
-    details: Optional[bool] = False,
-    nocache: Optional[bool] = False,
+    time: str | None = None,
+    object_id: str | None = None,
+    details: bool | None = False,
+    nocache: bool | None = False,
 ):
-    """Compute Messier object positions in real time (no precompute needed)."""
+    """Compute Messier positions without blocking the ASGI event loop."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
         cache_key = None
-
         if not nocache:
             cache_key = _make_response_cache_key(lat, lon, elevation, dt_utc, bool(details), object_id)
             cached_payload = _get_cached_response(cache_key)
             if cached_payload is not None:
                 return cached_payload
-
-        catalog = _load_catalog()
-        if not catalog:
-            raise HTTPException(status_code=500, detail="Messier catalog is empty")
-
-        tz = get_tzinfo(lat, lon)
-        location = wgs84.latlon(lat, lon, elevation_m=elevation)
-        observer = eph["earth"] + location
-        t = ts.from_datetime(dt_utc if dt_utc.tzinfo else dt_utc.replace(tzinfo=timezone.utc))
-        observer_at_t = observer.at(t)
-
-        if object_id:
-            selected = _get_catalog_object(object_id)
-            if not selected:
-                raise HTTPException(status_code=404, detail=f"Unknown Messier object: {object_id}")
-            catalog = [selected]
-
-        results = []
-        for obj in catalog:
-            try:
-                star = obj["star"]
-                app = observer_at_t.observe(star).apparent()
-                alt, az, _ = app.altaz()
-                payload = {
-                    "id": obj["id"],
-                    "name": obj["name"],
-                    "type": obj.get("type"),
-                    "magnitude": obj.get("mag"),
-                    "ra": obj["ra_hours"] * 15.0,
-                    "dec": obj["dec_deg"],
-                    "altitude": alt.degrees,
-                    "azimuth": az.degrees,
-                    "symbol": "✦",
-                }
-
-                if details:
-                    rise_time, set_time, transit_time = _compute_daily_events(observer, location, star, tz, dt_utc)
-                    payload["rise_time"] = rise_time
-                    payload["set_time"] = set_time
-                    payload["transit_time"] = transit_time
-
-                results.append(payload)
-            except Exception:
-                continue
-
-        response_payload = {"objects": results, "catalog_size": len(catalog), "details": bool(details)}
+        try:
+            response_payload = await asyncio.to_thread(
+                _compute_messier_payload, lat, lon, elevation, dt_utc, object_id, bool(details)
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Unknown Messier object: {object_id}")
         if cache_key is not None:
             _store_cached_response(cache_key, response_payload)
         return response_payload

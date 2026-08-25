@@ -1,12 +1,11 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 
-from db_utils import get_db_connection, db_transaction
-from api.routes.auth import _hash_password
-
+from api.routes.auth import _get_user_by_id, _hash_password, _session_clear_user
+from db_utils import db_transaction, get_db_connection
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -15,12 +14,20 @@ def _require_admin(request: Request) -> int:
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if not request.session.get("user_is_admin"):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
     try:
-        return int(user_id)
+        user = _get_user_by_id(int(user_id))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="Invalid session")
+        user = None
+    if not user or not user.get("is_active", False):
+        _session_clear_user(request)
+        raise HTTPException(status_code=401, detail="Session user no longer exists or is inactive")
+    if not user.get("is_admin", False):
+        request.session["user_is_admin"] = False
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    # Keep the cookie as a UI hint only; authorization always uses the live DB
+    # row above so role revocation is effective immediately.
+    request.session["user_is_admin"] = True
+    return int(user["id"])
 
 
 class AdminUserCreate(BaseModel):
@@ -32,14 +39,14 @@ class AdminUserCreate(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    is_admin: Optional[bool] = None
-    is_active: Optional[bool] = None
+    email: EmailStr | None = None
+    username: str | None = None
+    password: str | None = None
+    is_admin: bool | None = None
+    is_active: bool | None = None
 
 
-def _row_to_user(row: Dict[str, Any]) -> Dict[str, Any]:
+def _row_to_user(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "email": row["email"],
@@ -54,11 +61,11 @@ def _row_to_user(row: Dict[str, Any]) -> Dict[str, Any]:
 @router.get("")
 async def list_users(
     request: Request,
-    q: Optional[str] = None,
+    q: str | None = None,
     active_only: bool = False,
-    limit: int = 100,
-    offset: int = 0,
-) -> Dict[str, List[Dict[str, Any]]]:
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, list[dict[str, Any]]]:
     _require_admin(request)
 
     conn = get_db_connection()
@@ -68,8 +75,8 @@ async def list_users(
             "SELECT id, email, username, is_active, is_admin, created_at, updated_at "
             "FROM users"
         )
-        conditions: List[str] = []
-        params: List[Any] = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if active_only:
             conditions.append("is_active = TRUE")
@@ -94,7 +101,7 @@ async def list_users(
 
 
 @router.post("")
-async def create_user(payload: AdminUserCreate, request: Request) -> Dict[str, Dict[str, Any]]:
+async def create_user(payload: AdminUserCreate, request: Request) -> dict[str, dict[str, Any]]:
     _require_admin(request)
 
     email = payload.email.strip().lower()
@@ -139,7 +146,7 @@ async def update_user(
     user_id: int,
     payload: AdminUserUpdate,
     request: Request,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     _require_admin(request)
 
     data = payload.model_dump(exclude_unset=True)
@@ -153,8 +160,8 @@ async def update_user(
         new_username = data.get("username")
 
         if new_email or new_username:
-            conditions: List[str] = []
-            params: List[Any] = []
+            conditions: list[str] = []
+            params: list[Any] = []
             if new_email:
                 conditions.append("email = %s")
                 params.append(new_email.strip().lower())
@@ -174,8 +181,8 @@ async def update_user(
                     detail="Another user with same email or username already exists",
                 )
 
-        fields: List[str] = []
-        params2: List[Any] = []
+        fields: list[str] = []
+        params2: list[Any] = []
 
         if new_email:
             fields.append("email = %s")
@@ -216,7 +223,7 @@ async def update_user(
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: int, request: Request) -> Dict[str, Any]:
+async def delete_user(user_id: int, request: Request) -> dict[str, Any]:
     """Permanently delete a user from the database.
 
     This performs a hard delete from the users table. Related rows in

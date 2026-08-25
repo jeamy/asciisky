@@ -99,8 +99,9 @@ services:
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
       - RABBITMQ_TIMEOUT=120
       
-      # Session Secret (ÄNDERN für Produktion!)
-      - ASCII_SKY_SESSION_SECRET=${SESSION_SECRET:-c93d3747775793487777579348777757}
+      # Explicit production secret; Compose refuses to start without it.
+      - ASCII_SKY_ENV=production
+      - ASCII_SKY_SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET before starting production}
       
       # Magnitude Limits
       - ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG=${ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG:-14.0}
@@ -205,18 +206,20 @@ services:
     networks:
       - asciisky-net
 
-  # ===== Precompute Worker (Hauptserver, skalierbar) =====
+  # ===== Unified Worker (Hauptserver, skalierbar) =====
+  # Service name stays stable for deployment scripts. The dedicated worker is
+  # now a compatibility wrapper around this single implementation.
   precompute_worker:
     image: asciisky-web:latest
     pull_policy: never
-    command: ["python", "workers/precompute_worker.py"]
+    command: ["python", "workers/unified_worker.py"]
     volumes:
       - ./cache:/app/cache
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
-      # WORKER_ID wird automatisch aus Hostname generiert (siehe precompute_worker.py)
+      # WORKER_ID wird automatisch aus Hostname generiert (siehe unified_worker.py)
       # Für Docker Swarm: WORKER_ID=precompute-worker-main-{{.Task.Slot}}
       
       # PostgreSQL Configuration

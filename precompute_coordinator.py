@@ -16,30 +16,31 @@ Vorteile:
 - ✅ Failover (Worker fällt aus → anderer übernimmt)
 """
 
+import hashlib
+import json
+import logging
 import os
+import signal
 import sys
 import time
-import json
-import signal
-import hashlib
-import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import Any
 
 # RabbitMQ
 import pika
 
-# Settings
-import settings
 import bright_asteroids
 import comets
-from cache_utils import normalize_location, location_key, time_bucket_utc
+
+# Settings
+import settings
+from cache_utils import location_key, normalize_location, time_bucket_utc
 from db_utils import (
     claim_precompute_task,
+    get_all_user_locations,
     get_asteroid_positions,
     get_comet_positions,
     get_sunpath_year,
-    get_all_user_locations,
     release_precompute_task,
 )
 
@@ -106,7 +107,7 @@ def get_queue_status() -> int:
             pass
 
 
-def get_target_locations() -> List[Dict[str, Any]]:
+def get_target_locations() -> list[dict[str, Any]]:
     """
     Hole alle Locations die vorberechnet werden sollen.
 
@@ -202,7 +203,7 @@ def get_existing_queue_tasks() -> set:
     return set()
 
 
-def task_key(task: Dict[str, Any]) -> str:
+def task_key(task: dict[str, Any]) -> str:
     """Return the same deterministic key used while creating tasks."""
     return worker_utils.precompute_task_key(task)
 
@@ -225,7 +226,7 @@ def task_priority(hour_offset: int) -> int:
     return 4
 
 
-def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset: int, include_yearly: bool = True) -> List[Dict]:
+def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset: int, include_yearly: bool = True) -> list[dict]:
     """
     Erstelle Precompute-Tasks für alle Locations und Zeitfenster.
 
@@ -384,7 +385,7 @@ def create_precompute_tasks(locations: List[Dict], start_offset: int, end_offset
     return tasks
 
 
-def publish_tasks_to_rabbitmq(tasks: List[Dict], batch_size: int = 100):
+def publish_tasks_to_rabbitmq(tasks: list[dict], batch_size: int = 100):
     """
     Publiziere Tasks in RabbitMQ Queue.
 
@@ -501,7 +502,7 @@ def main():
     run_interval = int(os.getenv('PRECOMPUTE_COORDINATOR_INTERVAL', '3600'))  # 1 Stunde
     retry_interval = int(os.getenv('PRECOMPUTE_COORDINATOR_RETRY_INTERVAL', '30'))  # 30 Sekunden
 
-    logger.info(f"Configuration:")
+    logger.info("Configuration:")
     logger.info(f"  - Hours ahead: {hours_ahead}")
     logger.info(f"  - Run interval: {run_interval}s")
     logger.info(f"  - Retry interval: {retry_interval}s (on failure)")

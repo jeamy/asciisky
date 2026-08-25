@@ -21,6 +21,9 @@ export function initializeSkyTracker() {
         getCurrentLocation,
         setLocation
     };
+
+    // Start exactly once after the renderer has received its manager.
+    updateSky();
     
     // Set up periodic updates
     setInterval(updateSky, CONFIG.UPDATE_INTERVAL_MS);

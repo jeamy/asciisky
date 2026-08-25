@@ -2,6 +2,7 @@
 Configuration endpoint to expose magnitude limits to frontend
 """
 from fastapi import APIRouter
+
 import bright_asteroids
 import comets
 

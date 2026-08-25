@@ -12,10 +12,9 @@ import logging
 import os
 import pickle
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, List
 
 import numpy as np
 import pandas as pd
@@ -28,7 +27,7 @@ from astronomy_utils import (
     compute_rise_set_transit_from_altitudes,
     format_time,
 )
-from cache_utils import normalize_location, location_key, time_bucket_utc
+from cache_utils import location_key, normalize_location, time_bucket_utc
 from data_paths import COMET_ELEMENTS_PATH
 from db_utils import (
     get_comet_dataframe,
@@ -95,14 +94,6 @@ def vectorized_comet_apparent_magnitude(M1, n, delta, r):
 
     magnitude = M1 + 5.0 * np.log10(delta_safe) + 2.5 * n * np.log10(r_safe)
     return magnitude
-
-
-def clear_in_memory_cache():
-    """Clear in-memory DataFrame cache - called when filters change"""
-    global _comet_df_cache, _comet_df_timestamp
-    _comet_df_cache = None
-    _comet_df_timestamp = None
-    logger.info("Cleared comet in-memory DataFrame cache")
 
 
 def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
@@ -207,8 +198,6 @@ def _standardize_comet_df(comets: pd.DataFrame) -> pd.DataFrame:
 
     # Drop rows missing essentials; at this stage only require 'e' and 'q'.
     # Angle completeness (i/om/w) is validated later per-row before orbit build.
-    node_col = 'node' if 'node' in df.columns else ('om' if 'om' in df.columns else None)
-    peri_col = 'peri' if 'peri' in df.columns else ('w' if 'w' in df.columns else None)
     essentials = [c for c in ['e', 'q'] if c in df.columns]
     # Debug: before-drop counts for 'e'/'q'
     try:
@@ -392,7 +381,7 @@ def _make_comet_orbit_cached(key: tuple):
     return mpc.comet_orbit(row, _ts, gm_km3_s2=GM_SUN_Pitjeva_2005_km3_s2)
 
 
-def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: Optional[datetime] = None, dataframe=None) -> List[dict]:
+def load_comets(ts, eph, observer_location, max_comets: int = MAX_COMETS_DEFAULT, use_cache: bool = True, current_dt: datetime | None = None, dataframe=None) -> list[dict]:
     """
     Compute comet positions and times for the given observer location.
     Uses photometric filters similar to bright_asteroids: prefilter by M1<=MAX_ABSOLUTE_MAGNITUDE and
@@ -493,7 +482,7 @@ def _compute_comets_vectorized(
     use_cache: bool,
     dt_utc: datetime,
     tz,
-) -> List[dict]:
+) -> list[dict]:
     """Vectorized comet magnitude computation and final processing.
 
     Applies the robust row-normalization/orbit construction logic from
@@ -766,7 +755,7 @@ def _compute_comets_vectorized(
     indices = np.arange(len(processed_rows))
     mask = apparent_magnitudes <= 20.0
     bright_idx = indices[mask]
-    comet_list: List[dict] = []
+    comet_list: list[dict] = []
     if len(bright_idx) == 0:
         # Nothing bright enough
         pass

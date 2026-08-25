@@ -1,11 +1,17 @@
 from datetime import datetime, timezone
-from typing import Optional, Tuple
 
-from fastapi import Request
+from fastapi import HTTPException, Request
+
 import settings as app_settings
 
-def parse_time_param(time_str: Optional[str]) -> datetime:
-    """Helper: parse optional ISO 8601 datetime string (supports 'Z') into UTC-aware datetime"""
+
+def parse_time_param(time_str: str | None) -> datetime:
+    """Parse an optional ISO-8601 value into an aware UTC datetime.
+
+    Invalid input is a client error.  Silently using the current time makes a
+    simulation request appear successful while returning data for a different
+    instant.
+    """
     if not time_str:
         return datetime.now(timezone.utc)
     try:
@@ -16,11 +22,10 @@ def parse_time_param(time_str: Optional[str]) -> datetime:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
-    except Exception:
-        # Fallback to current UTC on parse errors
-        return datetime.now(timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid ISO-8601 time") from exc
 
-def get_location_params(request: Request, lat: float = None, lon: float = None, elevation: float = None) -> Tuple[float, float, float]:
+def get_location_params(request: Request, lat: float = None, lon: float = None, elevation: float = None) -> tuple[float, float, float]:
     """
     Unified location parameter resolution for all endpoints.
     Priority: query params > session > settings file
@@ -60,4 +65,3 @@ def resolve_magnitude_filter(request: Request, filter_key: str, default: float) 
             pass
     filters = app_settings.get_magnitude_filters()
     return float(filters.get(filter_key, default))
-

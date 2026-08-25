@@ -1,19 +1,16 @@
-from typing import Optional
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from api.helpers import parse_time_param, get_location_params, resolve_magnitude_filter
-from api.cache_interpolation import load_asteroids_with_interpolation
-from api.computation import LOADER, ts, eph
-from config.interpolation_config import is_smart_interpolation_enabled, get_interpolation_strategy
-import bright_asteroids
-import settings
 import asyncio
-import os
-import time
-import uuid
 import logging
-from datetime import datetime, timedelta
-from cache_utils import normalize_location, location_key, time_bucket_utc
-from db_utils import get_asteroid_positions
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+
+import bright_asteroids
+from api.cache_interpolation import load_asteroids_with_interpolation
+from api.helpers import get_location_params, parse_time_param, resolve_magnitude_filter
+from cache_utils import time_bucket_utc
+from config.interpolation_config import (
+    get_interpolation_strategy,
+    is_smart_interpolation_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,104 +18,37 @@ router = APIRouter()
 
 
 async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
-    """
-    Triggert Asteroid-Worker für On-Demand Berechnung
-    
-    Args:
-        lat, lon, elevation: Location
-        dt_utc: Zeit
-    """
+    """Publish one deduplicated asteroid precompute task."""
     try:
-        import pika
-        import json
-        rabbitmq_url = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@rabbitmq:5672/')
-        logger.info(f"🚀 Triggering asteroid worker: url={rabbitmq_url}")
-        
-        def publish_task():
-            try:
-                logger.info(f"📡 Connecting to RabbitMQ...")
-                params = pika.URLParameters(rabbitmq_url)
-                connection = pika.BlockingConnection(params)
-                channel = connection.channel()
-                logger.info(f"✅ Connected to RabbitMQ")
-                
-                # Exchange deklarieren (MUSS existieren für basic_publish)
-                channel.exchange_declare(
-                    exchange='computation.direct',
-                    exchange_type='direct',
-                    durable=True
-                )
-                
-                task_id = f"asteroid_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-                # Task-Daten
-                task = {
-                    'task_id': task_id,
-                    'type': 'precompute',
-                    'kind': 'asteroids',  # Required for unified_worker (plural!)
-                    'location': {
-                        'latitude': lat,
-                        'longitude': lon,
-                        'elevation': elevation
-                    },
-                    'time_bucket': dt_utc.isoformat(),
-                    'magnitude': 20.0,  # Max magnitude for asteroids
-                    'bucket_hours': bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-                }
-                
-                logger.info(f"📤 Publishing task: {task['task_id']}")
-                from db_utils import claim_precompute_task, release_precompute_task
-                from workers.worker_utils import precompute_task_key
-                key = precompute_task_key(task)
-                if not claim_precompute_task(key):
-                    logger.info("Equivalent asteroid task already queued: %s", key)
-                    connection.close()
-                    return
-                
-                # Publiziere an computation.direct Exchange mit routing_key compute.asteroid
-                # On-Demand Tasks für aktuellen Standort/Zeitpunkt mit höchster Priorität
-                channel.basic_publish(
-                    exchange='computation.direct',
-                    routing_key='compute.asteroid',
-                    body=json.dumps(task),
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,  # persistent
-                        priority=10,
-                        message_id=key,
-                    )
-                )
-                
-                connection.close()
-                logger.info(f"✅ Published asteroid task {task['task_id']} to asteroid.compute queue")
-            except Exception as e:
-                if 'key' in locals():
-                    try:
-                        release_precompute_task(key)
-                    except Exception:
-                        logger.exception("Could not release asteroid task claim")
-                logger.error(f"❌ Error in publish_task: {e}", exc_info=True)
-                raise
-        
-        await asyncio.to_thread(publish_task)
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to trigger asteroid worker: {e}", exc_info=True)
+        from api.rabbitmq.task_publisher import trigger_precompute_task
+
+        await trigger_precompute_task(
+            'asteroids',
+            {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+            dt_utc.isoformat(),
+            20.0,
+            bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
+        )
+    except Exception:
+        logger.exception("Failed to trigger asteroid worker")
 
 
 @router.get("/bright_asteroids")
-async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
+async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: str | None = None, max_magnitude: float = None):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
 
-        if save_location and lat is not None and lon is not None and elevation is not None:
-            settings.set_location(lat, lon, elevation, location_name)
+        if save_location:
+            # GET requests are intentionally side-effect free.  Persist
+            # locations through POST /api/session/location or user settings.
+            logger.warning("Ignoring deprecated save_location query parameter on GET /bright_asteroids")
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:
             max_magnitude = resolve_magnitude_filter(request, 'asteroidMaxMagnitude', bright_asteroids.MAX_APPARENT_MAGNITUDE)
 
         dt_utc = parse_time_param(time)
-        location_dict = {'latitude': lat, 'longitude': lon, 'elevation': elevation}
         
         # Feature Flag: Smart Interpolation aktivieren?
         user_id = request.session.get('user_id', 'anonymous')
@@ -137,44 +67,34 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
             
             # Wähle Interpolationsmethode basierend auf Feature Flags
             if use_smart_interpolation:
-                from api.smart_interpolation import load_asteroids_with_smart_interpolation
-                asteroid_list = load_asteroids_with_smart_interpolation(
+                from api.smart_interpolation import (
+                    load_asteroids_with_smart_interpolation,
+                )
+                asteroid_list = await asyncio.to_thread(
+                    load_asteroids_with_smart_interpolation,
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
                     use_postgres=True
                 )
             else:
                 # Original nearest-bucket strategy
-                asteroid_list = load_asteroids_with_interpolation(
+                asteroid_list = await asyncio.to_thread(
+                    load_asteroids_with_interpolation,
                     lat, lon, elevation, dt_utc,
                     bucket_hours=bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-                    ttl_seconds=bright_asteroids.ASTEROID_CACHE_TTL_SECONDS,
                     use_postgres=True
                 )
             
-            if isinstance(asteroid_list, list) and asteroid_list:
+            if isinstance(asteroid_list, list):
                 logger.info(f"✅ Cache HIT for asteroids: {len(asteroid_list)} found")
             else:
-                # Cache-Miss: Prüfe ob Berechnung bereits läuft
-                lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
-                loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                
-                computation_key = f"computing:asteroid:{loc_key}:{bucket_key}"
-                
-                # Prüfe ob bereits in Berechnung
-                from db_utils import is_computation_in_progress, computation_lock  # noqa: PLC0415
-                if is_computation_in_progress(computation_key):
-                    logger.info(f"⏳ Computation already in progress for bucket {bucket_key}")
-                    asteroid_list = []  # Warte auf laufende Berechnung
-                else:
-                    # Markiere als "in progress" und trigger Worker
-                    computation_lock(computation_key, ttl_seconds=300)  # 5 Min Timeout
-                    logger.warning(f"❌ Cache MISS - triggering asteroid worker for bucket {bucket_key}")
-                    # Starte Task als FastAPI Background Task (läuft NACH Response)
-                    # Wichtig: Übergebe BUCKET-Zeit, nicht Request-Zeit!
-                    background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, bucket_dt)
-                    asteroid_list = []  # Gib zurück was im Cache ist (leer)
+                # The publisher obtains the persistent claim before publishing.
+                # Do not create a separate API-only advisory-lock key here: it
+                # cannot remain held across the background task and previously
+                # made this branch appear protected although no lock was held.
+                logger.warning(f"❌ Cache MISS - triggering asteroid worker for bucket {bucket_key}")
+                background_tasks.add_task(trigger_asteroid_worker, lat, lon, elevation, bucket_dt)
+                asteroid_list = []
         except Exception as e:
             logger.error(f"Failed to load asteroids from cache: {e}")
             # Triggere trotzdem Asteroid-Worker
@@ -190,11 +110,13 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
                     result["bodies"][f"bright_asteroid_{asteroid['name']}"] = asteroid
         
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add back /asteroids endpoint for backward compatibility
 @router.get("/asteroids")
-async def get_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: Optional[str] = None, max_magnitude: float = None):
+async def get_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: str | None = None, max_magnitude: float = None):
     """Alias for /bright_asteroids endpoint for backward compatibility."""
     return await get_bright_asteroids(request, background_tasks, lat, lon, elevation, location_name, save_location, time, max_magnitude)

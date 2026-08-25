@@ -118,7 +118,7 @@ All caches used by workers contain **unfiltered** data:
 - Only a small fixed set of bodies, fast enough without cache
 
 **Code references:**
-- `workers/precompute_worker.py` and `workers/unified_worker.py` — computation and storage
+- `workers/unified_worker.py` — computation and storage (`precompute_worker.py` is a compatibility entry point)
 - `bright_asteroids.py` / `comets.py` — candidate selection and vectorized computation
 - `api/routes/asteroids.py` / `api/routes/comets.py` — response filtering
 - `api/helpers.py:resolve_magnitude_filter()` — resolves query, account, or local defaults

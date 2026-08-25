@@ -14,14 +14,24 @@ Features:
 - Comprehensive error handling and logging
 """
 
-import os
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tuple
-from enum import Enum
+from datetime import datetime, timezone
+from typing import Any
+
+import bright_asteroids
+import comets
+from api.computation import LOADER, eph, ts
+from api.interpolation import get_interpolation_buckets, interpolate_object_list
 
 # Existing imports
-from cache_utils import normalize_location, location_key, time_bucket_utc
+from cache_utils import location_key, normalize_location, time_bucket_utc
+from config.interpolation_config import (
+    InterpolationStrategy,
+    get_config_manager,
+)
+from config.interpolation_config import (
+    get_interpolation_config as get_runtime_interpolation_config,
+)
 from db_utils import (
     database_target,
     get_asteroid_positions,
@@ -29,39 +39,8 @@ from db_utils import (
     store_asteroid_positions,
     store_comet_positions,
 )
-from api.interpolation import get_interpolation_buckets, interpolate_object_list
-import bright_asteroids
-import comets
-from api.computation import LOADER, ts, eph
 
 logger = logging.getLogger(__name__)
-
-
-class InterpolationStrategy(Enum):
-    """Available interpolation strategies"""
-    NEAREST_BUCKET = "nearest_bucket"      # Current fallback strategy
-    SMART_INTERPOLATION = "smart_interpolation"  # New adaptive strategy
-    ON_DEMAND_ONLY = "on_demand_only"      # Compute everything on demand
-
-
-class SmartInterpolationConfig:
-    """Configuration for smart interpolation"""
-
-    def __init__(self):
-        self.enabled = os.getenv('ENABLE_SMART_INTERPOLATION', 'false').lower() == 'true'
-        self.on_demand_enabled = os.getenv('INTERPOLATION_ON_DEMAND', 'true').lower() == 'true'
-        self.max_future_hours = float(os.getenv('INTERPOLATION_MAX_FUTURE_HOURS', '2.0'))
-        self.cache_computed = os.getenv('INTERPOLATION_CACHE_COMPUTED', 'true').lower() == 'true'
-        self.strategy = InterpolationStrategy(os.getenv('INTERPOLATION_STRATEGY', 'smart_interpolation'))
-
-        logger.info(f"Smart Interpolation Config: enabled={self.enabled}, "
-                   f"on_demand={self.on_demand_enabled}, "
-                   f"max_future_hours={self.max_future_hours}, "
-                   f"strategy={self.strategy.value}")
-
-
-# Global configuration instance
-_config = SmartInterpolationConfig()
 
 
 def load_asteroids_with_smart_interpolation(
@@ -70,9 +49,8 @@ def load_asteroids_with_smart_interpolation(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int = 1,
-    ttl_seconds: int = 86400,
     use_postgres: bool = True
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Load asteroid positions with smart interpolation.
 
@@ -82,18 +60,17 @@ def load_asteroids_with_smart_interpolation(
         elevation: Elevation in meters
         dt_utc: Target datetime (UTC)
         bucket_hours: Cache bucket size in hours
-        ttl_seconds: Cache TTL in seconds
         use_postgres: Whether to use PostgreSQL backend
 
     Returns:
         List of interpolated asteroid dictionaries, or None if no data available
     """
-    if not _config.enabled:
+    if not get_runtime_interpolation_config().enable_smart_interpolation:
         # Fallback to original nearest-bucket strategy
-        return _load_with_nearest_bucket_asteroids(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
+        return _load_with_nearest_bucket_asteroids(lat, lon, elevation, dt_utc, bucket_hours, use_postgres)
 
     return _load_with_smart_interpolation(
-        'asteroids', lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres
+        'asteroids', lat, lon, elevation, dt_utc, bucket_hours, use_postgres
     )
 
 
@@ -103,9 +80,8 @@ def load_comets_with_smart_interpolation(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int = 1,
-    ttl_seconds: int = 86400,
     use_postgres: bool = True
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Load comet positions with smart interpolation.
 
@@ -115,18 +91,17 @@ def load_comets_with_smart_interpolation(
         elevation: Elevation in meters
         dt_utc: Target datetime (UTC)
         bucket_hours: Cache bucket size in hours
-        ttl_seconds: Cache TTL in seconds
         use_postgres: Whether to use PostgreSQL backend
 
     Returns:
         List of interpolated comet dictionaries, or None if no data available
     """
-    if not _config.enabled:
+    if not get_runtime_interpolation_config().enable_smart_interpolation:
         # Fallback to original nearest-bucket strategy
-        return _load_with_nearest_bucket_comets(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
+        return _load_with_nearest_bucket_comets(lat, lon, elevation, dt_utc, bucket_hours, use_postgres)
 
     return _load_with_smart_interpolation(
-        'comets', lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres
+        'comets', lat, lon, elevation, dt_utc, bucket_hours, use_postgres
     )
 
 
@@ -137,9 +112,8 @@ def _load_with_smart_interpolation(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int,
-    ttl_seconds: int,
     use_postgres: bool
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Core smart interpolation logic with adaptive strategies.
 
@@ -148,7 +122,6 @@ def _load_with_smart_interpolation(
         lat, lon, elevation: Location parameters
         dt_utc: Target datetime
         bucket_hours: Cache bucket size
-        ttl_seconds: Cache TTL
         use_postgres: Use PostgreSQL backend
 
     Returns:
@@ -164,11 +137,11 @@ def _load_with_smart_interpolation(
                f"bucket1={bucket1_dt.isoformat()}, bucket2={bucket2_dt.isoformat()}, factor={factor:.3f}")
 
     # Load data for both buckets
-    list1 = _load_bucket(object_type, lat, lon, elevation, bucket1_dt, bucket_hours, ttl_seconds, use_postgres)
-    list2 = _load_bucket(object_type, lat, lon, elevation, bucket2_dt, bucket_hours, ttl_seconds, use_postgres)
+    list1 = _load_bucket(object_type, lat, lon, elevation, bucket1_dt, bucket_hours, use_postgres)
+    list2 = _load_bucket(object_type, lat, lon, elevation, bucket2_dt, bucket_hours, use_postgres)
 
     # DEBUG: Log bucket contents
-    if list1:
+    if list1 is not None:
         logger.info(f"Bucket1 ({bucket1_dt.isoformat()}): {len(list1)} objects loaded")
         if list1 and object_type == 'comets' and len(list1) > 0:
             first_comet = list1[0]
@@ -176,7 +149,7 @@ def _load_with_smart_interpolation(
     else:
         logger.warning(f"Bucket1 ({bucket1_dt.isoformat()}): EMPTY or None")
 
-    if list2:
+    if list2 is not None:
         logger.info(f"Bucket2 ({bucket2_dt.isoformat()}): {len(list2)} objects loaded")
         if list2 and object_type == 'comets' and len(list2) > 0:
             first_comet = list2[0]
@@ -185,11 +158,12 @@ def _load_with_smart_interpolation(
         logger.warning(f"Bucket2 ({bucket2_dt.isoformat()}): EMPTY or None")
 
     # Apply adaptive strategy based on bucket availability
-    if _config.strategy == InterpolationStrategy.SMART_INTERPOLATION:
+    config = get_runtime_interpolation_config()
+    if config.interpolation_strategy == InterpolationStrategy.SMART_INTERPOLATION:
         return _apply_smart_strategy(object_type, lat, lon, elevation, dt_utc,
                                     bucket1_dt, bucket2_dt, factor, list1, list2,
                                     bucket_hours)
-    elif _config.strategy == InterpolationStrategy.ON_DEMAND_ONLY:
+    elif config.interpolation_strategy == InterpolationStrategy.ON_DEMAND_ONLY:
         return _apply_on_demand_strategy(object_type, lat, lon, elevation, dt_utc,
                                         bucket1_dt, bucket2_dt, factor, bucket_hours)
     else:
@@ -206,25 +180,24 @@ def _apply_smart_strategy(
     bucket1_dt: datetime,
     bucket2_dt: datetime,
     factor: float,
-    list1: Optional[List[Dict[str, Any]]],
-    list2: Optional[List[Dict[str, Any]]],
+    list1: list[dict[str, Any]] | None,
+    list2: list[dict[str, Any]] | None,
     bucket_hours: int,
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Apply smart interpolation strategy with on-demand computation.
     """
 
+    config = get_runtime_interpolation_config()
+
     # Case 1: Both buckets available → True interpolation
-    if list1 and list2:
+    if list1 is not None and list2 is not None:
         logger.info(f"Both buckets available for {object_type} → performing smart interpolation")
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
     # Case 2: Only previous bucket available → Trigger background task or compute on-demand
-    if list1 and not list2 and _config.on_demand_enabled:
+    if list1 is not None and list2 is None and config.enable_on_demand_computation:
         # Check if background tasks are enabled (async RabbitMQ workers)
-        from config.interpolation_config import get_interpolation_config
-        config = get_interpolation_config()
-
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket2
             logger.info(f"Only previous bucket available for {object_type} → triggering background worker for bucket2")
@@ -241,18 +214,15 @@ def _apply_smart_strategy(
             # SYNC: Compute on-demand (blocks request)
             logger.info(f"Only previous bucket available for {object_type} → computing future bucket on-demand (SYNC)")
             list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
-            if list2:
-                if _config.cache_computed:
+            if list2 is not None:
+                if config.cache_ttl_seconds > 0:
                     _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
             logger.warning(f"On-demand computation failed for {object_type} future bucket, using previous bucket")
             return list1
 
     # Case 3: Only future bucket available → Trigger background task or compute on-demand
-    if not list1 and list2 and _config.on_demand_enabled:
-        from config.interpolation_config import get_interpolation_config
-        config = get_interpolation_config()
-
+    if list1 is None and list2 is not None and config.enable_on_demand_computation:
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ worker for bucket1
             logger.info(f"Only future bucket available for {object_type} → triggering background worker for bucket1")
@@ -260,42 +230,39 @@ def _apply_smart_strategy(
 
             # Check if future bucket is within acceptable time range
             time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
-            if time_diff_hours <= _config.max_future_hours:
+            if time_diff_hours <= config.max_future_hours:
                 logger.info(f"Using future bucket for {object_type} (within {time_diff_hours:.1f}h limit)")
                 return list2
             else:
-                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
+                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {config.max_future_hours}h)")
                 return None
         else:
             # SYNC: Compute on-demand (blocks request)
             logger.info(f"Only future bucket available for {object_type} → computing previous bucket on-demand (SYNC)")
             list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
-            if list1:
-                if _config.cache_computed:
+            if list1 is not None:
+                if config.cache_ttl_seconds > 0:
                     _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
             # Fallback: Check if future bucket is within acceptable time range
             time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
-            if time_diff_hours <= _config.max_future_hours:
+            if time_diff_hours <= config.max_future_hours:
                 logger.info(f"Using future bucket for {object_type} (within {time_diff_hours:.1f}h limit)")
                 return list2
             else:
-                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {_config.max_future_hours}h)")
+                logger.warning(f"Future bucket too far ahead for {object_type} ({time_diff_hours:.1f}h > {config.max_future_hours}h)")
                 return None
 
     # Case 4: No buckets available → Trigger background tasks or compute on-demand
-    if not list1 and not list2 and _config.on_demand_enabled:
-        from config.interpolation_config import get_interpolation_config
-        config = get_interpolation_config()
-
+    if list1 is None and list2 is None and config.enable_on_demand_computation:
         if config.enable_background_tasks:
             # ASYNC: Trigger RabbitMQ workers for both buckets
             logger.info(f"No buckets available for {object_type} → triggering background workers for both buckets")
             _trigger_background_worker(object_type, lat, lon, elevation, bucket1_dt, bucket_hours)
             _trigger_background_worker(object_type, lat, lon, elevation, bucket2_dt, bucket_hours)
             # Return None (user gets empty response, next request will have data)
-            logger.info(f"Background workers triggered, returning None (data will be available soon)")
+            logger.info("Background workers triggered, returning None (data will be available soon)")
             return None
         else:
             # SYNC: Compute both on-demand (blocks request)
@@ -303,8 +270,8 @@ def _apply_smart_strategy(
             list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
             list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
 
-            if list1 and list2:
-                if _config.cache_computed:
+            if list1 is not None and list2 is not None:
+                if config.cache_ttl_seconds > 0:
                     _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
                     _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
                 return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
@@ -327,7 +294,7 @@ def _apply_on_demand_strategy(
     bucket2_dt: datetime,
     factor: float,
     bucket_hours: int,
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Apply on-demand only strategy (compute everything fresh).
     """
@@ -337,27 +304,27 @@ def _apply_on_demand_strategy(
     list1 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket1_dt)
     list2 = _compute_bucket_on_demand(object_type, lat, lon, elevation, bucket2_dt)
 
-    if list1 and list2:
-        if _config.cache_computed:
+    if list1 is not None and list2 is not None:
+        if get_runtime_interpolation_config().cache_ttl_seconds > 0:
             _store_bucket(object_type, lat, lon, elevation, bucket1_dt, list1, bucket_hours)
             _store_bucket(object_type, lat, lon, elevation, bucket2_dt, list2, bucket_hours)
         return _interpolate_objects_smart(object_type, list1, list2, factor, dt_utc, lat, lon, elevation)
 
-    return list1 or list2 or None
+    return list1 if list1 is not None else list2
 
 
 def _apply_nearest_bucket_strategy(
-    list1: Optional[List[Dict[str, Any]]],
-    list2: Optional[List[Dict[str, Any]]],
+    list1: list[dict[str, Any]] | None,
+    list2: list[dict[str, Any]] | None,
     factor: float,
     bucket2_dt: datetime,
     dt_utc: datetime
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Apply original nearest bucket strategy (current behavior).
     """
     # If we have both buckets, prefer the closer one instead of interpolation
-    if list1 and list2:
+    if list1 is not None and list2 is not None:
         if factor < 0.5:
             logger.info(f"Using bucket1 (closer): factor={factor:.3f}")
             return list1
@@ -366,14 +333,14 @@ def _apply_nearest_bucket_strategy(
             return list2
 
     # If only one bucket available, use it
-    if list1:
-        logger.info(f"Using only available bucket1")
+    if list1 is not None:
+        logger.info("Using only available bucket1")
         return list1
 
-    if list2:
+    if list2 is not None:
         # Check if bucket2 is not too far in the future
         time_diff_hours = (bucket2_dt - dt_utc).total_seconds() / 3600
-        if time_diff_hours <= _config.max_future_hours:
+        if time_diff_hours <= get_runtime_interpolation_config().max_future_hours:
             logger.info(f"Using bucket2 (within {time_diff_hours:.1f}h)")
             return list2
         else:
@@ -391,9 +358,8 @@ def _load_bucket(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int,
-    ttl_seconds: int,
     use_postgres: bool
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Load object data for a single time bucket from PostgreSQL."""
     lat_norm, lon_norm, elev_norm = normalize_location(lat, lon, elevation)
     loc_key = location_key(lat_norm, lon_norm, elev_norm)
@@ -407,7 +373,7 @@ def _load_bucket(
             else:
                 positions = get_comet_positions(loc_key, bucket)
 
-            if isinstance(positions, list) and positions:
+            if isinstance(positions, list):
                 return positions
             logger.warning(
                 "Missing/empty %s cache row: key=%s bucket=%s db=%s",
@@ -433,6 +399,7 @@ def _trigger_background_worker(
     """
     try:
         import os
+
         from api.rabbitmq.task_publisher import TaskPublisher
 
         kind = 'asteroids' if object_type == 'asteroids' else 'comets'
@@ -459,7 +426,7 @@ def _compute_bucket_on_demand(
     lon: float,
     elevation: float,
     dt_utc: datetime
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Compute missing bucket on-demand (SYNCHRONOUS - blocks request!).
     Only used when ENABLE_INTERPOLATION_BACKGROUND_TASKS=false.
@@ -496,7 +463,7 @@ def _store_bucket(
     lon: float,
     elevation: float,
     dt_utc: datetime,
-    objects: List[Dict[str, Any]],
+    objects: list[dict[str, Any]],
     bucket_hours: int,
 ) -> None:
     """
@@ -520,14 +487,14 @@ def _store_bucket(
 
 def _interpolate_objects_smart(
     object_type: str,
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]],
+    list1: list[dict[str, Any]],
+    list2: list[dict[str, Any]],
     factor: float,
     target_dt: datetime,
     lat: float = 0.0,
     lon: float = 0.0,
     elevation: float = 0.0
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Perform smart interpolation with astronomical corrections.
     """
@@ -552,13 +519,13 @@ def _interpolate_objects_smart(
 
 
 def _apply_astronomical_corrections(
-    obj: Dict[str, Any],
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]],
+    obj: dict[str, Any],
+    list1: list[dict[str, Any]],
+    list2: list[dict[str, Any]],
     factor: float,
     target_dt: datetime,
-    location: Dict[str, float]
-) -> Dict[str, Any]:
+    location: dict[str, float]
+) -> dict[str, Any]:
     """
     Apply astronomical corrections to interpolated object.
     Uses the dedicated astronomical_corrections module.
@@ -588,13 +555,12 @@ def _load_with_nearest_bucket_asteroids(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int,
-    ttl_seconds: int,
     use_postgres: bool
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Fallback to original nearest bucket strategy for asteroids."""
     # Import here to avoid circular imports
     from api.cache_interpolation import load_asteroids_with_interpolation
-    return load_asteroids_with_interpolation(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
+    return load_asteroids_with_interpolation(lat, lon, elevation, dt_utc, bucket_hours, use_postgres)
 
 
 def _load_with_nearest_bucket_comets(
@@ -603,22 +569,20 @@ def _load_with_nearest_bucket_comets(
     elevation: float,
     dt_utc: datetime,
     bucket_hours: int,
-    ttl_seconds: int,
     use_postgres: bool
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """Fallback to original nearest bucket strategy for comets."""
     # Import here to avoid circular imports
     from api.cache_interpolation import load_comets_with_interpolation
-    return load_comets_with_interpolation(lat, lon, elevation, dt_utc, bucket_hours, ttl_seconds, use_postgres)
+    return load_comets_with_interpolation(lat, lon, elevation, dt_utc, bucket_hours, use_postgres)
 
 
-def get_interpolation_config() -> SmartInterpolationConfig:
+def get_interpolation_config():
     """Get current interpolation configuration."""
-    return _config
+    return get_runtime_interpolation_config()
 
 
 def reload_interpolation_config():
     """Reload interpolation configuration from environment."""
-    global _config
-    _config = SmartInterpolationConfig()
-    logger.info(f"Smart interpolation config reloaded: {_config.strategy.value}")
+    get_config_manager().reload_config()
+    logger.info("Smart interpolation configuration reloaded")

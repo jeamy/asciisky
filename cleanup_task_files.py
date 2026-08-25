@@ -3,11 +3,10 @@
 Cleanup-Script für Task-Worker Dateileichen
 Erkennt und löscht verwaiste Task-Dateien basierend auf Alter und Status
 """
-import os
 import json
-import glob
 import logging
-from datetime import datetime, timezone, timedelta
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -103,21 +102,21 @@ def analyze_task_files(dry_run=True, max_age_hours=24):
             if status == 'completed':
                 # Erfolgreich abgeschlossen, aber Dateien nicht gelöscht
                 completed_old_files.extend([f for f in [task_file, status_file] if f])
-                logger.info(f"  → DATEILEICHE: Abgeschlossen aber nicht gelöscht")
+                logger.info("  → DATEILEICHE: Abgeschlossen aber nicht gelöscht")
             elif status == 'error':
                 # Fehler, Dateien blieben zurück
                 error_old_files.extend([f for f in [task_file, status_file] if f])
-                logger.info(f"  → DATEILEICHE: Fehler-Task nicht bereinigt")
+                logger.info("  → DATEILEICHE: Fehler-Task nicht bereinigt")
             elif status in ['running', 'starting']:
                 # Läuft angeblich noch, aber zu alt
                 running_old_files.extend([f for f in [task_file, status_file] if f])
-                logger.info(f"  → DATEILEICHE: Hängender Task (läuft zu lange)")
+                logger.info("  → DATEILEICHE: Hängender Task (läuft zu lange)")
             else:
                 # Unbekannter Status oder verwaist
                 orphaned_files.extend([f for f in [task_file, status_file] if f])
-                logger.info(f"  → DATEILEICHE: Verwaist oder unbekannter Status")
+                logger.info("  → DATEILEICHE: Verwaist oder unbekannter Status")
         else:
-            logger.info(f"  → OK: Noch jung genug")
+            logger.info("  → OK: Noch jung genug")
 
     # Zusammenfassung
     all_orphaned = orphaned_files + completed_old_files + error_old_files + running_old_files

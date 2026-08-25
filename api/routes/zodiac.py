@@ -1,24 +1,19 @@
 """
 Zodiac constellation API endpoint
 """
-import os
+import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+import os
+
 from fastapi import APIRouter, HTTPException, Query
 from skyfield.api import Star
 from skyfield.data import hipparcos, stellarium
-from skyfield.positionlib import Apparent
-import numpy as np
-from datetime import datetime, timezone
-import asyncio
-import uuid
-import time
-import settings
 
-from api.helpers import get_location_params
-from data_paths import DATA_DIR, CONSTELLATIONSHIP_PATH
-from api.computation import LOADER, ts as GLOBAL_TS, eph as GLOBAL_EPH
-
+from api.computation import LOADER
+from api.computation import eph as GLOBAL_EPH
+from api.computation import ts as GLOBAL_TS
+from api.helpers import parse_time_param
+from data_paths import CONSTELLATIONSHIP_PATH
 
 # Constants
 STELLARIUM_CONSTELLATION_PATH = str(CONSTELLATIONSHIP_PATH)
@@ -81,7 +76,7 @@ def init_skyfield():
         hip_data = None
         logger.error(f"Failed to load Hipparcos catalog: {e}")
 
-def get_star_position(hip_id: int, observer_location, time) -> Optional[Tuple[float, float, float]]:
+def get_star_position(hip_id: int, observer_location, time) -> tuple[float, float, float] | None:
     """Get star position (altitude, azimuth, magnitude) for given Hipparcos ID"""
     try:
         # Primary: Hipparcos dataframe
@@ -93,22 +88,14 @@ def get_star_position(hip_id: int, observer_location, time) -> Optional[Tuple[fl
             magnitude = float(star_data.get('magnitude', 5.0))
             return float(alt.degrees), float(az.degrees), magnitude
 
-        # Fallback: known RA/Dec for bright zodiac stars
-        if hip_id in KNOWN_STAR_COORDINATES:
-            ra_hours, dec_degrees, mag = KNOWN_STAR_COORDINATES[hip_id]
-            star = Star(ra_hours=ra_hours, dec_degrees=dec_degrees)
-            apparent = observer_location.at(time).observe(star).apparent()
-            alt, az, _ = apparent.altaz()
-            return float(alt.degrees), float(az.degrees), float(mag)
-
-        logger.debug(f"HIP {hip_id} not available in hip_data and no fallback coordinates found")
+        logger.debug("HIP %s not available in Hipparcos data", hip_id)
         return None
         
     except Exception as e:
         logger.debug(f"Error calculating position for HIP {hip_id}: {e}")
         return None
 
-def load_stellarium_constellations() -> Optional[List]:
+def load_stellarium_constellations() -> list | None:
     """Load Stellarium constellation data from local file"""
     if os.path.exists(STELLARIUM_CONSTELLATION_PATH):
         try:
@@ -193,32 +180,21 @@ async def get_zodiac_constellations(
     lat: float = Query(..., description="Latitude in degrees"),
     lon: float = Query(..., description="Longitude in degrees"), 
     elevation: float = Query(0, description="Elevation in meters"),
-    time: Optional[str] = Query(None, description="ISO time string (optional)"),
-    nocache: Optional[bool] = Query(False, description="Bypass cached zodiac result")
+    time: str | None = Query(None, description="ISO time string (optional)"),
+    nocache: bool | None = Query(False, description="Bypass cached zodiac result")
 ):
     """Get zodiac constellation data with calculated star positions"""
     
     try:
-        # Parse time parameter
-        if time:
-            try:
-                if time.endswith('Z'):
-                    dt_utc = datetime.fromisoformat(time[:-1]).replace(tzinfo=timezone.utc)
-                else:
-                    dt_utc = datetime.fromisoformat(time).replace(tzinfo=timezone.utc)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid time format")
-        else:
-            dt_utc = datetime.now(timezone.utc)
+        dt_utc = parse_time_param(time)
         
         # Zodiac calculations are fast, no caching needed
         result = await asyncio.to_thread(compute_constellations, lat, lon, elevation, dt_utc)
         
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in zodiac endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-# Initialize Skyfield when module is loaded
-init_skyfield()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e!s}")

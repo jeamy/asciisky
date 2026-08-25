@@ -103,8 +103,8 @@ In addition to on-demand workers there is a precompute pipeline:
     - Claims a normalized key in PostgreSQL before publishing, preventing a
       second coordinator/restart from publishing the same task until completion
       or claim expiry.
-- `workers/precompute_worker.py`:
-  - Consumes from `precompute.tasks`.
+- `workers/unified_worker.py` (and the compatible `precompute_worker.py` entry point):
+  - Consumes from `precompute.tasks` plus the on-demand queues.
   - For each task (`kind = 'asteroids' | 'comets'`):
     - Calls `bright_asteroids.load_bright_asteroids(...)` or `comets.load_comets(...)`.
     - Stores the resulting list in `cached_positions` via
@@ -150,7 +150,7 @@ RabbitMQ is used both for precompute and on-demand computation:
 
 - **Queues**
   - `precompute.tasks` (classic, durable, `x-max-priority = 10`)
-    - Used by `precompute_worker` for scheduled bucket computations.
+    - Used by the unified worker for scheduled bucket computations.
   - `asteroid.compute` (classic, durable, `x-message-ttl = 3600000` ms ≈ 1h)
     - On-demand asteroid bucket computations.
   - `comet.compute` (classic, durable, `x-message-ttl = 3600000` ms ≈ 1h)
@@ -254,7 +254,7 @@ Planets (und andere helle Himmelskörper) werden heute über die
 | Comet computation            | `comets.py`                   | `load_comets`, `_compute_comets_vectorized`     |
 | On-demand worker             | `workers/unified_worker.py`   | `UnifiedWorker` queue callbacks                  |
 | Precompute coordinator       | `precompute_coordinator.py`   | `create_precompute_tasks`, `publish_tasks_to_rabbitmq` |
-| Precompute worker            | `workers/precompute_worker.py`| `process_task`, `main`                          |
+| Precompute worker            | `workers/unified_worker.py`   | `UnifiedWorker.process_task`, `main`            |
 
 ### Celestial Objects (Sun, Moon, Planets)
 

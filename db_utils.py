@@ -3,18 +3,20 @@ PostgreSQL database utilities for AsciiSky astronomical data caching.
 Provides efficient storage and retrieval of asteroid orbital data and computed positions.
 Multi-host compatible.
 """
+import hashlib
+import json
+import logging
+import os
+import pickle
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any
+
 import psycopg
 from psycopg.rows import dict_row
-import pickle
-import json
-import os
-import time
-import logging
-import hashlib
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Tuple
-from contextlib import contextmanager
-import threading
 
 try:
     # Optional import; used only for cache versioning of sunpath data.
@@ -99,19 +101,34 @@ def close_db_connection():
 
 # ===== Asteroid Functions =====
 
-def store_asteroid_dataframe(df_pickle: bytes) -> None:
-    """Store asteroid DataFrame in FILESYSTEM (not PostgreSQL - too large for DB!)."""
+def _store_dataframe(filename: str, df_pickle: bytes) -> str:
+    """Atomically replace a source dataframe so workers never read a partial file."""
     from data_paths import DATA_DIR, ensure_data_dirs
     ensure_data_dirs()
+    cache_file = os.path.join(DATA_DIR, filename)
+    fd, temporary_path = tempfile.mkstemp(prefix=f".{filename}-", suffix=".tmp", dir=DATA_DIR)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(df_pickle)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, cache_file)
+    except OSError:
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            pass
+        raise
+    return cache_file
 
-    # Store in filesystem instead of PostgreSQL to avoid OOM killer
-    cache_file = os.path.join(DATA_DIR, 'asteroid_dataframe.pkl')
-    with open(cache_file, 'wb') as f:
-        f.write(df_pickle)
+
+def store_asteroid_dataframe(df_pickle: bytes) -> None:
+    """Store asteroid DataFrame in the filesystem using an atomic replace."""
+    cache_file = _store_dataframe('asteroid_dataframe.pkl', df_pickle)
 
     logger.info(f"Stored asteroid DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
-def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> bytes | None:
     """Retrieve cached asteroid DataFrame from FILESYSTEM (not PostgreSQL)."""
     from data_paths import DATA_DIR
 
@@ -124,6 +141,7 @@ def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Asteroid DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
+        return None
 
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
@@ -131,10 +149,17 @@ def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     logger.info(f"Loaded asteroid DataFrame from filesystem: {len(df_pickle) / 1024 / 1024:.1f} MB")
     return df_pickle
 
-def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: str,
-                                observer_lat: float, observer_lon: float, observer_elevation: float,
-                                position_data: List[Dict]) -> None:
-    """Store computed asteroid positions in PostgreSQL."""
+def _store_positions(
+    object_type: str,
+    object_id: int,
+    location_key: str,
+    time_bucket: str,
+    observer_lat: float,
+    observer_lon: float,
+    observer_elevation: float,
+    position_data: list[dict],
+) -> None:
+    """Store one immutable position bucket for a supported minor-body type."""
     with db_transaction() as conn:
         cursor = conn.cursor()
         serialized_data = pickle.dumps(position_data)
@@ -153,17 +178,13 @@ def store_asteroid_positions(asteroid_id: int, location_key: str, time_bucket: s
                 computed_at = EXCLUDED.computed_at,
                 position_data = EXCLUDED.position_data
         """, (
-            'asteroid', asteroid_id, location_key, time_bucket,
+            object_type, object_id, location_key, time_bucket,
             observer_lat, observer_lon, observer_elevation,
             datetime.now(timezone.utc), serialized_data
         ))
 
-def get_asteroid_positions(location_key: str, time_bucket: str) -> Optional[List[Dict]]:
-    """
-    Retrieve cached asteroid positions from PostgreSQL.
-
-    Positions for a specific time_bucket are immutable and can be cached indefinitely.
-    """
+def _get_positions(object_type: str, location_key: str, time_bucket: str) -> list[dict] | None:
+    """Retrieve an immutable minor-body position bucket, including ``[]``."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -171,11 +192,11 @@ def get_asteroid_positions(location_key: str, time_bucket: str) -> Optional[List
         # Positions for a specific time_bucket are immutable - no TTL needed!
         cursor.execute("""
             SELECT position_data FROM cached_positions
-            WHERE object_type = 'asteroid'
+            WHERE object_type = %s
               AND location_key = %s
               AND time_bucket = %s
             ORDER BY computed_at DESC LIMIT 1
-        """, (location_key, time_bucket))
+        """, (object_type, location_key, time_bucket))
 
         row = cursor.fetchone()
         if row and row['position_data']:
@@ -188,11 +209,26 @@ def get_asteroid_positions(location_key: str, time_bucket: str) -> Optional[List
         if not conn.closed:
             conn.commit()
 
+
+def store_asteroid_positions(
+    asteroid_id: int, location_key: str, time_bucket: str,
+    observer_lat: float, observer_lon: float, observer_elevation: float,
+    position_data: list[dict],
+) -> None:
+    _store_positions(
+        "asteroid", asteroid_id, location_key, time_bucket,
+        observer_lat, observer_lon, observer_elevation, position_data,
+    )
+
+
+def get_asteroid_positions(location_key: str, time_bucket: str) -> list[dict] | None:
+    return _get_positions("asteroid", location_key, time_bucket)
+
 # ===== Sunpath Functions =====
 
 def store_sunpath_year(location_key: str, year_bucket: str,
                         observer_lat: float, observer_lon: float, observer_elevation: float,
-                        sunpath_data: Dict[str, Any]) -> None:
+                        sunpath_data: dict[str, Any]) -> None:
     """Store yearly sunpath data in PostgreSQL cached_positions.
 
     Uses object_type='sunpath' and the year (as string) as time_bucket, so the
@@ -224,7 +260,7 @@ def store_sunpath_year(location_key: str, year_bucket: str,
 
 
 def get_sunpath_year(location_key: str, year_bucket: str,
-                      max_age_seconds: int = None) -> Optional[Dict[str, Any]]:
+                      max_age_seconds: int = None) -> dict[str, Any] | None:
     """Retrieve cached yearly sunpath data from PostgreSQL.
 
     Sunpath for a given (location, year) is effectively immutable, so max_age_seconds
@@ -278,18 +314,12 @@ def get_sunpath_year(location_key: str, year_bucket: str,
 # ===== Comet Functions =====
 
 def store_comet_dataframe(df_pickle: bytes) -> None:
-    """Store comet DataFrame in FILESYSTEM (not PostgreSQL - too large for DB!)."""
-    from data_paths import DATA_DIR, ensure_data_dirs
-    ensure_data_dirs()
-
-    # Store in filesystem instead of PostgreSQL to avoid OOM killer
-    cache_file = os.path.join(DATA_DIR, 'comet_dataframe.pkl')
-    with open(cache_file, 'wb') as f:
-        f.write(df_pickle)
+    """Store comet DataFrame in the filesystem using an atomic replace."""
+    cache_file = _store_dataframe('comet_dataframe.pkl', df_pickle)
 
     logger.info(f"Stored comet DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
-def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
+def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> bytes | None:
     """Retrieve cached comet DataFrame from FILESYSTEM (not PostgreSQL)."""
     from data_paths import DATA_DIR
 
@@ -302,6 +332,7 @@ def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     file_age = time.time() - os.path.getmtime(cache_file)
     if file_age > max_age_seconds:
         logger.warning(f"Comet DataFrame cache too old ({file_age / 3600:.1f}h > {max_age_seconds / 3600:.1f}h)")
+        return None
 
     with open(cache_file, 'rb') as f:
         df_pickle = f.read()
@@ -309,86 +340,23 @@ def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> Optional[bytes]:
     logger.info(f"Loaded comet DataFrame from filesystem: {len(df_pickle) / 1024 / 1024:.1f} MB")
     return df_pickle
 
-def get_comets_by_magnitude(max_absolute_mag: float) -> List[Dict]:
-    """Get comets filtered by magnitude from PostgreSQL."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
+def store_comet_positions(
+    comet_id: int, location_key: str, time_bucket: str,
+    observer_lat: float, observer_lon: float, observer_elevation: float,
+    position_data: list[dict],
+) -> None:
+    _store_positions(
+        "comet", comet_id, location_key, time_bucket,
+        observer_lat, observer_lon, observer_elevation, position_data,
+    )
 
-        cursor.execute("""
-            SELECT id, designation, m1_mag, orbit_data
-            FROM comet_elements
-            WHERE m1_mag <= %s
-            ORDER BY m1_mag ASC
-        """, (max_absolute_mag,))
 
-        return [dict(row) for row in cursor.fetchall()]
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        if not conn.closed:
-            conn.commit()
-
-def store_comet_positions(comet_id: int, location_key: str, time_bucket: str,
-                             observer_lat: float, observer_lon: float, observer_elevation: float,
-                             position_data: List[Dict]) -> None:
-    """Store computed comet positions in PostgreSQL."""
-    with db_transaction() as conn:
-        cursor = conn.cursor()
-        serialized_data = pickle.dumps(position_data)
-
-        cursor.execute("""
-            INSERT INTO cached_positions (
-                object_type, object_id, location_key, time_bucket,
-                observer_lat, observer_lon, observer_elevation,
-                computed_at, position_data
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (object_type, location_key, time_bucket)
-            DO UPDATE SET
-                observer_lat = EXCLUDED.observer_lat,
-                observer_lon = EXCLUDED.observer_lon,
-                observer_elevation = EXCLUDED.observer_elevation,
-                computed_at = EXCLUDED.computed_at,
-                position_data = EXCLUDED.position_data
-        """, (
-            'comet', comet_id, location_key, time_bucket,
-            observer_lat, observer_lon, observer_elevation,
-            datetime.now(timezone.utc), serialized_data
-        ))
-
-def get_comet_positions(location_key: str, time_bucket: str) -> Optional[List[Dict]]:
-    """
-    Retrieve cached comet positions from PostgreSQL.
-
-    Positions for a specific time_bucket are immutable and can be cached indefinitely.
-    """
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT position_data FROM cached_positions
-            WHERE object_type = 'comet'
-              AND location_key = %s
-              AND time_bucket = %s
-            ORDER BY computed_at DESC LIMIT 1
-        """, (location_key, time_bucket))
-
-        row = cursor.fetchone()
-        if row and row['position_data']:
-            return pickle.loads(bytes(row['position_data']))
-        return None
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        if not conn.closed:
-            conn.commit()
+def get_comet_positions(location_key: str, time_bucket: str) -> list[dict] | None:
+    return _get_positions("comet", location_key, time_bucket)
 
 # ===== Cache Maintenance Functions =====
 
-def cleanup_cached_positions(retention_days: int, object_types: Optional[List[str]] = None) -> int:
+def cleanup_cached_positions(retention_days: int, object_types: list[str] | None = None) -> int:
     """Delete cached position rows older than retention_days.
 
     Args:
@@ -426,7 +394,7 @@ def cleanup_cached_positions(retention_days: int, object_types: Optional[List[st
     return deleted_rows
 
 
-def invalidate_cached_positions(object_types: List[str]) -> int:
+def invalidate_cached_positions(object_types: list[str]) -> int:
     """Delete cached position rows for the provided object types."""
     if not object_types:
         return 0
@@ -452,13 +420,6 @@ def claim_precompute_task(task_key: str, ttl_seconds: int = 86400) -> bool:
     with db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS precompute_task_claims (
-                task_key TEXT PRIMARY KEY,
-                claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMPTZ NOT NULL
-            )
-        """)
-        cursor.execute("""
             INSERT INTO precompute_task_claims (task_key, claimed_at, expires_at)
             VALUES (%s, NOW(), NOW() + (%s * INTERVAL '1 second'))
             ON CONFLICT (task_key) DO UPDATE
@@ -475,53 +436,8 @@ def release_precompute_task(task_key: str) -> None:
     with db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS precompute_task_claims (
-                task_key TEXT PRIMARY KEY,
-                claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMPTZ NOT NULL
-            )
-        """)
-        cursor.execute("""
             DELETE FROM precompute_task_claims WHERE task_key = %s
         """, (task_key,))
-
-# ===== Data Update Tracking =====
-
-def record_data_update(update_type: str, status: str, message: str = None) -> None:
-    """Record data update in PostgreSQL."""
-    with db_transaction() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO data_updates (update_type, status, message, updated_at)
-            VALUES (%s, %s, %s, %s)
-        """, (update_type, status, message, datetime.now(timezone.utc)))
-
-def get_last_data_update(update_type: str = None) -> Optional[Dict]:
-    """Get last data update from PostgreSQL."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-
-        if update_type:
-            cursor.execute("""
-                SELECT * FROM data_updates
-                WHERE update_type = %s
-                ORDER BY updated_at DESC LIMIT 1
-            """, (update_type,))
-        else:
-            cursor.execute("""
-                SELECT * FROM data_updates
-                ORDER BY updated_at DESC LIMIT 1
-            """)
-
-        row = cursor.fetchone()
-        return dict(row) if row else None
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        if not conn.closed:
-            conn.commit()
 
 def get_database_stats() -> dict:
     """Get database statistics (asteroid/comet DataFrame availability from filesystem)."""
@@ -560,7 +476,7 @@ def get_database_stats() -> dict:
 
 # ===== User Settings Functions =====
 
-def get_user_settings(user_id: int) -> Optional[Dict[str, Any]]:
+def get_user_settings(user_id: int) -> dict[str, Any] | None:
     """Retrieve JSONB user settings for a given user_id."""
     conn = get_db_connection()
     try:
@@ -587,7 +503,7 @@ def get_user_settings(user_id: int) -> Optional[Dict[str, Any]]:
             conn.commit()
 
 
-def save_user_settings(user_id: int, settings: Dict[str, Any]) -> None:
+def save_user_settings(user_id: int, settings: dict[str, Any]) -> None:
     """Upsert JSONB user settings for a given user_id."""
     with db_transaction() as conn:
         cursor = conn.cursor()
@@ -604,7 +520,7 @@ def save_user_settings(user_id: int, settings: Dict[str, Any]) -> None:
         )
 
 
-def get_all_user_locations() -> List[Dict[str, Any]]:
+def get_all_user_locations() -> list[dict[str, Any]]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -620,7 +536,7 @@ def get_all_user_locations() -> List[Dict[str, Any]]:
             """
         )
 
-        locations: List[Dict[str, Any]] = []
+        locations: list[dict[str, Any]] = []
         for row in cursor.fetchall():
             lat = row.get("latitude")
             lon = row.get("longitude")
@@ -653,48 +569,24 @@ def _advisory_lock_id(computation_key: str) -> int:
     return int.from_bytes(h[:4], 'big') & 0x7FFFFFFF
 
 
-def is_computation_in_progress(computation_key: str) -> bool:
-    """Check if a computation is already in progress using PostgreSQL Advisory Locks."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-
-        # Try to acquire lock in non-blocking mode
-        # Returns 1 if lock acquired, 0 if already locked
-        lock_id = _advisory_lock_id(computation_key)
-        cursor.execute("SELECT pg_try_advisory_lock(%s) as acquired", (lock_id,))
-
-        result = cursor.fetchone()
-        acquired = result['acquired']
-
-        if acquired:
-            # We got the lock, release it immediately (we were just checking)
-            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
-            return False  # No computation in progress
-        else:
-            return True   # Computation is in progress (lock held by someone else)
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        if not conn.closed:
-            conn.commit()
-
 @contextmanager
-def computation_lock(computation_key: str, ttl_seconds: int = 300):
-    """Context manager for PostgreSQL Advisory Locks."""
+def computation_lock(computation_key: str, wait_seconds: float = 5.0):
+    """Acquire a session advisory lock with a bounded database-side wait.
+
+    PostgreSQL advisory locks do not have a TTL.  Task claims provide the
+    durable expiry mechanism; this lock solely serializes overlapping worker
+    DB operations.  A bounded wait prevents a stalled peer from blocking a
+    consumer indefinitely.
+    """
     conn = get_db_connection()
     lock_id = _advisory_lock_id(computation_key)
 
     try:
         cursor = conn.cursor()
-        # Try to acquire lock (blocking with timeout)
+        # ``lock_timeout`` applies to the following blocking lock statement.
+        timeout_ms = max(1, int(wait_seconds * 1000))
+        cursor.execute("SET LOCAL lock_timeout = %s", (f"{timeout_ms}ms",))
         cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
-
-        # Set up automatic cleanup after TTL
-        cursor.execute("""
-            SELECT pg_notify('computation_lock_timeout', %s)
-        """, (f"{computation_key}:{ttl_seconds}",))
 
         yield conn
         conn.commit()

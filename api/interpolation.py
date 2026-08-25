@@ -3,11 +3,10 @@ Interpolation utilities for asteroid and comet positions.
 Provides linear interpolation between cached hourly snapshots.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
-import math
+from typing import Any
 
 
-def interpolate_position(pos1: Dict[str, Any], pos2: Dict[str, Any], factor: float) -> Dict[str, Any]:
+def interpolate_position(pos1: dict[str, Any], pos2: dict[str, Any], factor: float) -> dict[str, Any]:
     """
     Linear interpolation between two position dictionaries.
     
@@ -69,10 +68,10 @@ def interpolate_azimuth(az1: float, az2: float, factor: float) -> float:
 
 
 def interpolate_object_list(
-    list1: List[Dict[str, Any]], 
-    list2: List[Dict[str, Any]], 
+    list1: list[dict[str, Any]],
+    list2: list[dict[str, Any]],
     factor: float
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Interpolate between two lists of celestial objects.
     Matches objects by name and interpolates their positions.

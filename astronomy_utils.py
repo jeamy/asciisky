@@ -4,11 +4,10 @@ Shared astronomy helpers used by bright_asteroids.py and comets.py.
 Keeps event-grid / rise-set-transit / timescale handling in one place so that
 the two modules don't drift apart.
 """
-from datetime import timedelta, timezone
-from typing import List, Optional, Tuple
 import os
-import numpy as np
+from datetime import timedelta, timezone
 
+import numpy as np
 
 # Standard refraction horizon for rise/set detection (degrees)
 DEFAULT_HORIZON_DEG = -0.5667
@@ -60,10 +59,10 @@ def build_event_time_grid(ts, anchor_time, days: int = 2, minutes_step: int | No
 
 def compute_rise_set_transit_from_altitudes(
     alt_deg: np.ndarray,
-    times_dt: List,
+    times_dt: list,
     minutes_step: int,
     horizon_deg: float = DEFAULT_HORIZON_DEG,
-) -> Tuple[Optional[object], Optional[object], Optional[object]]:
+) -> tuple[object | None, object | None, object | None]:
     """Extract first rise, first set and transit (max altitude) from a
     pre-computed altitude grid.
 

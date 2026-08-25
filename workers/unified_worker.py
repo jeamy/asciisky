@@ -15,42 +15,42 @@ Features:
 - ✅ Graceful Shutdown
 """
 
-import os
-import sys
-import time
-import json
-import socket
-import logging
-import signal
-import threading
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
-from enum import Enum
-import psutil
-import pika
 import hashlib
+import json
+import logging
+import os
+import signal
+import socket
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+import pika
+import psutil
 
 # ASCII Sky Imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
-from cache_utils import normalize_location, location_key, time_bucket_utc
+from api.astronomical_corrections import AstronomicalCorrector
+from api.computation import compute_sunpath_year
+from api.on_demand_computation import OnDemandComputationService
+from cache_utils import location_key, normalize_location
+from config.interpolation_config import get_interpolation_config
 from db_utils import (
-    database_target,
+    computation_lock,
     database_identity,
+    database_target,
     get_asteroid_positions,
     get_comet_positions,
     get_sunpath_year,
     store_asteroid_positions,
     store_comet_positions,
     store_sunpath_year,
-    computation_lock,
 )
-from api.on_demand_computation import OnDemandComputationService
-from api.astronomical_corrections import AstronomicalCorrector
-from config.interpolation_config import get_interpolation_config
-from api.computation import compute_sunpath_year
 
 # Worker Utils (same directory)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -62,13 +62,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-class TaskType(Enum):
-    """Typen von Tasks die der Worker verarbeiten kann"""
-    PRECOMPUTE = "precompute"
-    ON_DEMAND = "on_demand"
-    RPC = "rpc"
 
 
 def generate_computation_message_id(task_type: str, location_key: str, time_bucket: str, **kwargs) -> str:
@@ -103,7 +96,7 @@ class WorkerMetrics:
     total_processing_time: float = 0.0
     memory_usage_mb: float = 0.0
     cpu_usage_percent: float = 0.0
-    last_task_time: Optional[float] = None
+    last_task_time: float | None = None
     start_time: float = 0.0
 
 
@@ -122,12 +115,10 @@ class UnifiedWorker:
 
         # Shared Resources
         self.shared_resources = SharedSkyfieldResources()
-        loader, ts, eph, asteroid_df, comet_df = self.shared_resources.get_resources()
+        loader, ts, eph, _, _ = self.shared_resources.get_resources()
         self.loader = loader
         self.ts = ts
         self.eph = eph
-        self.asteroid_df = asteroid_df
-        self.comet_df = comet_df
 
         # Smart Interpolation Integration
         self.config = get_interpolation_config()
@@ -147,7 +138,7 @@ class UnifiedWorker:
 
         logger.info(f"Unified Worker {worker_id} initialized")
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum, _frame):
         """Handler für graceful shutdown"""
         logger.info(f"Received signal {signum}, shutting down gracefully...")
         self.shutdown_requested = True
@@ -210,7 +201,7 @@ class UnifiedWorker:
         worker_utils.declare_computation_queues(self.channel)
         logger.info("All queues and exchanges declared successfully")
 
-    def send_task_with_deduplication(self, queue_name: str, task_data: Dict[str, Any],
+    def send_task_with_deduplication(self, queue_name: str, task_data: dict[str, Any],
                                     message_id: str, priority: int = 0) -> bool:
         """Send task with RabbitMQ deduplication"""
         try:
@@ -231,7 +222,7 @@ class UnifiedWorker:
             logger.error(f"Failed to send task to {queue_name}: {e}")
             return False
 
-    def process_task(self, task: Dict[str, Any]) -> bool:
+    def process_task(self, task: dict[str, Any]) -> bool:
         """
         Verarbeite einen Task mit Smart Interpolation Integration
         """
@@ -270,7 +261,7 @@ class UnifiedWorker:
             return False
 
     @staticmethod
-    def _describe_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    def _describe_task(task: dict[str, Any]) -> dict[str, Any]:
         """Extract compact, stable fields for logs and health messages."""
         location = task.get('location') or {}
         lat = location.get('latitude')
@@ -301,7 +292,7 @@ class UnifiedWorker:
             self._last_task = dict(summary)
             self._current_task = None
 
-    def _process_precompute_task(self, task: Dict[str, Any]) -> bool:
+    def _process_precompute_task(self, task: dict[str, Any]) -> bool:
         """Verarbeite Precompute Task (optimiert)"""
         # Validiere Task-Struktur
         if 'kind' not in task:
@@ -346,7 +337,7 @@ class UnifiedWorker:
         # Use Advisory Locks for database operations (Hybrid approach)
         # RabbitMQ handles task deduplication, Advisory Locks protect DB operations
         try:
-            with computation_lock(computation_key, ttl_seconds=300):
+            with computation_lock(computation_key):
                 logger.debug(f"Acquired Advisory Lock for: {computation_key}")
 
                 tb = worker_utils.position_time_bucket(dt_utc, bucket_hours)
@@ -358,7 +349,7 @@ class UnifiedWorker:
                 )
                 cache_complete = (
                     existing is not None if kind == 'sunpath'
-                    else isinstance(existing, list) and len(existing) > 0
+                    else isinstance(existing, list)
                 )
                 if cache_complete:
                     logger.info("Skipping duplicate cached task %s", computation_key)
@@ -367,42 +358,42 @@ class UnifiedWorker:
                 if kind == 'asteroids':
                     # Nutze shared resources und globale Magnituden-Limits
                     max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
+                    _, _, _, asteroid_df, _ = self.shared_resources.get_resources()
 
                     calculation_started = time.perf_counter()
                     asteroids_data = bright_asteroids.load_bright_asteroids(
                         self.loader, self.ts, self.eph, observer_loc,
                         max_magnitude=max_mag,
                         current_dt=dt_utc,
-                        dataframe=self.asteroid_df  # Pass pre-loaded dataframe
+                        dataframe=asteroid_df
                     )
                     calculation_seconds = time.perf_counter() - calculation_started
 
-                    if asteroids_data:
-                        store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
-                        count = len(asteroids_data)
-                    else:
-                        logger.error("Asteroid computation returned no objects for %s", computation_key)
+                    if asteroids_data is None:
+                        logger.error("Asteroid computation failed for %s", computation_key)
                         return False
+                    store_asteroid_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, asteroids_data)
+                    count = len(asteroids_data)
 
                 elif kind == 'comets':
                     # Nutze konfigurierbare Limits
                     max_comets = min(1000, self.config.max_comets)
+                    _, _, _, _, comet_df = self.shared_resources.get_resources()
 
                     calculation_started = time.perf_counter()
                     comets_data = comets.load_comets(
                         self.ts, self.eph, observer_loc,
                         max_comets=max_comets,
                         current_dt=dt_utc,
-                        dataframe=self.comet_df  # Pass pre-loaded dataframe
+                        dataframe=comet_df
                     )
                     calculation_seconds = time.perf_counter() - calculation_started
 
-                    if comets_data:
-                        store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
-                        count = len(comets_data)
-                    else:
-                        logger.error("Comet computation returned no objects for %s", computation_key)
+                    if comets_data is None:
+                        logger.error("Comet computation failed for %s", computation_key)
                         return False
+                    store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
+                    count = len(comets_data)
 
                 elif kind == 'sunpath':
                     # Precompute yearly sunpath curve for this location
@@ -441,7 +432,7 @@ class UnifiedWorker:
             )
         return True
 
-    def _process_on_demand_task(self, task: Dict[str, Any]) -> bool:
+    def _process_on_demand_task(self, task: dict[str, Any]) -> bool:
         """Verarbeite On-Demand Task mit Smart Interpolation"""
         object_type = task['object_type']  # 'asteroids' or 'comets'
         location = task['location']
@@ -464,7 +455,7 @@ class UnifiedWorker:
                 location['latitude'], location['longitude'], location['elevation'], dt_utc
             )
 
-        success = result.status.value == 'success'
+        success = result.status.value in {'success', 'cached'}
 
         # Veröffentliche Status
         self._publish_status(task_id, result.status.value, 100 if success else 0)
@@ -472,7 +463,7 @@ class UnifiedWorker:
         logger.info(f"✅ On-demand {object_type} task {task_id} completed: {result.status.value}")
         return success
 
-    def _process_rpc_task(self, task: Dict[str, Any]) -> bool:
+    def _process_rpc_task(self, task: dict[str, Any]) -> bool:
         """Verarbeite RPC Task (kompatibel mit bestehenden asteroid/comet workers)"""
         # Implementierung für bestehende RPC-Kompatibilität
         return self._process_on_demand_task(task)
@@ -521,7 +512,7 @@ class UnifiedWorker:
         except Exception:
             pass
 
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         """Gibt Health-Status zurück"""
         uptime = time.time() - self.metrics.start_time
         success_rate = (self.metrics.tasks_processed - self.metrics.tasks_failed) / max(self.metrics.tasks_processed, 1)
@@ -548,7 +539,7 @@ class UnifiedWorker:
             'last_task': last_task,
         }
 
-    def callback(self, ch, method, properties, body):
+    def callback(self, ch, method, _properties, body):
         """RabbitMQ Callback mit optimierter Fehlerbehandlung"""
         try:
             task = json.loads(body)
@@ -563,10 +554,21 @@ class UnifiedWorker:
                         logger.exception("Could not release precompute claim")
                 self._safe_ack(ch, method.delivery_tag)
             else:
-                # Intelligent Retry mit exponential backoff
+                # One immediate retry.  A second failure is routed to the
+                # configured DLQ; release the publication claim so a later
+                # healthy request may schedule fresh work.
                 if hasattr(method, 'redelivered') and method.redelivered:
-                    self._safe_nack(ch, method.delivery_tag, requeue=False)
-                    logger.error("Task failed after retry, moved to DLQ")
+                    if task.get('type', 'precompute') == 'precompute':
+                        try:
+                            from db_utils import release_precompute_task
+                            release_precompute_task(worker_utils.precompute_task_key(task))
+                        except Exception:
+                            logger.exception("Could not release failed precompute claim")
+                    if self._publish_dead_task(ch, task, "failed after retry"):
+                        self._safe_ack(ch, method.delivery_tag)
+                        logger.error("Task failed after retry and was routed to the DLQ")
+                    else:
+                        self._safe_nack(ch, method.delivery_tag, requeue=True)
                 else:
                     self._safe_nack(ch, method.delivery_tag, requeue=True)
                     logger.warning("Task failed, requeued for retry")
@@ -594,6 +596,25 @@ class UnifiedWorker:
                 logger.warning("Channel closed, cannot nack – message will be redelivered")
         except Exception as e:
             logger.warning(f"Failed to nack: {e} – message will be redelivered")
+
+    @staticmethod
+    def _publish_dead_task(ch, task: dict[str, Any], reason: str) -> bool:
+        """Persist a failed task in the DLQ without changing existing queue arguments."""
+        try:
+            ch.basic_publish(
+                exchange='',
+                routing_key='computation.dead',
+                properties=pika.BasicProperties(delivery_mode=2, content_type='application/json'),
+                body=json.dumps({
+                    'failed_at': datetime.now(timezone.utc).isoformat(),
+                    'reason': reason,
+                    'task': task,
+                }),
+            )
+            return True
+        except Exception:
+            logger.exception("Could not publish failed task to DLQ")
+            return False
 
     def start(self):
         """Starte den Worker mit automatischer Wiederverbindung"""
@@ -770,7 +791,7 @@ class UnifiedWorker:
         except Exception as e:
             logger.error(f"Error publishing health status: {e}")
 
-    def send_precompute_task_with_deduplication(self, kind: str, location: Dict[str, Any],
+    def send_precompute_task_with_deduplication(self, kind: str, location: dict[str, Any],
                                             time_bucket: str, magnitude: float = 20.0) -> bool:
         """Send precompute task with RabbitMQ deduplication"""
         task_data = {

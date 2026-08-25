@@ -14,8 +14,8 @@ This document explains how ASCII Sky computes positions and brightness for brigh
 
 Backend entrypoint: `bright_asteroids.load_bright_asteroids()`.
 API endpoint: `/api/bright_asteroids` (see `api/routes/asteroids.py`).
-Worker: `workers/unified_worker.py` for on-demand work;
-`workers/precompute_worker.py` is the dedicated precompute consumer.
+Worker: `workers/unified_worker.py` for precompute and on-demand work;
+`workers/precompute_worker.py` remains a compatible entry point.
 Cache: PostgreSQL database (`cached_positions` table).
 
 ## Data Loading

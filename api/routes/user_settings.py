@@ -1,14 +1,15 @@
-from typing import Any, Dict, Optional
-
+import copy
 import logging
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
 from psycopg.errors import ForeignKeyViolation
+from pydantic import BaseModel
 
-from settings import DEFAULT_SETTINGS, get_default_magnitude_filters
-from db_utils import get_user_settings as db_get_user_settings, save_user_settings as db_save_user_settings
 from api.routes.auth import _get_user_by_id, _session_clear_user
-
+from db_utils import get_user_settings as db_get_user_settings
+from db_utils import save_user_settings as db_save_user_settings
+from settings import DEFAULT_SETTINGS, get_default_magnitude_filters
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +17,16 @@ router = APIRouter()
 
 
 class UserSettingsModel(BaseModel):
-    location: Optional[Dict[str, Any]] = None
-    display: Optional[Dict[str, Any]] = None
-    simTime: Optional[Dict[str, Any]] = None
-    filters: Optional[Dict[str, Any]] = None
-    theme: Optional[str] = None
-    language: Optional[str] = None
-    options: Optional[Dict[str, Any]] = None
+    location: dict[str, Any] | None = None
+    display: dict[str, Any] | None = None
+    simTime: dict[str, Any] | None = None
+    filters: dict[str, Any] | None = None
+    theme: str | None = None
+    language: str | None = None
+    options: dict[str, Any] | None = None
 
 
-def _default_user_settings() -> Dict[str, Any]:
+def _default_user_settings() -> dict[str, Any]:
     """Base defaults matching the structure of SettingsManager.settings."""
     base_location = DEFAULT_SETTINGS.get("location", {})
     base_filters = DEFAULT_SETTINGS.get("filters") or get_default_magnitude_filters()
@@ -44,16 +45,16 @@ def _default_user_settings() -> Dict[str, Any]:
             "enabled": False,
             "offsetMinutes": 0,
         },
-        "filters": base_filters,
+        "filters": copy.deepcopy(base_filters),
         "theme": "green",
         "language": "de",
         "options": {"showConstellations": False},
     }
 
 
-def _merge_settings(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_settings(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Shallow merge with simple nested-dict support for known sections."""
-    result: Dict[str, Any] = dict(base)
+    result: dict[str, Any] = dict(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
             nested = dict(result[key])
@@ -81,7 +82,7 @@ def _require_authenticated_user(request: Request) -> int:
 
 
 @router.get("/user/settings")
-async def get_user_settings(request: Request) -> Dict[str, Any]:
+async def get_user_settings(request: Request) -> dict[str, Any]:
     """Return settings JSON for the currently authenticated user.
 
     The user_id is taken from the session; unauthenticated callers receive 401.
@@ -103,7 +104,7 @@ async def get_user_settings(request: Request) -> Dict[str, Any]:
 async def update_user_settings(
     payload: UserSettingsModel,
     request: Request,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Upsert settings JSON for the currently authenticated user.
 
     The request body corresponds to the structure of SettingsManager.settings.

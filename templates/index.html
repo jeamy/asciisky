@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="./static/css/labels.css">
     <link rel="stylesheet" href="./static/css/app.css">
     <link rel="stylesheet" href="./static/css/timeControls.css">
-    <link rel="stylesheet" href="./static/css/cacheStatus.css">
     <link rel="stylesheet" href="./static/css/timeInputDialog.css">
     <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
     <link rel="stylesheet" href="./static/css/constellations.css">
@@ -68,7 +67,6 @@
 <div class="main-layout">
     <div class="left-panels">
         <aside id="visible-objects-panel" class="visible-objects-panel" aria-live="polite"></aside>
-        <aside id="cache-status-panel" class="cache-status-panel" aria-live="polite"></aside>
     </div>
     <div class="sky-panel">
         <div id="view-mode-tabs" class="view-mode-tabs" role="tablist" aria-label="Sky view mode">
@@ -90,7 +88,6 @@
     import { TimeInputDialog } from './static/js/timeInputDialog.js';
     import { settingsManager } from './static/js/settings.js';
     import { initAuthUI } from './static/js/auth.js';
-    import { initCacheStatusPanel, updateCacheStatusForLocation, updateCacheStatusForLocationDebounced } from './static/js/cacheStatusPanel.js';
     import { initVisibleObjectsList, updateVisibleObjectsList } from './static/js/visibleObjectsList.js';
     import { MagnitudeFilterDialog } from './static/js/magnitudeFilterDialog.js';
     import { SunpathOverlay } from './static/js/sunpathOverlay.js';
@@ -99,18 +96,7 @@
     let locationDialog;
     let magnitudeFilterDialog;
     let sunpathOverlay;
-    let __csSecondPassTimer = null;
     
-    function refreshCacheStatus() {
-        try {
-            const loc = settingsManager.getLocation();
-            if (loc) {
-                // debounced to avoid spamming during rapid simulated time changes
-                updateCacheStatusForLocationDebounced(loc.latitude, loc.longitude, loc.elevation, loc.name);
-            }
-        } catch (_) { /* noop */ }
-    }
-
     // Initialize app
     document.addEventListener('DOMContentLoaded', async () => {
         // 1) Einstellungen initialisieren und Session-Standort bevorzugen
@@ -138,10 +124,7 @@
         // 3a) Magnitude-Filter-Dialog initialisieren
         magnitudeFilterDialog = new MagnitudeFilterDialog();
         
-        // 3b) Cache-Status-Panel initialisieren
-        initCacheStatusPanel();
-        
-        // 3c) Visible Objects Panel initialisieren (nach Renderer-Erstellung)
+        // 3b) Visible Objects Panel initialisieren (nach Renderer-Erstellung)
         setTimeout(() => {
             initVisibleObjectsList('visible-objects-panel', renderer, magnitudeFilterDialog);
         }, 100);
@@ -169,8 +152,6 @@
             
             // Übernehme aktuellen (Session-)Standort in UI und SkyManager
             loadSavedLocation();
-            // Und aktualisiere Cache-Status entsprechend
-            refreshCacheStatus();
         }, 500);
     });
 
@@ -185,11 +166,7 @@
             // Standort im SkyManager setzen und sofort updaten
             if (renderer && renderer.skyManager) {
                 renderer.skyManager.setLocation(loc.latitude, loc.longitude, loc.elevation);
-                updateSky();
             }
-
-            // Cache-Status für aktuellen Standort aktualisieren
-            try { updateCacheStatusForLocation(loc.latitude, loc.longitude, loc.elevation, loc.name); } catch (_) { /* noop */ }
 
             // Dialog-Defaults aktualisieren
             if (locationDialog) {
@@ -201,16 +178,6 @@
                 };
             }
 
-            // LocalStorage aus Kompatibilitätsgründen synchron halten
-            try {
-                const legacy = {
-                    lat: loc.latitude,
-                    lon: loc.longitude,
-                    elevation: loc.elevation,
-                    name: loc.name || 'Unbekannt'
-                };
-                localStorage.setItem('asciisky_location', JSON.stringify(legacy));
-            } catch (_) { /* noop */ }
         } catch (error) {
             console.error('Error applying location after init:', error);
         }
@@ -349,8 +316,6 @@
 
             // Simulierte Zeit: kompakte UI hat keine Labels
             updateSimPreview();
-            // Sprachenwechsel auch auf Cache-Status anwenden
-            refreshCacheStatus();
         }
         
         // Funktion zum Aktualisieren des App-Titels
@@ -495,10 +460,6 @@
                         // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
-                    // Refresh cache status
-                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
-                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
-                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
 
                 const applyDelta = async (delta) => {
@@ -511,11 +472,6 @@
                         // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
-                    // Refresh cache status to reflect (potential) background precompute triggered by simulated time
-                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
-                    // Debounced second pass 3s later, avoid stacking multiple timers
-                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
-                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 };
 
                 // Siderischer Tag: 23h 56m 4s = 1436.067 Minuten
@@ -532,10 +488,6 @@
                         // Refresh object dialog if visible (after update completes)
                         renderer.refreshDialogIfVisible();
                     }
-                    // Refresh cache status for returning to real-time
-                    try { refreshCacheStatus(); } catch (_) { /* noop */ }
-                    try { if (__csSecondPassTimer) clearTimeout(__csSecondPassTimer); } catch (_) { /* noop */ }
-                    __csSecondPassTimer = setTimeout(() => { try { refreshCacheStatus(); } catch (_) { /* noop */ } }, 3000);
                 });
                 btnHourPlus.addEventListener('click', () => applyDelta(60));
                 btnDayPlus.addEventListener('click', () => applyDelta(SOLAR_DAY_MINUTES));
@@ -658,12 +610,6 @@
                 updateSky();
             }
 
-            // Aktualisiere Cache-Status für diesen Standort
-            try { updateCacheStatusForLocation(location.lat, location.lon, location.elevation, location.name); } catch (_) { /* noop */ }
-            
-            // Speichere den Standort im localStorage für Persistenz
-            saveLocationToLocalStorage(location);
-            
             // Speichere den Standort über den SettingsManager und synchronisiere mit dem Server
             try {
                 await settingsManager.setLocation(location.lat, location.lon, location.elevation, location.name);
@@ -688,16 +634,6 @@
             try { updateSimPreview(); } catch (_) { /* noop */ }
         });
 
-        // Funktion zum Speichern des Standorts im localStorage
-        function saveLocationToLocalStorage(location) {
-            try {
-                localStorage.setItem('asciisky_location', JSON.stringify(location));
-                console.log('Location saved to localStorage:', location);
-            } catch (error) {
-                console.error('Error saving location to localStorage:', error);
-            }
-        }
-        
         function setupObjectList() {
             const container = document.getElementById('object-list');
             if (!container) return;

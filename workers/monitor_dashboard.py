@@ -10,23 +10,20 @@ Web-basiertes Dashboard für Worker-Monitoring mit:
 - Worker Management Interface
 """
 
+import asyncio
+import json
+import logging
 import os
 import sys
-import json
-import time
-import asyncio
-import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any, List
-from dataclasses import asdict
+
+import uvicorn
 
 # Web Framework
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 # ASCII Sky Imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,7 +44,7 @@ class ConnectionManager:
     """Manager für WebSocket Verbindungen"""
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()

@@ -4,9 +4,9 @@ Performance test for magnitude filter recalculation
 Measures how long it takes to recalculate cache after filter change
 """
 
-import requests
 import time
-import json
+
+import requests
 
 BASE_URL = "http://localhost:8000"
 
@@ -59,7 +59,7 @@ def main():
     lon = 14.8417
     elevation = 410
     
-    print(f"\nTest parameters:")
+    print("\nTest parameters:")
     print(f"  Asteroid magnitude: {asteroid_mag}")
     print(f"  Comet magnitude: {comet_mag}")
     print(f"  Location: {lat}, {lon}, {elevation}m")
@@ -78,7 +78,7 @@ def main():
         print(f"  Filters: {result.get('filters')}")
     else:
         print("  ERROR: Could not set filters")
-        return
+        return False
     
     filter_time = time.time() - start_time
     print(f"  Time to set filters: {filter_time:.2f}s")
@@ -131,7 +131,7 @@ def main():
     print(f"\n  Filter setting:        {filter_time:.2f}s")
     print(f"  Asteroid calculation:  {asteroid_time:.2f}s")
     print(f"  Comet calculation:     {comet_time:.2f}s")
-    print(f"  " + "-"*40)
+    print("  " + "-"*40)
     print(f"  Total time:            {total_time:.2f}s")
     print(f"  Total time (minutes):  {total_time/60:.2f}min")
     
@@ -149,13 +149,15 @@ def main():
         print("  ✗ VERY SLOW: Recalculation takes too long")
     
     print()
+    return True
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(0 if main() else 1)
     except KeyboardInterrupt:
         print("\n\nTest interrupted by user")
     except Exception as e:
         print(f"\n\nERROR: {e}")
         import traceback
         traceback.print_exc()
+        raise SystemExit(1)

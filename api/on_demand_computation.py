@@ -13,22 +13,23 @@ Features:
 - Performance monitoring and metrics
 """
 
+import logging
 import os
 import time
 import uuid
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 # AsciiSky imports
 import bright_asteroids
 import comets
-from api.computation import LOADER, ts, eph
-from db_utils import store_asteroid_positions, store_comet_positions
-from cache_utils import normalize_location, location_key, time_bucket_utc
+from api.computation import LOADER, eph, ts
 from api.rabbitmq.task_publisher import get_task_publisher
+from cache_utils import location_key, normalize_location, time_bucket_utc
+from db_utils import store_asteroid_positions, store_comet_positions
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +46,11 @@ class ComputationStatus(Enum):
 class ComputationResult:
     """Result of on-demand computation"""
     status: ComputationStatus
-    objects: Optional[List[Dict[str, Any]]]
+    objects: list[dict[str, Any]] | None
     computation_time: float
     cache_hit: bool
-    error_message: Optional[str] = None
-    task_id: Optional[str] = None
+    error_message: str | None = None
+    task_id: str | None = None
 
 
 @dataclass
@@ -86,7 +87,7 @@ class OnDemandComputationService:
     Service for on-demand computation of asteroid and comet buckets.
     """
     
-    def __init__(self, config: Optional[OnDemandComputationConfig] = None):
+    def __init__(self, config: OnDemandComputationConfig | None = None):
         self.config = config or OnDemandComputationConfig()
         self.metrics = ComputationMetrics()
         self._computation_cache = {}  # Simple in-memory cache for very recent computations
@@ -228,7 +229,7 @@ class OnDemandComputationService:
             
         except Exception as e:
             computation_time = time.time() - start_time
-            error_msg = f"On-demand {object_type} computation failed: {str(e)}"
+            error_msg = f"On-demand {object_type} computation failed: {e!s}"
             logger.error(error_msg)
             
             # Update metrics
@@ -256,7 +257,7 @@ class OnDemandComputationService:
         lon: float,
         elevation: float,
         dt_utc: datetime
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> list[dict[str, Any]] | None:
         """
         Synchronous asteroid computation.
         """
@@ -276,7 +277,7 @@ class OnDemandComputationService:
         lon: float,
         elevation: float,
         dt_utc: datetime
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> list[dict[str, Any]] | None:
         """
         Synchronous comet computation.
         """
@@ -304,7 +305,7 @@ class OnDemandComputationService:
         cache_age = time.time() - self._cache_timestamps[cache_key]
         return cache_age < min(self.config.cache_ttl, 300)  # Max 5 minutes in-memory cache
     
-    def _cache_result(self, cache_key: str, objects: List[Dict[str, Any]]) -> None:
+    def _cache_result(self, cache_key: str, objects: list[dict[str, Any]]) -> None:
         """
         Cache computation result in memory.
         """
@@ -341,7 +342,7 @@ class OnDemandComputationService:
         lat_norm: float,
         lon_norm: float,
         elev_norm: float,
-        objects: List[Dict[str, Any]]
+        objects: list[dict[str, Any]]
     ) -> None:
         """
         Store computed bucket in persistent cache.
@@ -377,6 +378,7 @@ class OnDemandComputationService:
             if task_publisher:
                 task_data = {
                     'task_id': task_id,
+                    'type': 'on_demand',
                     'object_type': object_type,
                     'location': {'latitude': lat, 'longitude': lon, 'elevation': elevation},
                     'time_bucket': dt_utc.isoformat(),
@@ -384,11 +386,7 @@ class OnDemandComputationService:
                     'priority': 5  # Medium priority for on-demand triggered tasks
                 }
                 
-                # Publish to appropriate queue
-                if object_type == 'asteroids':
-                    task_publisher.publish_task('asteroid.compute', task_data)
-                else:
-                    task_publisher.publish_task('comet.compute', task_data)
+                task_publisher.publish_on_demand_task(task_data)
                 
                 self.metrics.background_tasks_triggered += 1
                 logger.info(f"Triggered background computation for {object_type}: task_id={task_id}")
@@ -433,31 +431,3 @@ def get_on_demand_service() -> OnDemandComputationService:
     if _service is None:
         _service = OnDemandComputationService()
     return _service
-
-
-def compute_asteroid_bucket_on_demand(
-    lat: float,
-    lon: float,
-    elevation: float,
-    dt_utc: datetime,
-    force_recompute: bool = False
-) -> ComputationResult:
-    """
-    Convenience function to compute asteroid bucket on-demand.
-    """
-    service = get_on_demand_service()
-    return service.compute_asteroid_bucket(lat, lon, elevation, dt_utc, force_recompute)
-
-
-def compute_comet_bucket_on_demand(
-    lat: float,
-    lon: float,
-    elevation: float,
-    dt_utc: datetime,
-    force_recompute: bool = False
-) -> ComputationResult:
-    """
-    Convenience function to compute comet bucket on-demand.
-    """
-    service = get_on_demand_service()
-    return service.compute_comet_bucket(lat, lon, elevation, dt_utc, force_recompute)

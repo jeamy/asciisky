@@ -22,8 +22,8 @@ This document explains how ASCII Sky computes positions and brightness for comet
 
 Backend entrypoint: `comets.load_comets()`.
 API endpoint: `/api/comets` (see `api/routes/comets.py`).
-Worker: `workers/unified_worker.py` for on-demand work;
-`workers/precompute_worker.py` is the dedicated precompute consumer.
+Worker: `workers/unified_worker.py` for precompute and on-demand work;
+`workers/precompute_worker.py` remains a compatible entry point.
 Cache:
 - Filesystem DataFrame cache: `comet_dataframe.pkl` under `DATA_DIR`.
 - PostgreSQL position cache: `cached_positions` table.

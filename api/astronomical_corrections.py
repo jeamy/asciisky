@@ -13,15 +13,12 @@ Features:
 - Object appearance/disappearance handling
 """
 
-import math
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+import math
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-
-from skyfield.api import wgs84
-from api.computation import ts, eph
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +35,7 @@ class HorizonEventType(Enum):
 class HorizonEvent:
     """Information about a horizon crossing event"""
     event_type: HorizonEventType
-    crossing_time: Optional[datetime]
+    crossing_time: datetime | None
     altitude_at_crossing: float
     azimuth_at_crossing: float
     confidence: float  # 0.0 to 1.0
@@ -47,10 +44,10 @@ class HorizonEvent:
 @dataclass
 class CorrectionResult:
     """Result of astronomical correction"""
-    corrected_object: Dict[str, Any]
-    applied_corrections: List[str]
+    corrected_object: dict[str, Any]
+    applied_corrections: list[str]
     correction_quality: float  # 0.0 to 1.0
-    warnings: List[str]
+    warnings: list[str]
 
 
 class AstronomicalCorrectionConfig:
@@ -76,18 +73,18 @@ class AstronomicalCorrector:
     Applies sophisticated astronomical corrections to interpolated objects.
     """
     
-    def __init__(self, config: Optional[AstronomicalCorrectionConfig] = None):
+    def __init__(self, config: AstronomicalCorrectionConfig | None = None):
         self.config = config or AstronomicalCorrectionConfig()
         logger.info("Astronomical Corrector initialized")
     
     def correct_interpolated_object(
         self,
-        obj: Dict[str, Any],
-        list1: List[Dict[str, Any]],
-        list2: List[Dict[str, Any]],
+        obj: dict[str, Any],
+        list1: list[dict[str, Any]],
+        list2: list[dict[str, Any]],
         factor: float,
         target_dt: datetime,
-        location: Dict[str, float]
+        location: dict[str, float]
     ) -> CorrectionResult:
         """
         Apply astronomical corrections to an interpolated object.
@@ -168,17 +165,17 @@ class AstronomicalCorrector:
                 corrected_object=obj,
                 applied_corrections=[],
                 correction_quality=0.0,
-                warnings=[f"Correction failed: {str(e)}"]
+                warnings=[f"Correction failed: {e!s}"]
             )
     
     def _correct_horizon_crossing(
         self,
-        obj: Dict[str, Any],
-        list1: List[Dict[str, Any]],
-        list2: List[Dict[str, Any]],
+        obj: dict[str, Any],
+        list1: list[dict[str, Any]],
+        list2: list[dict[str, Any]],
         factor: float,
         target_dt: datetime,
-        location: Dict[str, float]
+        location: dict[str, float]
     ) -> CorrectionResult:
         """
         Detect and correct horizon crossing events.
@@ -230,7 +227,7 @@ class AstronomicalCorrector:
             
         except Exception as e:
             logger.error(f"Error correcting horizon crossing: {e}")
-            return CorrectionResult(obj, [], 0.0, [f"Horizon correction failed: {str(e)}"])
+            return CorrectionResult(obj, [], 0.0, [f"Horizon correction failed: {e!s}"])
     
     def _detect_horizon_event(
         self,
@@ -346,9 +343,9 @@ class AstronomicalCorrector:
     
     def _apply_magnitude_smoothing(
         self,
-        obj: Dict[str, Any],
-        list1: List[Dict[str, Any]],
-        list2: List[Dict[str, Any]],
+        obj: dict[str, Any],
+        list1: list[dict[str, Any]],
+        list2: list[dict[str, Any]],
         factor: float
     ) -> CorrectionResult:
         """
@@ -363,7 +360,6 @@ class AstronomicalCorrector:
             
             mag1 = obj1.get('magnitude', 99)
             mag2 = obj2.get('magnitude', 99)
-            mag_interp = obj.get('magnitude', 99)
             
             # Check for large magnitude jumps (possible errors)
             mag_diff = abs(mag2 - mag1)
@@ -388,7 +384,7 @@ class AstronomicalCorrector:
                 
         except Exception as e:
             logger.error(f"Error applying magnitude smoothing: {e}")
-            return CorrectionResult(obj, [], 0.0, [f"Magnitude smoothing failed: {str(e)}"])
+            return CorrectionResult(obj, [], 0.0, [f"Magnitude smoothing failed: {e!s}"])
     
     def _smooth_nonlinear(
         self,
@@ -424,12 +420,12 @@ class AstronomicalCorrector:
     
     def _validate_and_correct_position(
         self,
-        obj: Dict[str, Any],
-        list1: List[Dict[str, Any]],
-        list2: List[Dict[str, Any]],
+        obj: dict[str, Any],
+        list1: list[dict[str, Any]],
+        list2: list[dict[str, Any]],
         factor: float,
         target_dt: datetime,
-        location: Dict[str, float]
+        location: dict[str, float]
     ) -> CorrectionResult:
         """
         Validate interpolated position and apply corrections if needed.
@@ -491,13 +487,13 @@ class AstronomicalCorrector:
             
         except Exception as e:
             logger.error(f"Error validating position: {e}")
-            return CorrectionResult(obj, [], 0.0, [f"Position validation failed: {str(e)}"])
+            return CorrectionResult(obj, [], 0.0, [f"Position validation failed: {e!s}"])
     
     def _recalculate_time_based_events(
         self,
-        obj: Dict[str, Any],
+        obj: dict[str, Any],
         target_dt: datetime,
-        location: Dict[str, float]
+        location: dict[str, float]
     ) -> CorrectionResult:
         """
         Recalculate rise/set/transit times for interpolated object.
@@ -510,7 +506,7 @@ class AstronomicalCorrector:
         
         return CorrectionResult(obj, [], 1.0, [])
     
-    def _find_object_by_name(self, object_list: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    def _find_object_by_name(self, object_list: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
         """
         Find object in list by name.
         """
@@ -538,12 +534,12 @@ def get_astronomical_corrector() -> AstronomicalCorrector:
 
 
 def apply_astronomical_corrections(
-    obj: Dict[str, Any],
-    list1: List[Dict[str, Any]],
-    list2: List[Dict[str, Any]],
+    obj: dict[str, Any],
+    list1: list[dict[str, Any]],
+    list2: list[dict[str, Any]],
     factor: float,
     target_dt: datetime,
-    location: Dict[str, float]
+    location: dict[str, float]
 ) -> CorrectionResult:
     """
     Convenience function to apply astronomical corrections.
