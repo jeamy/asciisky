@@ -213,7 +213,7 @@ class TaskPublisher:
             if hasattr(_thread_local, 'connection'):
                 try:
                     _thread_local.connection.close()
-                except:
+                except Exception:
                     pass
                 _thread_local.connection = None
                 _thread_local.channel = None
@@ -280,7 +280,7 @@ class TaskPublisher:
             if hasattr(_thread_local, 'connection'):
                 try:
                     _thread_local.connection.close()
-                except:
+                except Exception:
                     pass
                 _thread_local.connection = None
                 _thread_local.channel = None
@@ -360,21 +360,24 @@ class TaskPublisher:
 
 # Singleton Instance
 _publisher = None
+_publisher_lock = threading.Lock()
 
 def get_task_publisher() -> TaskPublisher | None:
     """
     Lazy initialization von Task Publisher
-    
+
     Returns:
         TaskPublisher instance oder None
     """
     global _publisher
-    
+
     if _publisher is None and settings.RABBITMQ_ENABLED:
-        try:
-            _publisher = TaskPublisher(settings.RABBITMQ_URL)
-        except Exception as e:
-            logger.error(f"Failed to initialize TaskPublisher: {e}")
-            _publisher = None
-    
+        with _publisher_lock:
+            if _publisher is None and settings.RABBITMQ_ENABLED:
+                try:
+                    _publisher = TaskPublisher(settings.RABBITMQ_URL)
+                except Exception as e:
+                    logger.error(f"Failed to initialize TaskPublisher: {e}")
+                    _publisher = None
+
     return _publisher

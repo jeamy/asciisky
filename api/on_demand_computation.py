@@ -15,10 +15,11 @@ Features:
 
 import logging
 import os
+import threading
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -92,7 +93,8 @@ class OnDemandComputationService:
         self.metrics = ComputationMetrics()
         self._computation_cache = {}  # Simple in-memory cache for very recent computations
         self._cache_timestamps = {}
-        
+        self._lock = threading.Lock()
+
         logger.info(f"On-Demand Computation Service initialized: {self.config.enabled}")
     
     def compute_asteroid_bucket(
@@ -171,78 +173,87 @@ class OnDemandComputationService:
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         bucket = time_bucket_utc(dt_utc, 1)
         cache_key = f"{object_type}:{loc_key}:{bucket}"
-        
+
         try:
             # Check in-memory cache first
-            if not force_recompute and self._is_cached(cache_key):
-                cached_objects = self._computation_cache[cache_key]
-                self.metrics.cache_hits += 1
-                
+            with self._lock:
+                if not force_recompute and self._is_cached(cache_key):
+                    cached_objects = self._computation_cache[cache_key]
+                    self.metrics.cache_hits += 1
+                    cache_hit = True
+                else:
+                    cached_objects = None
+                    cache_hit = False
+
+            if cache_hit:
                 computation_time = time.time() - start_time
                 logger.info(f"Cache hit for {object_type} bucket: {len(cached_objects)} objects in {computation_time:.3f}s")
-                
+
                 return ComputationResult(
                     status=ComputationStatus.CACHED,
                     objects=cached_objects,
                     computation_time=computation_time,
                     cache_hit=True
                 )
-            
+
             # Perform computation
             logger.info(f"Computing {object_type} bucket on-demand for {dt_utc.isoformat()}")
             objects = computation_func(lat, lon, elevation, dt_utc)
-            
+
             if objects is None:
                 objects = []
-            
+
             computation_time = time.time() - start_time
-            
+
             # Check computation time limit
             if computation_time > self.config.max_computation_time:
                 logger.warning(f"{object_type} computation exceeded time limit: {computation_time:.2f}s > {self.config.max_computation_time}s")
-            
+
             # Cache the result
-            self._cache_result(cache_key, objects)
-            
+            with self._lock:
+                self._cache_result(cache_key, objects)
+
             # Store in persistent cache
             if self.config.cache_ttl > 0:
                 self._store_bucket_persistent(object_type, loc_key, bucket, lat_norm, lon_norm, elev_norm, objects)
-            
+
             # Trigger background task for future caching
             if self.config.trigger_background_tasks:
                 self._trigger_background_computation(object_type, lat, lon, elevation, dt_utc)
-            
+
             # Update metrics
-            self.metrics.total_computations += 1
-            self.metrics.successful_computations += 1
-            self.metrics.total_computation_time += computation_time
-            self.metrics.average_computation_time = self.metrics.total_computation_time / self.metrics.total_computations
-            
+            with self._lock:
+                self.metrics.total_computations += 1
+                self.metrics.successful_computations += 1
+                self.metrics.total_computation_time += computation_time
+                self.metrics.average_computation_time = self.metrics.total_computation_time / self.metrics.total_computations
+
             logger.info(f"Successfully computed {object_type} bucket: {len(objects)} objects in {computation_time:.3f}s")
-            
+
             return ComputationResult(
                 status=ComputationStatus.SUCCESS,
                 objects=objects,
                 computation_time=computation_time,
                 cache_hit=False
             )
-            
+
         except Exception as e:
             computation_time = time.time() - start_time
             error_msg = f"On-demand {object_type} computation failed: {e!s}"
             logger.error(error_msg)
-            
+
             # Update metrics
-            self.metrics.total_computations += 1
-            
+            with self._lock:
+                self.metrics.total_computations += 1
+
             # Retry logic
             if self.config.retry_failed_computations and not force_recompute:
                 logger.info(f"Retrying failed {object_type} computation")
                 return self._compute_bucket(
-                    object_type, lat, lon, elevation, dt_utc, 
+                    object_type, lat, lon, elevation, dt_utc,
                     force_recompute=True, computation_func=computation_func
                 )
-            
+
             return ComputationResult(
                 status=ComputationStatus.FAILED,
                 objects=None,
@@ -387,8 +398,9 @@ class OnDemandComputationService:
                 }
                 
                 task_publisher.publish_on_demand_task(task_data)
-                
-                self.metrics.background_tasks_triggered += 1
+
+                with self._lock:
+                    self.metrics.background_tasks_triggered += 1
                 logger.info(f"Triggered background computation for {object_type}: task_id={task_id}")
             else:
                 # Fallback: trigger via existing API mechanisms
@@ -401,26 +413,30 @@ class OnDemandComputationService:
         """
         Get current computation metrics.
         """
-        return self.metrics
-    
+        with self._lock:
+            return replace(self.metrics)
+
     def reset_metrics(self) -> None:
         """
         Reset computation metrics.
         """
-        self.metrics = ComputationMetrics()
+        with self._lock:
+            self.metrics = ComputationMetrics()
         logger.info("On-demand computation metrics reset")
-    
+
     def clear_cache(self) -> None:
         """
         Clear all caches.
         """
-        self._computation_cache.clear()
-        self._cache_timestamps.clear()
+        with self._lock:
+            self._computation_cache.clear()
+            self._cache_timestamps.clear()
         logger.info("On-demand computation cache cleared")
 
 
 # Global service instance
 _service = None
+_service_lock = threading.Lock()
 
 
 def get_on_demand_service() -> OnDemandComputationService:
@@ -429,5 +445,7 @@ def get_on_demand_service() -> OnDemandComputationService:
     """
     global _service
     if _service is None:
-        _service = OnDemandComputationService()
+        with _service_lock:
+            if _service is None:
+                _service = OnDemandComputationService()
     return _service

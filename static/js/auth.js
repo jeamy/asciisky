@@ -37,7 +37,7 @@ function isCurrentUserAdmin() {
 
 async function refreshAuthState() {
     try {
-        const resp = await fetch(`${API_ENDPOINTS.AUTH_ME}?nocache=1`, {
+        const resp = await fetch(`${API_ENDPOINTS.AUTH_ME}`, {
             credentials: 'same-origin'
         });
         if (!resp.ok) {

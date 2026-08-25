@@ -43,6 +43,7 @@ services:
 
   # ===== Web Service =====
   web:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     image: asciisky-web:latest
     build: .
     pull_policy: never
@@ -97,6 +98,7 @@ services:
 
   # ===== Data Updater =====
   data_updater:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     image: asciisky-web:latest
     build: .
     pull_policy: never
@@ -128,6 +130,7 @@ services:
 
   # ===== Precompute Coordinator =====
   precompute_coordinator:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     image: asciisky-web:latest
     build: .
     pull_policy: never
@@ -159,6 +162,7 @@ services:
   # Verarbeitet alle Task-Typen in einem Worker
   # HYBRID DEDUPLICATION: RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
   unified_worker:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     image: asciisky-web:latest
     build: .
     pull_policy: never

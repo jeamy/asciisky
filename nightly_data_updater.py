@@ -36,7 +36,7 @@ LAST_UPDATE_FILE = Path('cache/last_data_update.txt')
 _shutdown_requested = False
 
 
-def _signal_handler(signum, frame):
+def _signal_handler(signum, _frame):
     """Handler für graceful shutdown bei SIGTERM/SIGINT"""
     global _shutdown_requested
     logger.info(f"Received signal {signum}, shutting down gracefully...")

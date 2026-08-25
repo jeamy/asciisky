@@ -26,7 +26,7 @@ from api.routes import (
     user_settings,
     zodiac,
 )
-from api.routes.auth import _get_user_by_id
+from api.routes.auth import _get_user_by_id, _session_clear_user
 from db_utils import database_identity, database_target
 
 
@@ -101,19 +101,29 @@ async def read_root(request: Request):
     return FileResponse("templates/index.html")
 
 
+def _require_admin_page(request: Request) -> dict | None:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    try:
+        user = _get_user_by_id(int(user_id))
+    except (TypeError, ValueError):
+        user = None
+    if not user or not user.get("is_active", False):
+        _session_clear_user(request)
+        return None
+    if not user.get("is_admin", False):
+        request.session["user_is_admin"] = False
+        return None
+    request.session["user_is_admin"] = True
+    return user
+
+
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 async def admin_page(request: Request):
     """Render the admin user management page (admins only)."""
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return RedirectResponse("/", status_code=302)
-
-    try:
-        user = _get_user_by_id(int(user_id))
-    except Exception:
-        user = None
-
-    if not user or not user.get("is_admin"):
+    user = _require_admin_page(request)
+    if not user:
         return RedirectResponse("/", status_code=302)
 
     return FileResponse("templates/admin.html")

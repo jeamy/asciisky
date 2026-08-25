@@ -36,32 +36,27 @@ asciisky_require_dockerfile() {
 }
 
 # Ensure host bind-mount dirs are writable by container appuser (uid 10001).
-# Safe no-op when dirs already match or chown is not permitted (warn only).
 asciisky_prepare_data_dirs() {
   local root="${1:-.}"
-  local d
+  local d owner
   for d in data cache; do
     mkdir -p "${root}/${d}"
   done
-  # user_settings.json may be bind-mounted read-write in production
-  if [[ ! -f "${root}/user_settings.json" ]]; then
-    : # optional
+
+  if [[ -f "${root}/user_settings.json" && ! -f "${root}/cache/user_settings.json" ]]; then
+    cp "${root}/user_settings.json" "${root}/cache/user_settings.json"
   fi
 
-  if [[ "$(id -u)" -eq 0 ]]; then
-    chown -R "${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}" "${root}/data" "${root}/cache" 2>/dev/null || true
-    return 0
-  fi
+  chown -R "${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}" "${root}/data" "${root}/cache" 2>/dev/null || true
 
-  # Non-root: try chown; if it fails, warn (common on first multi-stage deploy)
-  if ! chown -R "${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}" "${root}/data" "${root}/cache" 2>/dev/null; then
-    local owner
-    owner="$(stat -c '%u:%g' "${root}/data" 2>/dev/null || stat -f '%u:%g' "${root}/data" 2>/dev/null || echo unknown)"
+  for d in data cache; do
+    owner="$(stat -c '%u:%g' "${root}/${d}" 2>/dev/null || stat -f '%u:%g' "${root}/${d}" 2>/dev/null || echo unknown)"
     if [[ "$owner" != "${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}" ]]; then
-      echo "⚠️  ${root}/data owner is ${owner}, container runs as ${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}"
-      echo "   If workers cannot write cache/data, run: sudo chown -R ${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID} data cache"
+      echo "❌ ${root}/${d} owner is ${owner}; container requires ${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID}" >&2
+      echo "   Run: sudo chown -R ${ASCIISKY_APP_UID}:${ASCIISKY_APP_GID} ${root}/data ${root}/cache" >&2
+      return 1
     fi
-  fi
+  done
 }
 
 asciisky_compose_build_args() {

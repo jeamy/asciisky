@@ -181,7 +181,6 @@ async def get_zodiac_constellations(
     lon: float = Query(..., description="Longitude in degrees"), 
     elevation: float = Query(0, description="Elevation in meters"),
     time: str | None = Query(None, description="ISO time string (optional)"),
-    nocache: bool | None = Query(False, description="Bypass cached zodiac result")
 ):
     """Get zodiac constellation data with calculated star positions"""
     

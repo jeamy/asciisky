@@ -102,8 +102,6 @@ export class ZodiacRenderer {
                 lon: location.longitude,
                 elevation: location.elevation || 0
             });
-            // Ensure we bypass any previously cached 12-only result
-            params.append('nocache', '1');
 
             if (time) {
                 params.append('time', time);
@@ -542,11 +540,6 @@ export class ZodiacRenderer {
     /**
      * Toggle debug grid visibility (for console debugging)
      */
-    static toggleDebugGrid() {
-        ZodiacRenderer.DEBUG_GRID = !ZodiacRenderer.DEBUG_GRID;
-        return ZodiacRenderer.DEBUG_GRID;
-    }
-
     /**
      * Update constellation positions (called when sky is re-rendered)
      */

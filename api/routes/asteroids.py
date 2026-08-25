@@ -5,7 +5,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 import bright_asteroids
 from api.cache_interpolation import load_asteroids_with_interpolation
-from api.helpers import get_location_params, parse_time_param, resolve_magnitude_filter
+from api.helpers import (
+    get_location_params,
+    parse_time_param,
+    resolve_magnitude_filter,
+    trigger_small_body_worker,
+)
 from cache_utils import time_bucket_utc
 from config.interpolation_config import (
     get_interpolation_strategy,
@@ -19,30 +24,23 @@ router = APIRouter()
 
 async def trigger_asteroid_worker(lat, lon, elevation, dt_utc):
     """Publish one deduplicated asteroid precompute task."""
-    try:
-        from api.rabbitmq.task_publisher import trigger_precompute_task
-
-        await trigger_precompute_task(
-            'asteroids',
-            {'latitude': lat, 'longitude': lon, 'elevation': elevation},
-            dt_utc.isoformat(),
-            20.0,
-            bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
-        )
-    except Exception:
-        logger.exception("Failed to trigger asteroid worker")
+    await trigger_small_body_worker(
+        'asteroids',
+        lat,
+        lon,
+        elevation,
+        dt_utc,
+        20.0,
+        bright_asteroids.ASTEROID_CACHE_BUCKET_HOURS,
+        logger,
+    )
 
 
 @router.get("/bright_asteroids")
-async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: str | None = None, max_magnitude: float = None):
+async def get_bright_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None, max_magnitude: float = None):
     """Get positions of the brightest minor planets (asteroids)."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
-
-        if save_location:
-            # GET requests are intentionally side-effect free.  Persist
-            # locations through POST /api/session/location or user settings.
-            logger.warning("Ignoring deprecated save_location query parameter on GET /bright_asteroids")
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:
@@ -117,6 +115,6 @@ async def get_bright_asteroids(request: Request, background_tasks: BackgroundTas
 
 # Add back /asteroids endpoint for backward compatibility
 @router.get("/asteroids")
-async def get_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: str | None = None, max_magnitude: float = None):
+async def get_asteroids(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None, max_magnitude: float = None):
     """Alias for /bright_asteroids endpoint for backward compatibility."""
-    return await get_bright_asteroids(request, background_tasks, lat, lon, elevation, location_name, save_location, time, max_magnitude)
+    return await get_bright_asteroids(request, background_tasks, lat, lon, elevation, time, max_magnitude)

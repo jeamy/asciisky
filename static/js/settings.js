@@ -250,7 +250,7 @@ export class SettingsManager {
     async loadUserSettingsFromServer() {
         // 1) Prüfen, ob ein authentifizierter Benutzer per Session vorhanden ist
         try {
-            const meResp = await fetch(`${API_ENDPOINTS.AUTH_ME}?nocache=1`, {
+            const meResp = await fetch(`${API_ENDPOINTS.AUTH_ME}`, {
                 credentials: 'same-origin'
             });
             if (!meResp.ok) {
@@ -273,7 +273,7 @@ export class SettingsManager {
 
         // 2) Settings für den eingeloggten Benutzer laden (Session-basiert, ohne user_id-Query)
         try {
-            const url = `${API_ENDPOINTS.USER_SETTINGS_GET}?nocache=1`;
+            const url = `${API_ENDPOINTS.USER_SETTINGS_GET}`;
             const resp = await fetch(url, { credentials: 'same-origin' });
             if (!resp.ok) {
                 if (resp.status === 401 || resp.status === 403) {
@@ -298,7 +298,7 @@ export class SettingsManager {
     async saveUserSettingsToServer() {
         if (!this.authenticatedUserId) return;
         try {
-            const url = `${API_ENDPOINTS.USER_SETTINGS_SET}?nocache=1`;
+            const url = `${API_ENDPOINTS.USER_SETTINGS_SET}`;
             const resp = await fetch(url, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -338,7 +338,7 @@ export class SettingsManager {
     // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
     async fetchSessionLocation() {
         try {
-            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_GET}?nocache=1`, {
+            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_GET}`, {
                 credentials: 'same-origin'
             });
             if (!resp.ok) return null;
@@ -373,7 +373,7 @@ export class SettingsManager {
                 elevation: location.elevation,
                 name: location.name || 'Unbekannt'
             };
-            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_POST}?nocache=1`, {
+            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_POST}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',

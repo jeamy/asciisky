@@ -861,7 +861,7 @@ export class SkyRenderer {
         const cacheValid = this._magCache && (now - this._magCache.ts) < 60_000;
         if (!cacheValid) {
             try {
-                const response = await fetch(`${API_ENDPOINTS.FILTERS_GET}?nocache=1`);
+                const response = await fetch(API_ENDPOINTS.FILTERS_GET);
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.filters) {
@@ -2249,41 +2249,32 @@ export class SkyRenderer {
 
     // Methode zum Setzen der Magnitude-Filter wurde entfernt
 
-    // Methode zum Laden von Asteroiden
-    async loadAsteroids(token) {
+    async loadSmallBodies(token, endpoint, keyPrefix, label) {
         try {
-            // Erstelle die URL mit Standortparametern
-            let url = `${API_ENDPOINTS.ASTEROIDS}?nocache=1`;
-
-            // Verwende die gespeicherten Standortdaten
+            const params = new URLSearchParams();
             if (this.location) {
-                url += `&lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
+                params.set('lat', this.location.latitude);
+                params.set('lon', this.location.longitude);
+                params.set('elevation', this.location.elevation);
             }
-
+            const query = params.toString();
+            let url = query ? `${endpoint}?${query}` : endpoint;
             url = this.appendTimeParam(url);
             const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
-                throw new Error(`HTTP error loading asteroids! status: ${response.status}`);
+                throw new Error(`HTTP error loading ${label}! status: ${response.status}`);
             }
 
             const data = await response.json();
-            console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} asteroids`);
-
-            // Falls dieses Update veraltet ist, breche ab
+            console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} ${label}`);
             if (!this.isActiveUpdate(token)) return;
 
-            // Entferne alte Asteroiden-Einträge vor dem Merge
             if (this.celestialData && this.celestialData.bodies) {
-                const cleanBodies = {};
-                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
-                    if (!key.startsWith('bright_asteroid_')) {
-                        cleanBodies[key] = value;
-                    }
-                }
-                this.celestialData.bodies = cleanBodies;
+                this.celestialData.bodies = Object.fromEntries(
+                    Object.entries(this.celestialData.bodies).filter(([key]) => !key.startsWith(keyPrefix))
+                );
             }
 
-            // Füge die Asteroiden zu den Himmelsdaten hinzu
             if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
                 this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
                 if (this.selectedObject && this.selectedObject.name && data.bodies[this.selectedObject.name]) {
@@ -2292,55 +2283,16 @@ export class SkyRenderer {
                 }
             }
         } catch (error) {
-            console.error('Error loading asteroids:', error);
+            console.error(`Error loading ${label}:`, error);
         }
     }
 
-    // Methode zum Laden von Kometen
+    async loadAsteroids(token) {
+        return this.loadSmallBodies(token, API_ENDPOINTS.ASTEROIDS, 'bright_asteroid_', 'asteroids');
+    }
+
     async loadComets(token) {
-        try {
-            // Erstelle die URL mit Standortparametern
-            let url = `${API_ENDPOINTS.COMETS}?nocache=1`;
-
-            // Verwende die gespeicherten Standortdaten
-            if (this.location) {
-                url += `&lat=${this.location.latitude}&lon=${this.location.longitude}&elevation=${this.location.elevation}`;
-            }
-
-            url = this.appendTimeParam(url);
-            const response = await fetch(url, { cache: 'no-store' });
-            if (!response.ok) {
-                throw new Error(`HTTP error loading comets! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            console.log(`Loaded ${data.bodies ? Object.keys(data.bodies).length : 0} comets`);
-
-            // Falls dieses Update veraltet ist, breche ab
-            if (!this.isActiveUpdate(token)) return;
-
-            // Entferne alte Kometen-Einträge vor dem Merge
-            if (this.celestialData && this.celestialData.bodies) {
-                const cleanBodies = {};
-                for (const [key, value] of Object.entries(this.celestialData.bodies)) {
-                    if (!key.startsWith('comet_')) {
-                        cleanBodies[key] = value;
-                    }
-                }
-                this.celestialData.bodies = cleanBodies;
-            }
-
-            // Füge die Kometen zu den Himmelsdaten hinzu
-            if (data && data.bodies && this.celestialData && this.celestialData.bodies) {
-                this.celestialData.bodies = { ...this.celestialData.bodies, ...data.bodies };
-                if (this.selectedObject && this.selectedObject.name && data.bodies[this.selectedObject.name]) {
-                    this.selectedObject = data.bodies[this.selectedObject.name];
-                    this.refreshDialogIfVisible();
-                }
-            }
-        } catch (error) {
-            console.error('Error loading comets:', error);
-        }
+        return this.loadSmallBodies(token, API_ENDPOINTS.COMETS, 'comet_', 'comets');
     }
 
     // Methode zum Aktualisieren der Himmelsdaten

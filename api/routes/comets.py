@@ -5,7 +5,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 import comets
 from api.cache_interpolation import load_comets_with_interpolation
-from api.helpers import get_location_params, parse_time_param, resolve_magnitude_filter
+from api.helpers import (
+    get_location_params,
+    parse_time_param,
+    resolve_magnitude_filter,
+    trigger_small_body_worker,
+)
 from cache_utils import time_bucket_utc
 from config.interpolation_config import (
     get_interpolation_strategy,
@@ -19,28 +24,23 @@ router = APIRouter()
 
 async def trigger_comet_worker(lat, lon, elevation, dt_utc):
     """Publish one deduplicated comet precompute task."""
-    try:
-        from api.rabbitmq.task_publisher import trigger_precompute_task
-
-        await trigger_precompute_task(
-            'comets',
-            {'latitude': lat, 'longitude': lon, 'elevation': elevation},
-            dt_utc.isoformat(),
-            14.0,
-            comets.COMET_CACHE_BUCKET_HOURS,
-        )
-    except Exception:
-        logger.exception("Failed to trigger comet worker")
+    await trigger_small_body_worker(
+        'comets',
+        lat,
+        lon,
+        elevation,
+        dt_utc,
+        14.0,
+        comets.COMET_CACHE_BUCKET_HOURS,
+        logger,
+    )
 
 
 @router.get("/comets")
-async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, location_name: str = None, save_location: bool = False, time: str | None = None, max_magnitude: float = None):
+async def get_comets(request: Request, background_tasks: BackgroundTasks, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None, max_magnitude: float = None):
     """Get comets with real MPC data and rise/set/transit times."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
-
-        if save_location:
-            logger.warning("Ignoring deprecated save_location query parameter on GET /comets")
 
         # Magnitude-Filter aus user_settings oder Parameter verwenden
         if max_magnitude is None:

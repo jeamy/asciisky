@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 import settings
+from api.routes.auth import _get_user_by_id, _session_clear_user
 
 router = APIRouter()
 
@@ -56,14 +57,33 @@ def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
         print(f"Error saving user filters to DB: {e}")
         return False
 
+
+def _resolve_session_user_id(request: Request) -> int | None:
+    """Return a live, active user id, or None for an anonymous request.
+
+    Stale or disabled sessions are cleared and raise 401.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    try:
+        user = _get_user_by_id(int(user_id))
+    except (TypeError, ValueError):
+        user = None
+    if not user or not user.get("is_active", False):
+        _session_clear_user(request)
+        raise HTTPException(status_code=401, detail="Session user no longer exists")
+    return int(user["id"])
+
+
 @router.get("/filters")
 async def get_filters(request: Request):
     """Get current magnitude filter settings"""
     try:
         # Check if user is logged in
-        user_id = request.session.get('user_id')
-        
-        if user_id:
+        user_id = _resolve_session_user_id(request)
+
+        if user_id is not None:
             # Load from database
             filters = get_user_filters_from_db(user_id)
             if filters:
@@ -80,6 +100,8 @@ async def get_filters(request: Request):
             "filters": filters,
             "source": "file"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -88,9 +110,9 @@ async def set_filters(filters: MagnitudeFilters, request: Request):
     """Set magnitude filter settings and invalidate cache"""
     try:
         # Check if user is logged in
-        user_id = request.session.get('user_id')
-        
-        if user_id:
+        user_id = _resolve_session_user_id(request)
+
+        if user_id is not None:
             # Get old filters from database
             old_filters = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
         else:
@@ -108,7 +130,7 @@ async def set_filters(filters: MagnitudeFilters, request: Request):
             updated_filters["cometMaxMagnitude"] = float(filters.cometMaxMagnitude)
         
         # Save to appropriate storage
-        if user_id:
+        if user_id is not None:
             # Save to database
             success = save_user_filters_to_db(user_id, updated_filters)
             if not success:

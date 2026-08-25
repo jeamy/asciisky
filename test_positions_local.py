@@ -580,19 +580,136 @@ def run_comet_test(ts, eph):
 # MAIN
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def skyfield_context():
-    return setup_skyfield()
+# ---------------------------------------------------------------------------
+# Focused unit tests for refactored comets.py helpers
+# ---------------------------------------------------------------------------
+
+def test_comets_standardize_prefers_valid_eq_rows():
+    import comets
+    df = pd.DataFrame({
+        'designation': ['A', 'A', 'B'],
+        'reference': ['20240101', '20240201', '20240115'],
+        'e': [np.nan, 0.5, 0.7],
+        'q': [np.nan, 1.5, 2.0],
+        'Tp': [2459000.0, 2459100.0, 2459200.0],
+    })
+    result = comets._standardize_comet_df(df)
+    assert len(result) == 2
+    assert 'A' in result.index
+    assert 'B' in result.index
+    assert result.loc['A', 'e'] == 0.5
+    assert result.loc['A', 'q'] == 1.5
+    assert result.loc['A', 'reference'] == '20240201'
 
 
-def test_asteroids(skyfield_context):
-    ts, eph = skyfield_context
-    assert run_asteroid_test(ts, eph) is not None
+def test_comets_standardize_filters_time_reference():
+    import comets
+    df = pd.DataFrame({
+        'designation': ['A', 'B', 'C'],
+        'e': [0.5, 0.6, 0.7],
+        'q': [1.5, 1.6, 1.7],
+        'epoch_tt': [2459000.0, np.nan, np.nan],
+        'Tp': [np.nan, 2459100.0, np.nan],
+    })
+    result = comets._standardize_comet_df(df)
+    assert len(result) == 2
+    assert 'A' in result.index
+    assert 'B' in result.index
+    assert 'C' not in result.index
 
 
-def test_comets(skyfield_context):
-    ts, eph = skyfield_context
-    assert run_comet_test(ts, eph) is not None
+def test_comets_standardize_maps_mpc_aliases():
+    import comets
+    df = pd.DataFrame({
+        'designation': ['A'],
+        'eccentricity': ['0.5'],
+        'perihelion_distance_au': ['1.5'],
+        'inclination_degrees': ['10.0'],
+        'longitude_of_ascending_node_degrees': ['20.0'],
+        'argument_of_perihelion_degrees': ['30.0'],
+        'magnitude_g': ['8.5'],
+        'magnitude_k': ['4.0'],
+        'Tp': [2459000.0],
+    })
+    result = comets._standardize_comet_df(df)
+    assert len(result) == 1
+    assert result.loc['A', 'e'] == 0.5
+    assert result.loc['A', 'q'] == 1.5
+    assert result.loc['A', 'i'] == 10.0
+    assert result.loc['A', 'node'] == 20.0
+    assert result.loc['A', 'peri'] == 30.0
+    assert result.loc['A', 'M1'] == 8.5
+    assert result.loc['A', 'k1'] == 4.0
+
+
+def test_comets_select_visible_comets():
+    import comets
+    mags = np.array([21.0, 18.5, 20.0, 19.0])
+    bright_idx, selected_idx = comets._select_visible_comets(mags, max_comets=2)
+    assert len(bright_idx) == 3
+    assert len(selected_idx) == 2
+    np.testing.assert_array_equal(selected_idx, np.array([1, 3]))
+
+
+def test_comets_select_visible_comets_empty():
+    import comets
+    mags = np.array([21.0, 22.0])
+    bright_idx, selected_idx = comets._select_visible_comets(mags, max_comets=5)
+    assert len(bright_idx) == 0
+    assert len(selected_idx) == 0
+
+
+def test_comets_compute_distances():
+    import comets
+    tgt_xyz = np.array([[3.0, 4.0, 0.0], [6.0, 8.0, 0.0]]).T
+    sun_xyz = np.array([0.0, 0.0, 0.0])
+    observer_xyz = np.array([6.0, 8.0, 0.0])
+    r_arr, delta_arr = comets._compute_comet_distances(tgt_xyz, sun_xyz, observer_xyz)
+    np.testing.assert_allclose(r_arr, np.array([5.0, 10.0]))
+    np.testing.assert_allclose(delta_arr, np.array([5.0, 0.0]))
+
+
+def test_comets_normalize_row_builds_dates():
+    import comets
+    ts = Loader(str(DATA_DIR)).timescale()
+    row = pd.Series({
+        'e': 0.5,
+        'q': 1.5,
+        'i': 10.0,
+        'om': 20.0,
+        'w': 30.0,
+        'M1': 8.0,
+        'k1': 4.0,
+        'perihelion_year': 2026.0,
+        'perihelion_month': 6.0,
+        'perihelion_day': 15.0,
+        'epoch_year': 2024.0,
+        'epoch_month': 1.0,
+        'epoch_day': 1.0,
+    })
+    result = comets._normalize_comet_row(('C/2026 A', row, ts))
+    assert result is not None
+    designation, row2, orbit_key, M1, n = result
+    assert designation == 'C/2026 A'
+    assert M1 == 8.0
+    assert n == 4.0
+    assert row2['Tp'] == pytest.approx(float(ts.tt(2026, 6, 15).tt))
+    assert row2['epoch_tt'] == pytest.approx(float(ts.tt(2024, 1, 1).tt))
+
+
+def test_comets_normalize_row_rejects_missing_m1():
+    import comets
+    ts = Loader(str(DATA_DIR)).timescale()
+    row = pd.Series({
+        'e': 0.5,
+        'q': 1.5,
+        'i': 10.0,
+        'om': 20.0,
+        'w': 30.0,
+        'Tp': 2459000.0,
+    })
+    result = comets._normalize_comet_row(('C/2026 A', row, ts))
+    assert result is None
 
 
 if __name__ == "__main__":

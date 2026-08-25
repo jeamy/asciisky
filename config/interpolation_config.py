@@ -13,9 +13,11 @@ Features:
 - Configuration monitoring and logging
 """
 
+import copy
 import hashlib
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -219,6 +221,7 @@ class InterpolationConfigManager:
     """
     
     def __init__(self):
+        self._lock = threading.RLock()
         self._config = SmartInterpolationConfig()
         self._config_timestamp = 0
         self._update_callbacks = []
@@ -227,113 +230,132 @@ class InterpolationConfigManager:
     
     def get_config(self) -> SmartInterpolationConfig:
         """Get current configuration"""
-        return self._config
+        with self._lock:
+            return copy.deepcopy(self._config)
     
     def reload_config(self) -> None:
         """Reload configuration from environment variables"""
-        old_config = self._config.to_dict()
-        self._config = SmartInterpolationConfig()
-        self._config_timestamp = time.time()
-        
+        with self._lock:
+            old_config = copy.deepcopy(self._config)
+            new_config = SmartInterpolationConfig()
+            changed = old_config.to_dict() != new_config.to_dict()
+            self._config = new_config
+            self._config_timestamp = time.time()
+            callbacks = list(self._update_callbacks)
+            config_snapshot = copy.deepcopy(self._config)
+
         # Notify callbacks if configuration changed
-        if old_config != self._config.to_dict():
+        if changed:
             logger.info("Interpolation configuration changed")
-            for callback in self._update_callbacks:
+            for callback in callbacks:
                 try:
-                    callback(self._config)
+                    callback(config_snapshot)
                 except Exception as e:
                     logger.error(f"Error in config update callback: {e}")
     
     def update_config(self, config_dict: dict[str, Any]) -> None:
         """Update configuration from dictionary"""
-        self._config.update_from_dict(config_dict)
-        self._config_timestamp = time.time()
-        
+        with self._lock:
+            self._config.update_from_dict(config_dict)
+            self._config_timestamp = time.time()
+            callbacks = list(self._update_callbacks)
+            config_snapshot = copy.deepcopy(self._config)
+
         # Notify callbacks
-        for callback in self._update_callbacks:
+        for callback in callbacks:
             try:
-                callback(self._config)
+                callback(config_snapshot)
             except Exception as e:
                 logger.error(f"Error in config update callback: {e}")
     
     def add_update_callback(self, callback) -> None:
         """Add callback for configuration updates"""
-        self._update_callbacks.append(callback)
+        with self._lock:
+            self._update_callbacks.append(callback)
     
     def remove_update_callback(self, callback) -> None:
         """Remove callback for configuration updates"""
-        if callback in self._update_callbacks:
-            self._update_callbacks.remove(callback)
+        with self._lock:
+            if callback in self._update_callbacks:
+                self._update_callbacks.remove(callback)
     
     def get_config_summary(self) -> dict[str, Any]:
         """Get configuration summary for monitoring"""
-        return {
-            'enabled': self._config.enable_smart_interpolation,
-            'strategy': self._config.interpolation_strategy.value,
-            'on_demand_enabled': self._config.enable_on_demand_computation,
-            'corrections_enabled': self._config.enable_astronomical_corrections,
-            'correction_level': self._config.correction_level.value,
-            'enabled_users': len(self._config.enabled_user_ids),
-            'enabled_percentage': self._config.enabled_percentage,
-            'last_updated': self._config_timestamp
-        }
+        with self._lock:
+            return {
+                'enabled': self._config.enable_smart_interpolation,
+                'strategy': self._config.interpolation_strategy.value,
+                'on_demand_enabled': self._config.enable_on_demand_computation,
+                'corrections_enabled': self._config.enable_astronomical_corrections,
+                'correction_level': self._config.correction_level.value,
+                'enabled_users': len(self._config.enabled_user_ids),
+                'enabled_percentage': self._config.enabled_percentage,
+                'last_updated': self._config_timestamp
+            }
     
     def enable_for_user(self, user_id: str) -> None:
         """Enable smart interpolation for specific user"""
-        if user_id not in self._config.enabled_user_ids:
-            self._config.enabled_user_ids.append(user_id)
-            logger.info(f"Enabled smart interpolation for user: {user_id}")
+        with self._lock:
+            if user_id not in self._config.enabled_user_ids:
+                self._config.enabled_user_ids.append(user_id)
+                logger.info(f"Enabled smart interpolation for user: {user_id}")
     
     def disable_for_user(self, user_id: str) -> None:
         """Disable smart interpolation for specific user"""
-        if user_id in self._config.enabled_user_ids:
-            self._config.enabled_user_ids.remove(user_id)
-            logger.info(f"Disabled smart interpolation for user: {user_id}")
+        with self._lock:
+            if user_id in self._config.enabled_user_ids:
+                self._config.enabled_user_ids.remove(user_id)
+                logger.info(f"Disabled smart interpolation for user: {user_id}")
     
     def set_enabled_percentage(self, percentage: float) -> None:
         """Set percentage of users enabled (0-100)"""
-        if 0 <= percentage <= 100:
-            self._config.enabled_percentage = percentage
-            logger.info(f"Set enabled percentage to: {percentage}%")
-        else:
-            logger.error(f"Invalid percentage: {percentage}, must be 0-100")
+        with self._lock:
+            if 0 <= percentage <= 100:
+                self._config.enabled_percentage = percentage
+                logger.info(f"Set enabled percentage to: {percentage}%")
+            else:
+                logger.error(f"Invalid percentage: {percentage}, must be 0-100")
     
     def enable_feature(self, feature: str) -> None:
         """Enable a specific feature"""
-        if feature == 'smart_interpolation':
-            self._config.enable_smart_interpolation = True
-        elif feature == 'on_demand':
-            self._config.enable_on_demand_computation = True
-        elif feature == 'corrections':
-            self._config.enable_astronomical_corrections = True
-        elif feature == 'background_tasks':
-            self._config.enable_background_tasks = True
-        else:
-            logger.warning(f"Unknown feature: {feature}")
+        with self._lock:
+            if feature == 'smart_interpolation':
+                self._config.enable_smart_interpolation = True
+            elif feature == 'on_demand':
+                self._config.enable_on_demand_computation = True
+            elif feature == 'corrections':
+                self._config.enable_astronomical_corrections = True
+            elif feature == 'background_tasks':
+                self._config.enable_background_tasks = True
+            else:
+                logger.warning(f"Unknown feature: {feature}")
     
     def disable_feature(self, feature: str) -> None:
         """Disable a specific feature"""
-        if feature == 'smart_interpolation':
-            self._config.enable_smart_interpolation = False
-        elif feature == 'on_demand':
-            self._config.enable_on_demand_computation = False
-        elif feature == 'corrections':
-            self._config.enable_astronomical_corrections = False
-        elif feature == 'background_tasks':
-            self._config.enable_background_tasks = False
-        else:
-            logger.warning(f"Unknown feature: {feature}")
+        with self._lock:
+            if feature == 'smart_interpolation':
+                self._config.enable_smart_interpolation = False
+            elif feature == 'on_demand':
+                self._config.enable_on_demand_computation = False
+            elif feature == 'corrections':
+                self._config.enable_astronomical_corrections = False
+            elif feature == 'background_tasks':
+                self._config.enable_background_tasks = False
+            else:
+                logger.warning(f"Unknown feature: {feature}")
 
 
 # Global configuration manager instance
 _config_manager = None
+_manager_lock = threading.RLock()
 
 
 def get_config_manager() -> InterpolationConfigManager:
     """Get global configuration manager instance"""
     global _config_manager
-    if _config_manager is None:
-        _config_manager = InterpolationConfigManager()
+    with _manager_lock:
+        if _config_manager is None:
+            _config_manager = InterpolationConfigManager()
     return _config_manager
 
 

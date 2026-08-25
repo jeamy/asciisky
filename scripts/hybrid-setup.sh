@@ -176,7 +176,7 @@ EOF
     fi
     
     print_info "Step 2: Building multi-stage images..."
-    asciisky_prepare_data_dirs .
+    ASCIISKY_APP_UID="$(id -u)" ASCIISKY_APP_GID="$(id -g)" asciisky_prepare_data_dirs .
     asciisky_compose_build docker-compose.yml . || { print_error "Build failed"; exit 1; }
     asciisky_tag_aliases asciisky-web:latest
     # Dev compose may tag image as asciisky-web (no :latest) — verify best-effort
@@ -616,7 +616,7 @@ case "$COMMAND" in
         if [[ ! -f "$COMPOSE" ]]; then
             COMPOSE="docker-compose.yml"
         fi
-        asciisky_prepare_data_dirs .
+        ASCIISKY_APP_UID="$(id -u)" ASCIISKY_APP_GID="$(id -g)" asciisky_prepare_data_dirs .
         BUILD_NO_CACHE="${BUILD_NO_CACHE:-0}"
         asciisky_compose_build "$COMPOSE" . || exit 1
         asciisky_tag_aliases asciisky-web:latest

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 
 from fastapi import HTTPException, Request
 
@@ -41,6 +42,30 @@ def get_location_params(request: Request, lat: float = None, lon: float = None, 
     resolved_lon = lon if lon is not None else session_loc.get("longitude", location_settings["longitude"])  
     resolved_elevation = elevation if elevation is not None else session_loc.get("elevation", location_settings["elevation"])
     return float(resolved_lat), float(resolved_lon), float(resolved_elevation)
+
+
+async def trigger_small_body_worker(
+    kind: str,
+    lat: float,
+    lon: float,
+    elevation: float,
+    dt_utc: datetime,
+    magnitude: float,
+    bucket_hours: int,
+    logger: logging.Logger,
+) -> None:
+    try:
+        from api.rabbitmq.task_publisher import trigger_precompute_task
+
+        await trigger_precompute_task(
+            kind,
+            {'latitude': lat, 'longitude': lon, 'elevation': elevation},
+            dt_utc.isoformat(),
+            magnitude,
+            bucket_hours,
+        )
+    except Exception:
+        logger.exception("Failed to trigger %s worker", kind)
 
 
 def resolve_magnitude_filter(request: Request, filter_key: str, default: float) -> float:

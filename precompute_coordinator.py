@@ -59,7 +59,7 @@ _shutdown_requested = False
 _queued_task_keys = set()
 
 
-def _signal_handler(signum, frame):
+def _signal_handler(signum, _frame):
     """Handler für graceful shutdown bei SIGTERM/SIGINT"""
     global _shutdown_requested
     logger.info(f"Received signal {signum}, shutting down gracefully...")
@@ -323,7 +323,7 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
             asteroid_cached = False
             try:
                 cached = get_asteroid_positions(loc_key, asteroid_bucket)
-                asteroid_cached = isinstance(cached, list) and len(cached) > 0
+                asteroid_cached = isinstance(cached, list)
             except Exception:
                 pass
 
@@ -354,7 +354,7 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
             comet_cached = False
             try:
                 cached = get_comet_positions(loc_key, comet_bucket)
-                comet_cached = isinstance(cached, list) and len(cached) > 0
+                comet_cached = isinstance(cached, list)
             except Exception:
                 pass
 

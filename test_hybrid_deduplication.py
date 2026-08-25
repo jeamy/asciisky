@@ -71,12 +71,12 @@ def test_advisory_locks():
             cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
         with second.cursor() as cursor:
             cursor.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (lock_id,))
-            assert cursor.fetchone()["acquired"] is False
+            assert cursor.fetchone()[0] is False
         with first.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
         with second.cursor() as cursor:
             cursor.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (lock_id,))
-            assert cursor.fetchone()["acquired"] is True
+            assert cursor.fetchone()[0] is True
             cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
     finally:
         first.close()

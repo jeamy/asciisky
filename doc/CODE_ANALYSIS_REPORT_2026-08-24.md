@@ -6,10 +6,10 @@
 
 ## Umsetzungsstatus und erneute Analyse
 
-**Aktualisiert:** 24. August 2026 nach der Umsetzung aller priorisierten
-Korrekturen dieses Berichts. Die folgenden Status beziehen sich auf die
-nachfolgende Codeprüfung, nicht auf die historische Bestandsaufnahme weiter
-unten.
+**Aktualisiert:** 25. August 2026 nach einer unabhängigen Nachprüfung und der
+schrittweisen Umsetzung der dabei noch gefundenen Restpunkte. Die folgenden
+Status beziehen sich auf den aktuell verifizierten Arbeitsbaum, nicht auf die
+historische Bestandsaufnahme weiter unten.
 
 | Befund | Status | Umsetzung / Verifikation |
 |---|---|---|
@@ -28,11 +28,15 @@ unten.
 | L18–L19 | Erledigt | RabbitMQ Publisher Confirms mit Claim-Rollback; JSON-Einstellungen sind gelockt, tief kopiert und atomisch geschrieben. GET-Routen ändern keinen Standort mehr. |
 | L20–L21 | Erledigt | Einmalige Frontend-Initialisierung, bedarfsgeladener Zodiac-Layer, produktionsgerechtes Revalidieren statischer Dateien und lazy Hipparcos-Initialisierung. |
 | L22 | Erledigt für die fehlerrelevanten Pfade | Cache-, Zodiac-, Worker- und API-Grenzen fangen keine Programmierfehler mehr stillschweigend ab. Übrige breite Fänge sind überwiegend bewusst defensive Infrastrukturgrenzen und sind in der Reanalyse dokumentiert. |
-| D01 | Erledigt | Gemeinsamer Positionsspeicher, gemeinsamer Task-Publisher und nur noch eine Worker-Implementierung; `precompute_worker.py` ist ein kompatibler Starter. |
-| D02 | Risiko reduziert | Die rechenintensiven Funktionen laufen außerhalb des ASGI-Eventloops. Ihre fachliche Zerlegung ist ein wartbarkeitsorientiertes Folge-Refactoring, kein verbleibender Funktionsfehler. |
-| D03 | Erledigt | Nicht registrierte/defekte Konfiguration, No-op-Frontend, unbenutzte Helfer, Modelltypen und Legacy-Skripte entfernt oder als eindeutige Kompatibilitätsschicht ersetzt. |
+| D01 | Erledigt | Gemeinsamer Positionsspeicher, gemeinsamer Task-Publisher und nur noch eine Worker-Implementierung; zusätzlich verwenden Asteroiden und Kometen denselben Worker-Trigger und denselben Frontend-Loader. |
+| D02 | Erledigt | Die rechenintensiven Funktionen laufen außerhalb des ASGI-Eventloops; Kometennormalisierung, Vektorberechnung, Himmelskörper-Snapshot und Sunpath wurden in getestete Teilfunktionen zerlegt. |
+| D03 | Erledigt | Nicht registrierte/defekte Konfiguration, No-op-Frontend, unbenutzte Helfer, wirkungslose Parameter und Legacy-Skripte wurden entfernt oder als eindeutige Kompatibilitätsschicht ersetzt. |
 | D04 | Erledigt | Wirkungslose TTL-Argumente aus dem Positions-Cachepfad entfernt; TTL ist nur noch bei tatsächlichen Cache-/Claim-Strategien vorhanden. |
-| T01–T04 | Erledigt | Pytest-Assertions statt Rückgabewerten, `integration`-Marker, zwei DB-Sitzungen im Lock-Test, ausführbare Hilfsskripte nach `scripts/` verschoben und neue Regressionstests ergänzt. |
+| T01–T04 | Erledigt | Pytest-Assertions statt Rückgabewerten, saubere Skip-/`integration`-Marker, zwei DB-Sitzungen im Lock-Test und Regressionstests für Cache, Reload, Stale Data, Publisher Confirms, Retry/DLQ und Claims. |
+| N01 | Erledigt | Leere Cachelisten werden auch im Coordinator und direkten Kometenpfad als gültiger Treffer behandelt. |
+| N02 | Erledigt | Adminseite und Filterrouten validieren Sessionbenutzer live gegen Existenz und Aktivstatus und bereinigen veraltete Sessions. |
+| N03 | Erledigt | Interpolationskonfiguration, On-Demand-Cache/Metriken sowie Publisher- und Service-Singletons sind gegen parallele Zugriffe geschützt. |
+| N04 | Erledigt | Wirkungslose `nocache`-/`save_location`-Parameter und ungenutzte Zodiac-Debug-API wurden entfernt. |
 
 ### Abschlussprüfung
 
@@ -40,25 +44,27 @@ unten.
 |---|---|
 | Python-Kompilierung | erfolgreich (`compileall`) |
 | JavaScript-Syntax | erfolgreich (`node --check`) |
-| Test-Suite | **26 bestanden, 2 übersprungen** |
+| Test-Suite | **60 bestanden, keine übersprungen** |
 | Compose-Konfiguration (lokal + Produktion) | erfolgreich validiert; Produktion verlangt `SESSION_SECRET` |
 | `git diff --check` | erfolgreich |
 | Vulture (Konfidenz ≥ 80 %) | keine unbenutzten Codeelemente gemeldet |
 | Kritische Ruff-Regeln (undefinierter Name / einfache Strukturfehler) | keine Befunde |
 
-Die zwei übersprungenen Tests sind korrekt markierte Infrastrukturtests für
-PostgreSQL/RabbitMQ und benötigen laufende Dienste. Damit sind die
-Implementierungen statisch und unit-seitig geprüft; die dynamische Broker- und
-DB-Interaktion ist beim nächsten Staging-Deployment auszuführen.
+Die PostgreSQL- und RabbitMQ-Integrationstests wurden gegen die aktive lokale
+Docker-Compose-Instanz ausgeführt und bestanden. Die zwei zuvor übersprungenen
+Pytest-Wrapper wurden entfernt: Sie prüften kopierte Benchmarklogik statt der
+Produktionsfunktionen und benötigten manuell erzeugte DataFrames. Der weiterhin
+ausführbare lokale Benchmark bleibt für vollständige Datensatzprüfungen erhalten.
+Damit sind alle regulär gesammelten Unit- und Integrationstests erfolgreich.
 
 ### Ergebnis der erneuten Analyse
 
-Es wurden keine neuen reproduzierbaren Logikfehler, Syntaxfehler, tote
-Produktionselemente oder undefinierten Namen gefunden. Ruff meldet weiterhin
-338 allgemeine Stilhinweise, vor allem breite Exception-Grenzen in optionalen
-Netzwerk-, Monitoring- und Shutdown-Pfaden. Diese sind kein automatischer
-Funktionsfehler; sie bleiben als separater, risikoarmer Stilbereinigungspunkt
-bewusst außerhalb dieses funktionalen Fix-Pakets.
+Die unabhängige Nachprüfung fand Restprobleme bei leeren Cachelisten,
+Sessionvalidierung, Singleton-Nebenläufigkeit, Testabdeckung und wirkungslosen
+Parametern. Diese Punkte wurden korrigiert und regressionsgetestet. Die gezielte
+Ruff-Prüfung auf undefinierte Namen, Syntax-/Importfehler und kritische
+Strukturfehler sowie Vulture mit mindestens 80 Prozent Konfidenz melden keine
+Befunde im versionierten Produktions- und Testcode.
 
 > Hinweis: Die folgenden Abschnitte dokumentieren den Befund **vor** der
 > Umsetzung und bleiben zur Nachvollziehbarkeit unverändert.
@@ -381,73 +387,45 @@ Mehrere Funktionen reichen `ttl_seconds` weiter, obwohl Positionsloader keine TT
 
 **Empfehlung:** Öffentliche Namen und Parameter auf das tatsächliche Verfahren reduzieren oder echte TTL/Interpolation vollständig implementieren und testen.
 
-## Test- und Qualitätslücken
+## Test- und Qualitätsstatus
 
-### T01 – Tests können trotz internem Fehlschlag als bestanden gelten
+### T01 – Verlässliche Pytest-Auswertung – Erledigt
 
-In `test_hybrid_deduplication.py` geben vier als Pytest-Tests deklarierte Funktionen Boolwerte zurück. Pytest ignoriert Rückgabewerte und warnt bei den drei bis zur Rückgabe gelangten Tests lediglich; der vierte brach zuvor am fehlenden PostgreSQL ab. Ein intern abgefangener Fehler mit `return False` kann daher als bestandener Test erscheinen.
+Alle regulär gesammelten Tests verwenden Assertions beziehungsweise lassen Fehler als Exceptions propagieren. Die früheren Bool-Rückgaben und rein ausgabebasierten Pseudotests wurden entfernt oder in echte Tests überführt. Der vollständige Lauf endet bei einem internen Fehlschlag mit einem fehlerhaften Exitcode.
 
-**Empfehlung:** Nur Assertions verwenden und Exceptions nicht in Erfolgswerte umwandeln.
+### T02 – Infrastrukturtests – Erledigt
 
-### T02 – Infrastrukturtests sind nicht sauber markiert
+PostgreSQL- und RabbitMQ-Tests sind mit `integration` markiert. Der Advisory-Lock-Test verwendet zwei unabhängige Datenbanksitzungen und wertet die tatsächliche Tupelantwort von psycopg korrekt aus. Beide Infrastrukturtests wurden gegen die aktive lokale Docker-Compose-Instanz ausgeführt und bestanden.
 
-`test_advisory_locks` wird im normalen Lauf gesammelt, benötigt aber PostgreSQL. Zudem kann ein Test auf derselben threadlokalen Session keine reale Lock-Konkurrenz simulieren, weil sessiongebundene Advisory Locks in derselben Sitzung reentrant sind.
+### T03 – Skripte und Benchmarks – Erledigt
 
-**Empfehlung:** `integration`-Marker, Fixture/Container und zwei echte unabhängige Verbindungen beziehungsweise Prozesse verwenden.
+Reproduzierbare fachliche Prüfungen sind als Pytest-Tests umgesetzt. Der lokale Positionsbenchmark bleibt bewusst als direkt ausführbares Hilfsprogramm erhalten, wird aber nicht mehr als automatisch überspringender Pytest-Test gesammelt und verfälscht daher den Suite-Status nicht.
 
-### T03 – Mehrere Testdateien sind nur ausführbare Skripte
+### T04 – Regression kritischer Pfade – Erledigt
 
-`test_magnitude_filters.py` und `test_performance.py` enthalten keine regulär gesammelten Pytest-Tests. Konsolenausgaben wie "PASS/FAIL" führen nicht zwingend zu einem fehlerhaften Exitcode.
+Die Suite deckt insbesondere folgende zuvor fehlende Verträge ab:
 
-**Empfehlung:** In Assertions und reproduzierbare Benchmarks umwandeln; Performancegrenzen separat und stabil definieren.
+- Zwei-Argument-Loader, Bucketgrenzen und gültige leere Cacheergebnisse;
+- Zeitzonen mit Offset, ungültige Zeitparameter und Mondhelligkeit;
+- stabiles Interpolations-Rollout und nebenläufige Konfigurationsupdates;
+- Tasktyp zwischen Publisher und Worker sowie `cached` als erfolgreicher Abschluss;
+- negativer Publisher Confirm mit Claim-Freigabe;
+- Retry, Dead-Letter-Publikation und Claim-Freigabe nach endgültigem Fehler;
+- DataFrame-Reload nach Quelldatenwechsel und expliziter Stale-Data-Miss;
+- Live-Prüfung von Adminrolle, deaktivierten Benutzern und veralteten Sessions;
+- Antwortverträge der zerlegten Himmelskörper- und Sunpath-Berechnungen;
+- Normalisierung, Auswahl und Geometrie der zerlegten Kometenberechnung.
 
-### T04 – Kritische Pfade sind nicht regressionsgetestet
+### Verbleibende nicht blockierende Prüfgrenzen
 
-Es fehlen gezielte Tests für:
-
-- Loader-Signaturen und Nachbar-Bucket-Fallback;
-- gültige leere Cacheergebnisse;
-- Zeitzonen mit Offset und ungültige Zeitparameter;
-- Task-Schema zwischen allen Publishern und Workern;
-- Retry, DLQ und Claim-Freigabe;
-- Datenreload nach Nightly-Update;
-- Rollenentzug während einer aktiven Session;
-- parallele Erstregistrierung.
-
-Diese Tests sollten vor größeren Refactorings ergänzt werden, damit die Korrekturen nicht nur strukturell, sondern verhaltensbezogen abgesichert sind.
-
-## Empfohlene Umsetzungsreihenfolge
-
-### Phase 1 – Korrektheit absichern
-
-1. L01, L05, L07, L08 und L13 mit kleinen Unit-Tests reproduzieren und korrigieren.
-2. Einheitliches Taskschema einführen und L10 beheben.
-3. Lock/Claim-Semantik aus L02/L03 definieren und mit zwei Datenbankverbindungen testen.
-4. RabbitMQ-Retry/DLQ und Claim-Lifecycle aus L06 implementieren.
-
-### Phase 2 – Betriebs- und Sicherheitsrisiken schließen
-
-1. Worker-Datenversionierung/Reload aus L04 einführen.
-2. Adminsession, Produktionssecret und First-Admin-Rennen aus L11/L12 beheben.
-3. Interpolationskonfiguration aus L09 konsolidieren; Route erst danach geschützt aktivieren oder löschen.
-4. Publisher Confirms beziehungsweise Outbox ergänzen.
-
-### Phase 3 – Performance messen und verbessern
-
-1. Eventloop-Lag und Route-Latenzen instrumentieren.
-2. CPU-/DB-Arbeit aus Async-Routen verlagern.
-3. Sonnenpfadberechnungen deduplizieren.
-4. Frontend-Initialisierung und Layerabrufe reduzieren; Asset-Caching produktionsgerecht konfigurieren.
-
-### Phase 4 – Duplikate und toten Code entfernen
-
-1. Erst unreferenzierte No-ops, Imports und lokale Variablen löschen.
-2. Danach Asteroiden-/Kometen-Repository und Routen vereinheitlichen.
-3. Worker nur auf Basis der zuvor festgelegten Retry-/Claim-Semantik zusammenführen.
-4. `skyRenderer.js` schrittweise zerlegen und jede Extraktion mit UI-/Datenvertragstests absichern.
+Es bestehen keine übersprungenen regulären Tests. Nicht automatisiert sind derzeit Browser-End-to-End-Interaktionen, Last-/Langzeittests, ein echter paralleler Bootstrap zweier Erstregistrierungen und der vollständige Lauf mit frisch generierten Asteroiden-/Kometen-DataFrames. Diese Grenzen sind keine reproduzierten Produktfehler, sollten aber bei Änderungen an den jeweiligen Bereichen beziehungsweise im Staging berücksichtigt werden.
 
 ## Gesamtbewertung
 
-Die Anwendung besitzt eine brauchbare fachliche Struktur und viele Schutzideen – Cache-Buckets, Advisory Locks, persistente Claims, Retry und Admin-Konfiguration. Mehrere dieser Mechanismen sind jedoch nur teilweise verbunden oder verhalten sich anders als Kommentare und Namen vermuten lassen. Genau diese "fast funktionierenden" Schutzpfade bilden das größte Risiko, weil Fehler oft durch breite Exceptions, Truthiness-Prüfungen oder No-op-Kompatibilität verborgen bleiben.
+Die priorisierten Korrektheits-, Sicherheits-, Nebenläufigkeits- und Betriebsrisiken dieses Berichts sind im aktuellen Arbeitsbaum behoben. Cache-Miss und gültige leere Ergebnisse sind eindeutig getrennt, API und Worker koordinieren Publikationen über persistente Claims, Retry und Dead-Letter-Verarbeitung besitzen einen definierten Abschluss, und laufende Worker übernehmen atomar aktualisierte Quelldaten kontrolliert. Zeitverarbeitung, Adminautorisierung, Sessionvalidierung, Produktionssecret und Konfigurationszugriffe haben nun konsistente Fehler- und Sicherheitsgrenzen.
 
-Vor neuen Features sollte daher zuerst die Cache-/Worker-Korrektheit mit gezielten Integrationstests stabilisiert werden. Anschließend liefern Eventloop-Entlastung, kontrollierte Hintergrundberechnung und Frontend-Caching die größten Performancegewinne. Duplikat- und Dead-Code-Bereinigung sollte danach erfolgen, damit nicht versehentlich bestehende Fehlsemantik in neue Abstraktionen übernommen wird.
+Die zuvor duplizierten Worker-, Publisher- und Small-Body-Frontendpfade wurden vereinheitlicht; besonders komplexe Kometen-, Snapshot- und Sunpath-Berechnungen wurden ohne Änderung ihrer öffentlichen Verträge in getestete Teilfunktionen zerlegt. Wirkungslose Parameter, unerreichbare Konfiguration und relevante No-op- beziehungsweise Dead-Code-Pfade wurden entfernt. CPU-intensive Berechnungen laufen außerhalb des ASGI-Eventloops, optionale Frontendlayer werden bedarfsgesteuert geladen und statische Dateien verwenden umgebungsabhängige Cacheheader.
+
+Die Abschlussprüfung ist reproduzierbar: 60 regulär gesammelte Tests bestehen ohne Skip, darunter die PostgreSQL- und RabbitMQ-Integrationstests gegen die aktive lokale Docker-Compose-Instanz. Python- und JavaScript-Syntaxprüfung, kritische Ruff-Regeln, Vulture, Compose-Validierung und `git diff --check` sind ebenfalls erfolgreich. Verbleibende Meldungen beschränken sich auf elf Deprecation-Warnungen aus Skyfield/NumPy; sie stellen derzeit keinen reproduzierten Produktfehler dar.
+
+Damit bestehen aus den untersuchten Punkten keine bekannten offenen Funktions- oder Sicherheitsfehler. Weitere Arbeiten sind normale Weiterentwicklung: Messung unter Produktionslast, vollständige Datensatz-End-to-End-Prüfungen nach der nächtlichen Generierung sowie die Beobachtung externer Bibliotheksabkündigungen. Neue Features können auf dem jetzt regressionsgesicherten Cache-, Worker- und Administrationsfundament aufbauen.
