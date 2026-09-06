@@ -14,7 +14,7 @@
 #
 # Note: same image is used for web + workers; CMD is overridden in compose.
 
-ARG PYTHON_VERSION=3.14.1
+ARG PYTHON_VERSION=3.14.7
 
 # ---------------------------------------------------------------------------
 # Stage 1: builder — compile/install Python deps into an isolated prefix
@@ -74,6 +74,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tzdata \
         libffi8 \
         libpq5 \
+        openssl \
+        libssl3t64 \
+        openssl-provider-legacy \
         ca-certificates \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo "$TZ" > /etc/timezone \
