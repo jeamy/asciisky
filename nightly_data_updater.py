@@ -14,7 +14,7 @@ from datetime import datetime
 from ftplib import FTP, FTP_TLS
 from pathlib import Path
 
-from data_paths import COMET_ELEMENTS_PATH, MPCORB_PATH, ensure_data_dirs
+from data_paths import COMET_ELEMENTS_PATH, DATA_DIR, MPCORB_PATH, ensure_data_dirs
 
 # Setup logging
 logging.basicConfig(
@@ -124,8 +124,32 @@ def set_last_update_date(date):
         f.write(date.isoformat())
 
 
+def _data_refresh_reason():
+    """Return why locally available source data needs to be processed."""
+    max_age_seconds = 49 * 3600
+    datasets = (
+        ('asteroid', Path(MPCORB_PATH), Path(DATA_DIR) / 'asteroid_dataframe.pkl'),
+        ('comet', Path(COMET_ELEMENTS_PATH), Path(DATA_DIR) / 'comet_dataframe.pkl'),
+    )
+
+    for name, source_file, dataframe_file in datasets:
+        if not dataframe_file.exists():
+            return f"{name} DataFrame is missing"
+        if time.time() - dataframe_file.stat().st_mtime > max_age_seconds:
+            return f"{name} DataFrame is stale"
+        if source_file.exists() and source_file.stat().st_mtime > dataframe_file.stat().st_mtime:
+            return f"{source_file.name} is newer than {dataframe_file.name}"
+
+    return None
+
+
 def should_update_now():
-    """Check if it's time to update (2 AM and not updated today)"""
+    """Check if new data is available or the scheduled update is due."""
+    refresh_reason = _data_refresh_reason()
+    if refresh_reason:
+        logger.info(f"Data refresh needed: {refresh_reason}")
+        return True
+
     now = datetime.now()
     today = now.date()
 
@@ -427,18 +451,15 @@ def run_update_loop():
 
 
 def check_initial_data():
-    """On startup: update if data is missing or today's update has not run yet."""
+    """On startup: update stale data, new source data, or if today's update has not run."""
     try:
-        from db_utils import get_asteroid_dataframe, get_comet_dataframe
-
-        asteroid_df = get_asteroid_dataframe()
-        comet_df = get_comet_dataframe()
+        refresh_reason = _data_refresh_reason()
         last_update = get_last_update_date()
         today = datetime.now().date()
 
-        if not asteroid_df and not comet_df:
+        if refresh_reason:
             logger.info("=" * 80)
-            logger.info("Database is empty - performing initial data load")
+            logger.info(f"Data refresh needed: {refresh_reason}")
             logger.info("=" * 80)
             perform_nightly_update()
             return True
@@ -449,7 +470,7 @@ def check_initial_data():
             perform_nightly_update()
             return True
         else:
-            logger.info(f"Database has data and already updated today ({last_update}) - skipping initial load")
+            logger.info(f"Data is current and already updated today ({last_update}) - skipping initial load")
             return False
     except Exception as e:
         logger.warning(f"Could not check database status: {e}")

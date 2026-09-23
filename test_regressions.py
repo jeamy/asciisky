@@ -33,9 +33,44 @@ from api.rabbitmq.task_publisher import TaskPublisher
 from api.routes import admin_users
 from config.interpolation_config import InterpolationConfigManager, SmartInterpolationConfig
 import db_utils
+import nightly_data_updater
 import precompute_coordinator
 from workers import worker_utils
 from workers.unified_worker import UnifiedWorker
+
+
+def test_nightly_updater_detects_newer_source_data(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data"
+    cache_dir = data_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    asteroid_source = cache_dir / "MPCORB.DAT.gz"
+    comet_source = cache_dir / "COMET_ELEMENTS.txt"
+    asteroid_dataframe = data_dir / "asteroid_dataframe.pkl"
+    comet_dataframe = data_dir / "comet_dataframe.pkl"
+
+    for path in (asteroid_source, comet_source, asteroid_dataframe, comet_dataframe):
+        path.write_bytes(b"data")
+    old_time = datetime.now().timestamp() - 3600
+    os.utime(asteroid_dataframe, (old_time, old_time))
+    os.utime(asteroid_source, (old_time + 60, old_time + 60))
+
+    monkeypatch.setattr(nightly_data_updater, "DATA_DIR", data_dir)
+    monkeypatch.setattr(nightly_data_updater, "MPCORB_PATH", asteroid_source)
+    monkeypatch.setattr(nightly_data_updater, "COMET_ELEMENTS_PATH", comet_source)
+
+    assert nightly_data_updater._data_refresh_reason() == (
+        "MPCORB.DAT.gz is newer than asteroid_dataframe.pkl"
+    )
+
+
+def test_initial_data_refreshes_stale_dataset_even_if_updated_today(monkeypatch):
+    updates = []
+    monkeypatch.setattr(nightly_data_updater, "_data_refresh_reason", lambda: "comet DataFrame is stale")
+    monkeypatch.setattr(nightly_data_updater, "get_last_update_date", lambda: datetime.now().date())
+    monkeypatch.setattr(nightly_data_updater, "perform_nightly_update", lambda: updates.append(True))
+
+    assert nightly_data_updater.check_initial_data() is True
+    assert updates == [True]
 
 
 def test_cache_loader_uses_two_argument_contract_and_preserves_empty_result():
