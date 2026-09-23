@@ -23,7 +23,8 @@ export const API_ENDPOINTS = {
     AUTH_LOGIN: '/api/auth/login',
     AUTH_LOGOUT: '/api/auth/logout',
     AUTH_ME: '/api/auth/me',
-    ADMIN_USERS: '/api/admin/users'
+    ADMIN_USERS: '/api/admin/users',
+    ELEVATION: 'https://api.open-meteo.com/v1/elevation'
 };
 
 // Astronomical Constants

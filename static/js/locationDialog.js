@@ -1,6 +1,6 @@
 // Location Dialog für ASCII Sky Tracker
 import { t } from './i18n.js';
-import { ASTRO_CONSTANTS } from './constants.js';
+import { API_ENDPOINTS, ASTRO_CONSTANTS } from './constants.js';
 
 export class LocationDialog {
     constructor(onLocationChange) {
@@ -208,7 +208,7 @@ export class LocationDialog {
         });
     }
     
-    // Funktion zur Höhenermittlung über Open-Elevation API
+    // Funktion zur Höhenermittlung über Open-Meteo API
     async getElevationForCoordinates(lat, lon) {
         try {
             // Status anzeigen
@@ -216,11 +216,16 @@ export class LocationDialog {
             if (elevationInput) {
                 elevationInput.value = t('fetching_elevation') || 'Fetching elevation...';
             }
-            
-            const response = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`);
+
+            const params = new URLSearchParams({ latitude: lat, longitude: lon });
+            const response = await fetch(`${API_ENDPOINTS.ELEVATION}?${params}`);
+            if (!response.ok) {
+                throw new Error(`Elevation API returned HTTP ${response.status}`);
+            }
             const data = await response.json();
-            if (data && data.results && data.results.length > 0) {
-                return data.results[0].elevation;
+            const elevation = data?.elevation?.[0];
+            if (Number.isFinite(elevation)) {
+                return elevation;
             }
         } catch (error) {
             console.error('Error fetching elevation:', error);
