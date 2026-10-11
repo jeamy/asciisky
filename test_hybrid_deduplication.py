@@ -189,11 +189,12 @@ def main():
     for test_name, test_func in tests:
         print(f"\n📋 Running: {test_name}")
         try:
-            if test_func():
-                passed += 1
-                print(f"✅ {test_name} PASSED")
-            else:
-                print(f"❌ {test_name} FAILED")
+            # Tests signal failure via assert (AssertionError), so no exception means PASS
+            test_func()
+            passed += 1
+            print(f"✅ {test_name} PASSED")
+        except AssertionError as e:
+            print(f"❌ {test_name} FAILED: {e}")
         except Exception as e:
             print(f"❌ {test_name} ERROR: {e}")
     
