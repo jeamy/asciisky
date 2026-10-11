@@ -221,7 +221,7 @@ EOF
     # Check Web API
     echo "🔍 Checking Web API..."
     for i in {1..10}; do
-        if curl -s "http://localhost:8000/api/health" >/dev/null 2>&1; then
+        if curl -sf "http://localhost:8000/api/bright_asteroids?lat=46.7632&lon=14.8417&elevation=405" >/dev/null 2>&1; then
             print_status "Web API is ready"
             break
         else
@@ -236,6 +236,10 @@ EOF
     
     # Run tests
     print_info "Step 6: Running Hybrid Deduplication tests..."
+    # Test dependencies are not in the production image; install them into the running web container
+    if ! docker compose exec -T -u root web pip install -q -r requirements-dev.txt; then
+        print_warning "Could not install requirements-dev.txt into web container"
+    fi
     if docker compose exec -T web python test_hybrid_deduplication.py; then
         print_status "Hybrid Deduplication tests passed"
     else
