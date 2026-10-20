@@ -1,24 +1,24 @@
-fastapi==0.138.1
-uvicorn==0.49.0
+fastapi==0.153.0
+uvicorn==0.54.0
 python-multipart==0.0.32
 httpx==0.28.1
-pydantic==2.13.4
-skyfield==1.54
-numpy==2.5.0
+pydantic==2.14.1
+skyfield==1.55
+numpy==2.5.4
 jinja2==3.1.6
 aiofiles==25.1.0
 itsdangerous==2.2.0
-pytz==2026.2
+pytz==2026.5
 email-validator==2.3.0
-pandas==3.0.3
+pandas==3.0.6
 requests==2.34.2
-timezonefinder==8.2.4
+timezonefinder==9.0.0
 psutil==7.2.2
 # RabbitMQ Client Libraries
-pika==1.4.1
-prometheus-client==0.25.0
+pika==1.4.4
+prometheus-client==0.26.0
 
 # PostgreSQL (für Multi-Host Deployment)
 # psycopg2-binary nicht kompatibel mit Python 3.13+
 # Verwende psycopg 3 (moderne API, Python 3.14 Support)
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.6

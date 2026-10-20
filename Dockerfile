@@ -14,7 +14,7 @@
 #
 # Note: same image is used for web + workers; CMD is overridden in compose.
 
-ARG PYTHON_VERSION=3.14.7
+ARG PYTHON_VERSION=3.14.8
 
 # ---------------------------------------------------------------------------
 # Stage 1: builder — compile/install Python deps into an isolated prefix
