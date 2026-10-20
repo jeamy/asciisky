@@ -5,7 +5,7 @@
 services:
   # ===== PostgreSQL Database =====
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18.6-alpine
     container_name: asciisky-postgres
     ports:
       - "5432:5432"
@@ -14,23 +14,37 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
-      
-      # Performance Tuning (8 Cores, 16GB RAM, SSD - max 8GB für App)
-      # KONSERVATIV: Defaults funktionierten, nur SSD-Optimierung + moderater Cache
-      - POSTGRES_SHARED_BUFFERS=512MB         # 2GB RAM für PostgreSQL, 512MB Cache
-      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB  # 75% of 2GB PostgreSQL RAM
-      - POSTGRES_WORK_MEM=16MB                # Größer als Default (4MB) für DataFrames
-      - POSTGRES_MAINTENANCE_WORK_MEM=256MB   # Für VACUUM, CREATE INDEX
-      - POSTGRES_MAX_CONNECTIONS=100          # Default beibehalten
-      - POSTGRES_RANDOM_PAGE_COST=1.1         # SSD-Optimierung (Default: 4.0)
-      - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200 # SSD-Optimierung (Default: 1)
-      - POSTGRES_WAL_BUFFERS=16MB             # Write-Ahead Log
+
+    # Performance Tuning (8 Cores, 16GB RAM, SSD - max 8GB für App)
+    # KONSERVATIV: Defaults funktionierten, nur SSD-Optimierung + moderater Cache
+    # NOTE: POSTGRES_* env vars are NOT honoured by the postgres entrypoint;
+    # these settings must be passed as postgres -c arguments.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB         # 2GB RAM für PostgreSQL, 512MB Cache
+      - -c
+      - effective_cache_size=1536MB  # 75% of 2GB PostgreSQL RAM
+      - -c
+      - work_mem=16MB                # Größer als Default (4MB) für DataFrames
+      - -c
+      - maintenance_work_mem=256MB   # Für VACUUM, CREATE INDEX
+      - -c
+      - max_connections=100          # Default beibehalten
+      - -c
+      - random_page_cost=1.1         # SSD-Optimierung (Default: 4.0)
+      - -c
+      - effective_io_concurrency=200 # SSD-Optimierung (Default: 1)
+      - -c
+      - wal_buffers=16MB             # Write-Ahead Log
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PG18 images store data at /var/lib/postgresql/<major>/docker;
+      # mount the parent dir, NOT /var/lib/postgresql/data.
+      - postgres18_data:/var/lib/postgresql
       - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U asciisky -d asciisky"]
-      interval: 600s
+      interval: 30s
       timeout: 5s
       retries: 5
     restart: unless-stopped
@@ -45,7 +59,7 @@ services:
 
   # ===== RabbitMQ Service =====
   rabbitmq:
-    image: rabbitmq:4.1.8-management
+    image: rabbitmq:4.3.6-management
     container_name: asciisky-rabbitmq
     hostname: rabbitmq-asciisky
     ports:
@@ -257,6 +271,9 @@ services:
       replicas: ${PRECOMPUTE_WORKERS:-4}  # Anzahl aus .env
 
 volumes:
+  postgres18_data:
+    driver: local
+  # Kept for rollback of the PG16→18 migration; no longer mounted.
   postgres_data:
     driver: local
   rabbitmq_data:
