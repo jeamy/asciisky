@@ -6,8 +6,10 @@ Downloads and processes asteroid/comet data once per day at 2:00 AM
 import hashlib
 import logging
 import os
+import pickle
 import signal
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime
@@ -195,11 +197,43 @@ def invalidate_object_cache(object_type: str):
         return False
 
 
-def _content_changed(previous: bytes | None, current: bytes) -> bool:
-    """Compare serialized source datasets without retaining duplicate objects."""
-    if previous is None:
+def _file_sha256(path: Path) -> bytes:
+    with path.open('rb') as f:
+        return hashlib.file_digest(f, 'sha256').digest()
+
+
+def _content_changed(dataframe_file: Path, candidate_file: Path) -> bool:
+    """Compare serialized source datasets without loading either into RAM."""
+    if not dataframe_file.exists():
         return True
-    return hashlib.sha256(previous).digest() != hashlib.sha256(current).digest()
+    if dataframe_file.stat().st_size != candidate_file.stat().st_size:
+        return True
+    return _file_sha256(dataframe_file) != _file_sha256(candidate_file)
+
+
+def _store_dataframe_if_changed(df, filename: str) -> bool:
+    """Atomically replace a changed dataframe; return whether it changed.
+
+    The dataframe is pickled straight to disk because an in-memory pickle adds
+    about 1 GB at peak for MPCORB. An unchanged dataframe still gets a fresh
+    mtime: it records that the source was processed and keeps the file within
+    the readers' age limit.
+    """
+    dataframe_file = Path(DATA_DIR) / filename
+    fd, temporary_path = tempfile.mkstemp(prefix=f".{filename}-", suffix=".tmp", dir=DATA_DIR)
+    candidate_file = Path(temporary_path)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            pickle.dump(df, f)
+            f.flush()
+            os.fsync(f.fileno())
+        if _content_changed(dataframe_file, candidate_file):
+            candidate_file.replace(dataframe_file)
+            return True
+        os.utime(dataframe_file)
+        return False
+    finally:
+        candidate_file.unlink(missing_ok=True)
 
 
 def _calendar_tt_jd(year, month, day):
@@ -223,18 +257,13 @@ def update_asteroid_data():
     logger.info("Updating asteroid data...")
     try:
         import gzip
-        import pickle
         from pathlib import Path
 
         import pandas as pd
         from skyfield.data import mpc
 
         import bright_asteroids
-        from db_utils import (
-            get_asteroid_dataframe,
-            get_database_stats,
-            store_asteroid_dataframe,
-        )
+        from db_utils import get_database_stats
 
         # Download latest data
         ensure_data_dirs()
@@ -246,7 +275,6 @@ def update_asteroid_data():
         else:
             logger.warning("✗ Failed to download asteroid data via HTTP")
             # Fallback: use existing file if it is newer than the current asteroid_dataframe.pkl
-            from data_paths import DATA_DIR
             pkl_path = Path(DATA_DIR) / 'asteroid_dataframe.pkl'
             if mpcorb_file.exists():
                 pkl_mtime = pkl_path.stat().st_mtime if pkl_path.exists() else 0
@@ -288,10 +316,7 @@ def update_asteroid_data():
 
         # Store only changed source data; unchanged nightly downloads must not
         # invalidate every computed bucket.
-        df_pickle = pickle.dumps(df)
-        previous = get_asteroid_dataframe(max_age_seconds=10**12)
-        if _content_changed(previous, df_pickle):
-            store_asteroid_dataframe(df_pickle)
+        if _store_dataframe_if_changed(df, 'asteroid_dataframe.pkl'):
             logger.info("✓ Stored changed asteroid DataFrame")
             invalidate_object_cache('asteroid')
         else:
@@ -312,14 +337,8 @@ def update_comet_data():
     """Download and process comet data"""
     logger.info("Updating comet data...")
     try:
-        import pickle
-
         import comets
-        from db_utils import (
-            get_comet_dataframe,
-            get_database_stats,
-            store_comet_dataframe,
-        )
+        from db_utils import get_database_stats
 
         ensure_data_dirs()
         comet_file = Path(COMET_ELEMENTS_PATH)
@@ -327,7 +346,6 @@ def update_comet_data():
             download_file_from_ftp('COMET_ELEMENTS.txt', COMET_ELEMENTS_PATH)
         else:
             # No FTP: check if local file is newer than current comet_dataframe.pkl
-            from data_paths import DATA_DIR
             pkl_path = Path(DATA_DIR) / 'comet_dataframe.pkl'
             if comet_file.exists():
                 pkl_mtime = pkl_path.stat().st_mtime if pkl_path.exists() else 0
@@ -358,10 +376,7 @@ def update_comet_data():
                     df.loc[valid, 'perihelion_day'],
                 )
 
-            df_pickle = pickle.dumps(df)
-            previous = get_comet_dataframe(max_age_seconds=10**12)
-            if _content_changed(previous, df_pickle):
-                store_comet_dataframe(df_pickle)
+            if _store_dataframe_if_changed(df, 'comet_dataframe.pkl'):
                 logger.info("✓ Stored changed comet DataFrame")
                 invalidate_object_cache('comet')
             else:

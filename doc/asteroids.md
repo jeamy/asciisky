@@ -105,7 +105,7 @@ Frontend display: the UI simplifies display names by stripping numeric designati
 
 - DataFrame cache (filesystem)
   - File: `asteroid_dataframe.pkl` under `DATA_DIR`.
-  - Written by `db_utils.store_asteroid_dataframe()` and read via
+  - Written by `nightly_data_updater._store_dataframe_if_changed()` and read via
     `db_utils.get_asteroid_dataframe()` / `bright_asteroids.load_asteroid_dataframe()`.
   - Staleness window: ~49 hours (see `ASTEROID_DF_CACHE_TTL_SECONDS`).
 - Position cache (PostgreSQL, table `cached_positions`)

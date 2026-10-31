@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import pickle
-import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -100,33 +99,6 @@ def close_db_connection():
         _thread_local.connection = None
 
 # ===== Asteroid Functions =====
-
-def _store_dataframe(filename: str, df_pickle: bytes) -> str:
-    """Atomically replace a source dataframe so workers never read a partial file."""
-    from data_paths import DATA_DIR, ensure_data_dirs
-    ensure_data_dirs()
-    cache_file = os.path.join(DATA_DIR, filename)
-    fd, temporary_path = tempfile.mkstemp(prefix=f".{filename}-", suffix=".tmp", dir=DATA_DIR)
-    try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(df_pickle)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary_path, cache_file)
-    except OSError:
-        try:
-            os.unlink(temporary_path)
-        except OSError:
-            pass
-        raise
-    return cache_file
-
-
-def store_asteroid_dataframe(df_pickle: bytes) -> None:
-    """Store asteroid DataFrame in the filesystem using an atomic replace."""
-    cache_file = _store_dataframe('asteroid_dataframe.pkl', df_pickle)
-
-    logger.info(f"Stored asteroid DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
 def get_asteroid_dataframe(max_age_seconds: int = 49 * 3600) -> bytes | None:
     """Retrieve cached asteroid DataFrame from FILESYSTEM (not PostgreSQL)."""
@@ -312,12 +284,6 @@ def get_sunpath_year(location_key: str, year_bucket: str,
             conn.commit()
 
 # ===== Comet Functions =====
-
-def store_comet_dataframe(df_pickle: bytes) -> None:
-    """Store comet DataFrame in the filesystem using an atomic replace."""
-    cache_file = _store_dataframe('comet_dataframe.pkl', df_pickle)
-
-    logger.info(f"Stored comet DataFrame in filesystem: {cache_file} ({len(df_pickle) / 1024 / 1024:.1f} MB)")
 
 def get_comet_dataframe(max_age_seconds: int = 49 * 3600) -> bytes | None:
     """Retrieve cached comet DataFrame from FILESYSTEM (not PostgreSQL)."""

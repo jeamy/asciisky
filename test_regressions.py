@@ -1,10 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import os
 import pickle
 from types import SimpleNamespace
 
+import pandas
 import pytest
 from fastapi import HTTPException
 
@@ -31,6 +33,8 @@ from api.on_demand_computation import OnDemandComputationConfig, OnDemandComputa
 from api.rabbitmq import task_publisher
 from api.rabbitmq.task_publisher import TaskPublisher
 from api.routes import admin_users
+import bright_asteroids
+import comets
 from config.interpolation_config import InterpolationConfigManager, SmartInterpolationConfig
 import db_utils
 import nightly_data_updater
@@ -61,6 +65,97 @@ def test_nightly_updater_detects_newer_source_data(monkeypatch, tmp_path):
     assert nightly_data_updater._data_refresh_reason() == (
         "MPCORB.DAT.gz is newer than asteroid_dataframe.pkl"
     )
+
+
+def test_unchanged_dataset_is_not_reprocessed(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    cache_dir = data_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    asteroid_source = cache_dir / "MPCORB.DAT.gz"
+    comet_source = cache_dir / "COMET_ELEMENTS.txt"
+    asteroid_dataframe = data_dir / "asteroid_dataframe.pkl"
+    comet_dataframe = data_dir / "comet_dataframe.pkl"
+
+    for path in (asteroid_source, comet_source):
+        path.write_bytes(b"data")
+    for path in (asteroid_dataframe, comet_dataframe):
+        path.write_bytes(pickle.dumps({"rows": 1}))
+    old_time = datetime.now().timestamp() - 3600
+    os.utime(asteroid_source, (old_time + 60, old_time + 60))
+    os.utime(comet_source, (old_time, old_time))
+    os.utime(asteroid_dataframe, (old_time, old_time))
+
+    monkeypatch.setattr(nightly_data_updater, "DATA_DIR", data_dir)
+    monkeypatch.setattr(nightly_data_updater, "MPCORB_PATH", asteroid_source)
+    monkeypatch.setattr(nightly_data_updater, "COMET_ELEMENTS_PATH", comet_source)
+    assert nightly_data_updater._data_refresh_reason() is not None
+
+    assert nightly_data_updater._store_dataframe_if_changed(
+        {"rows": 1}, "asteroid_dataframe.pkl"
+    ) is False
+
+    assert nightly_data_updater._data_refresh_reason() is None
+    assert sorted(path.name for path in data_dir.iterdir() if path.is_file()) == [
+        "asteroid_dataframe.pkl",
+        "comet_dataframe.pkl",
+    ]
+
+
+@pytest.mark.parametrize("ftp_disabled", [True, False])
+def test_update_functions_mark_unchanged_dataframes_current(tmp_path, monkeypatch, ftp_disabled):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = data_dir / "COMET_ELEMENTS.txt"
+    source.write_bytes(b"data")
+    comet_df = pandas.DataFrame({"designation": ["1P"]})
+    dataframe_file = data_dir / "comet_dataframe.pkl"
+    dataframe_file.write_bytes(pickle.dumps(comet_df))
+    old_time = datetime.now().timestamp() - 3600
+    os.utime(dataframe_file, (old_time, old_time))
+
+    monkeypatch.setattr(nightly_data_updater, "DATA_DIR", data_dir)
+    monkeypatch.setattr(nightly_data_updater, "COMET_ELEMENTS_PATH", source)
+    monkeypatch.setattr(nightly_data_updater, "ftp_download_enabled", lambda: not ftp_disabled)
+    monkeypatch.setattr(nightly_data_updater, "ensure_data_dirs", lambda: None)
+    monkeypatch.setattr(nightly_data_updater, "download_file_from_ftp", lambda *_args: None)
+    monkeypatch.setattr(comets, "load_comet_dataframe", lambda use_cache: comet_df)
+    monkeypatch.setattr(db_utils, "get_database_stats", lambda: {"comets_count": 1})
+
+    assert nightly_data_updater.update_comet_data() is True
+    assert dataframe_file.stat().st_mtime > old_time
+
+
+def test_changed_dataframe_replaces_stored_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(nightly_data_updater, "DATA_DIR", tmp_path)
+    stored = tmp_path / "dataframe.pkl"
+
+    assert nightly_data_updater._store_dataframe_if_changed({"rows": 1}, stored.name) is True
+    assert nightly_data_updater._store_dataframe_if_changed({"rows": 2}, stored.name) is True
+    assert pickle.loads(stored.read_bytes()) == {"rows": 2}
+    assert nightly_data_updater._store_dataframe_if_changed({"rows": 2}, stored.name) is False
+
+
+@pytest.mark.parametrize(
+    ("payload", "content_length", "expected"),
+    [(b"new", 3, True), (b"ne", 3, False), (b"", 0, False)],
+)
+def test_mpcorb_download_only_replaces_file_when_complete(
+    tmp_path, monkeypatch, payload, content_length, expected
+):
+    target = tmp_path / "MPCORB.DAT.gz"
+    target.write_bytes(b"old")
+
+    class Response(io.BytesIO):
+        def info(self):
+            return {"Content-Length": content_length}
+
+    monkeypatch.setattr(bright_asteroids, "MPCORB_FILE", target)
+    monkeypatch.setattr(
+        bright_asteroids.urllib.request, "urlopen", lambda *_args, **_kwargs: Response(payload)
+    )
+
+    assert bright_asteroids.download_mpcorb_file() is expected
+    assert target.read_bytes() == (b"new" if expected else b"old")
 
 
 def test_initial_data_refreshes_stale_dataset_even_if_updated_today(monkeypatch):

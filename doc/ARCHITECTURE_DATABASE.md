@@ -8,11 +8,11 @@ Raw MPC orbital data for asteroids and comets is stored as pickled Pandas
 DataFrames on the filesystem (not in PostgreSQL tables):
 
 - **Asteroids:** `DATA_DIR/asteroid_dataframe.pkl`
-  - Written by `db_utils.store_asteroid_dataframe(df_pickle)`.
+  - Written by `nightly_data_updater._store_dataframe_if_changed()`.
   - Read by `db_utils.get_asteroid_dataframe(max_age_seconds=49*3600)` and
     `bright_asteroids.load_asteroid_dataframe()`.
 - **Comets:** `DATA_DIR/comet_dataframe.pkl`
-  - Written by `db_utils.store_comet_dataframe(df_pickle)`.
+  - Written by `nightly_data_updater._store_dataframe_if_changed()`.
   - Read by `db_utils.get_comet_dataframe(max_age_seconds=49*3600)` and
     `comets.load_comet_dataframe()`.
 

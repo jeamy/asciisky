@@ -122,7 +122,7 @@ Each comet entry returned by `load_comets()` includes:
 
 - Filesystem DataFrame cache
   - File: `comet_dataframe.pkl` under `DATA_DIR`.
-  - Written by `db_utils.store_comet_dataframe()` and read via
+  - Written by `nightly_data_updater._store_dataframe_if_changed()` and read via
     `db_utils.get_comet_dataframe()` / `comets.load_comet_dataframe()`.
   - TTL: 31 days (`COMET_DF_CACHE_TTL_SECONDS`).
 - PostgreSQL position cache (table `cached_positions`)

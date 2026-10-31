@@ -126,8 +126,9 @@ def download_mpcorb_file():
     try:
         logger.info("Downloading MPCORB.DAT.gz from %s", MPCORB_URL)
         MPCORB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = MPCORB_FILE.with_suffix(MPCORB_FILE.suffix + '.part')
 
-        with urllib.request.urlopen(MPCORB_URL, timeout=300) as response, MPCORB_FILE.open('wb') as out_file:
+        with urllib.request.urlopen(MPCORB_URL, timeout=300) as response, temp_file.open('wb') as out_file:
             file_size = int(response.info().get('Content-Length', 0))
             if file_size:
                 logger.info("File size: %.1f MB", file_size / (1024 * 1024))
@@ -148,12 +149,17 @@ def download_mpcorb_file():
                         downloaded * 100 / file_size,
                     )
 
-        logger.info("Download complete. File saved to %s", MPCORB_FILE)
+        if file_size and downloaded != file_size:
+            logger.error("Download incomplete: got %s of %s bytes", downloaded, file_size)
+            return False
+        if downloaded == 0:
+            logger.error("Download failed: File is empty")
+            return False
 
-        if MPCORB_FILE.exists() and MPCORB_FILE.stat().st_size > 0:
-            return True
-        logger.error("Download failed: File is empty or does not exist")
-        return False
+        # Atomic replace: FTP clients and readers never see a partial file.
+        temp_file.replace(MPCORB_FILE)
+        logger.info("Download complete. File saved to %s", MPCORB_FILE)
+        return True
     except Exception as e:
         logger.error("Error downloading MPCORB.DAT.gz: %s", e)
         return False
