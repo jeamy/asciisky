@@ -158,11 +158,10 @@ export class SkyView {
         const { w: rw, h: rh } = this._glyphRatio();
         const v = this.view;
         let font = Math.min(CONFIG.MAX_FONT_PX, W / (HORIZON_COLS * rw), H / (HORIZON_ROWS * rh));
-        if (v.mode === 'planisphere' || v.fov < 360) {
-            // Readable glyphs, as many cells as fit.  The planisphere uses the
-            // horizon's font and fills the whole area.
-            font = Math.max(CONFIG.MIN_FONT_PX, font);
-        }
+        // A part of the horizon: readable glyphs, as many columns as fit.  The
+        // planisphere always takes the horizon's font (for the same field of
+        // view) and fills the whole area with it.
+        if (v.fov < 360) font = Math.max(CONFIG.MIN_FONT_PX, font);
         if (v.mode === 'planisphere') {
             const cols = clamp(Math.floor(W / (font * rw)), 24, 240);
             const rows = clamp(Math.floor(H / (font * rh)), 12, 120);
