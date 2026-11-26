@@ -70,7 +70,9 @@ async def trigger_small_body_worker(
 
 def resolve_magnitude_filter(request: Request, filter_key: str, default: float) -> float:
     """
-    Resolve magnitude filter value: DB for logged-in users, file for anonymous.
+    Resolve the magnitude filter: DB for signed-in users, the session for
+    anonymous visitors, otherwise the server defaults.  Blocking (DB): call it
+    from a worker thread.
     
     Args:
         request: FastAPI request (for session user_id)
@@ -79,14 +81,16 @@ def resolve_magnitude_filter(request: Request, filter_key: str, default: float) 
         
     Returns: resolved max magnitude as float
     """
+    from api.routes.filters import get_user_filters_from_db, session_filters
+
     user_id = request.session.get('user_id') if hasattr(request, 'session') else None
     if user_id:
-        try:
-            from api.routes.filters import get_user_filters_from_db
-            filters = get_user_filters_from_db(user_id)
-            if filters:
-                return float(filters.get(filter_key, default))
-        except Exception:
-            pass
+        filters = get_user_filters_from_db(user_id)
+        if filters and filter_key in filters:
+            return float(filters[filter_key])
+    else:
+        filters = session_filters(request)
+        if filters and filter_key in filters:
+            return float(filters[filter_key])
     filters = app_settings.get_magnitude_filters()
     return float(filters.get(filter_key, default))

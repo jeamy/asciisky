@@ -75,7 +75,7 @@ def _wait_for_shutdown(seconds):
 
 def get_rabbitmq_connection():
     """Erstelle RabbitMQ-Verbindung"""
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@127.0.0.1:5672/')
+    rabbitmq_url = settings.RABBITMQ_URL
     heartbeat = int(os.getenv('RABBITMQ_HEARTBEAT', '60'))
     return worker_utils.setup_rabbitmq_connection(rabbitmq_url, heartbeat=heartbeat)
 
@@ -136,7 +136,7 @@ def get_target_locations() -> list[dict[str, Any]]:
     try:
         locations_file = os.path.join(os.getcwd(), 'precompute_locations.json')
         if os.path.exists(locations_file):
-            with open(locations_file, 'r') as f:
+            with open(locations_file) as f:
                 file_locs = json.load(f)
                 for loc in file_locs:
                     locations.append({
@@ -246,7 +246,6 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
     tasks = []
     skipped = 0
     skipped_queue = 0  # Bereits in Queue
-    total_possible = 0
     now = datetime.now(timezone.utc)
 
     # Runde auf volle Stunde
@@ -286,7 +285,6 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
                     pass
 
                 if not sunpath_cached:
-                    total_possible += 1
                     if task_key not in existing_tasks:
                         tasks.append({
                             'kind': 'sunpath',
@@ -329,7 +327,6 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
 
             # Task für Asteroiden nur wenn nicht gecached UND nicht in Queue
             if not asteroid_cached:
-                total_possible += 1
                 if asteroid_task_key not in existing_tasks:
                     tasks.append({
                         'kind': 'asteroids',
@@ -340,7 +337,7 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
                             'name': name
                         },
                         'time_bucket': asteroid_bucket_dt.isoformat(),
-                        'magnitude': 20.0,  # Default max magnitude
+                        'magnitude': bright_asteroids.CACHE_MAX_MAGNITUDE,
                         'priority': priority,
                         'bucket_hours': asteroid_bucket_hours,
                     })
@@ -360,7 +357,6 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
 
             # Task für Kometen nur wenn nicht gecached UND nicht in Queue
             if not comet_cached:
-                total_possible += 1
                 if comet_task_key not in existing_tasks:
                     tasks.append({
                         'kind': 'comets',
@@ -371,7 +367,7 @@ def create_precompute_tasks(locations: list[dict], start_offset: int, end_offset
                             'name': name
                         },
                         'time_bucket': comet_bucket_dt.isoformat(),
-                        'magnitude': 14.0,  # Comet max magnitude
+                        'magnitude': comets.CACHE_MAX_MAGNITUDE,
                         'priority': priority,
                         'bucket_hours': comet_bucket_hours,
                     })
@@ -560,8 +556,8 @@ def main():
                 start_offset = -2 if current_horizon == 0 else current_horizon
                 end_offset = min(current_horizon + BATCH_SIZE_HOURS, hours_ahead)
 
-                # Sunpath nur im ersten Batch (Stunde 0-24) mitberechnen
-                include_yearly = (start_offset == 0)
+                # Sunpath only in the first batch of a cycle (start_offset is -2 there, never 0)
+                include_yearly = (current_horizon == 0)
 
                 tasks = create_precompute_tasks(
                     locations,

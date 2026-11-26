@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 """
-Unified Worker - Optimiert für Smart Interpolation
-=================================================
+Unified worker for precompute tasks.
 
-Einheitlicher Worker für Precompute, On-Demand und RPC Tasks
-mit Integration in die Smart Interpolation Architektur.
-
-Features:
-- ✅ Shared Skyfield Resources (Memory-Effizienz)
-- ✅ Integration mit Smart Interpolation
-- ✅ Adaptive Task-Verarbeitung
-- ✅ Performance-Monitoring
-- ✅ Health Checks und Metrics
-- ✅ Graceful Shutdown
+Consumes the precompute queues (coordinator and API cache misses), computes
+asteroid, comet and sunpath buckets with shared Skyfield resources and stores
+them in PostgreSQL.  A failed task is retried once and then routed to the
+dead-letter queue ``computation.dead``.
 """
 
-import hashlib
 import json
 import logging
 import os
@@ -35,11 +27,9 @@ import psutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import bright_asteroids
 import comets
-from api.astronomical_corrections import AstronomicalCorrector
+import settings
 from api.computation import compute_sunpath_year
-from api.on_demand_computation import OnDemandComputationService
 from cache_utils import location_key, normalize_location
-from config.interpolation_config import get_interpolation_config
 from db_utils import (
     computation_lock,
     database_identity,
@@ -64,30 +54,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def generate_computation_message_id(task_type: str, location_key: str, time_bucket: str, **kwargs) -> str:
-    """Generate unique message ID for computation deduplication"""
-    # Create deterministic hash from computation parameters
-    components = [task_type, location_key, time_bucket]
-
-    # Add optional parameters sorted by key
-    for key in sorted(kwargs.keys()):
-        components.append(f"{key}:{kwargs[key]}")
-
-    computation_string = "|".join(components)
-    return hashlib.sha256(computation_string.encode()).hexdigest()
-
-
-def generate_precompute_message_id(lat: float, lon: float, elevation: float, time_bucket: str, object_type: str) -> str:
-    """Generate message ID for precompute tasks"""
-    loc_key = location_key(lat, lon, elevation)
-    return generate_computation_message_id(
-        task_type=f"precompute_{object_type}",
-        location_key=loc_key,
-        time_bucket=time_bucket,
-        object_type=object_type
-    )
-
-
 @dataclass
 class WorkerMetrics:
     """Performance-Metriken für den Worker"""
@@ -101,9 +67,7 @@ class WorkerMetrics:
 
 
 class UnifiedWorker:
-    """
-    Unified Worker für alle Task-Typen mit Smart Interpolation Integration
-    """
+    """Worker for precompute tasks (asteroids, comets, sunpath)."""
 
     def __init__(self, worker_id: str, rabbitmq_url: str):
         self.worker_id = worker_id
@@ -119,11 +83,6 @@ class UnifiedWorker:
         self.loader = loader
         self.ts = ts
         self.eph = eph
-
-        # Smart Interpolation Integration
-        self.config = get_interpolation_config()
-        self.on_demand_service = OnDemandComputationService()
-        self.astronomical_corrector = AstronomicalCorrector()
 
         # Metrics
         self.metrics = WorkerMetrics()
@@ -201,31 +160,8 @@ class UnifiedWorker:
         worker_utils.declare_computation_queues(self.channel)
         logger.info("All queues and exchanges declared successfully")
 
-    def send_task_with_deduplication(self, queue_name: str, task_data: dict[str, Any],
-                                    message_id: str, priority: int = 0) -> bool:
-        """Send task with RabbitMQ deduplication"""
-        try:
-            self.channel.basic_publish(
-                exchange='',
-                routing_key=queue_name,
-                body=json.dumps(task_data),
-                properties=pika.BasicProperties(
-                    message_id=message_id,
-                    delivery_mode=2,  # Persistent
-                    priority=priority,
-                    expiration='300000'  # 5 minutes
-                )
-            )
-            logger.debug(f"Sent task to {queue_name} with deduplication ID: {message_id[:16]}...")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send task to {queue_name}: {e}")
-            return False
-
     def process_task(self, task: dict[str, Any]) -> bool:
-        """
-        Verarbeite einen Task mit Smart Interpolation Integration
-        """
+        """Process one task and record its outcome in the metrics."""
         start_time = time.time()
         task_type = task.get('type', 'precompute')
         task_summary = self._describe_task(task)
@@ -237,10 +173,6 @@ class UnifiedWorker:
         try:
             if task_type == 'precompute':
                 success = self._process_precompute_task(task)
-            elif task_type == 'on_demand':
-                success = self._process_on_demand_task(task)
-            elif task_type == 'rpc':
-                success = self._process_rpc_task(task)
             else:
                 logger.error(f"Unknown task type: {task_type}")
                 success = False
@@ -300,9 +232,12 @@ class UnifiedWorker:
             return False
 
         kind = task['kind']
+        if kind not in ('asteroids', 'comets', 'sunpath'):
+            # Never acknowledge a task nobody can compute.
+            logger.error("Unknown precompute kind: %s", kind)
+            return False
         location = task.get('location', {})
         time_bucket_str = task.get('time_bucket', '')
-        magnitude = task.get('magnitude', 20.0)
 
         if not location or not time_bucket_str:
             logger.error(f"Invalid precompute task: missing required fields. Task: {task}")
@@ -311,7 +246,7 @@ class UnifiedWorker:
         # Debug: Zeige komplette Task-Struktur
         logger.debug(f"Task structure: {json.dumps(task, indent=2)}")
 
-        lat, lon, elevation = location['latitude'], location['longitude'], location['elevation']
+        lat, lon, elevation = location['latitude'], location['longitude'], location.get('elevation', 0)
         location_name = location.get('name', f"Lat {lat:.2f}, Lon {lon:.2f}")
 
         dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
@@ -356,14 +291,15 @@ class UnifiedWorker:
                     return True
 
                 if kind == 'asteroids':
-                    # Nutze shared resources und globale Magnituden-Limits
-                    max_mag = min(magnitude, bright_asteroids.MAX_APPARENT_MAGNITUDE)
+                    # A bucket is shared by every user, so it always covers
+                    # the faintest filter; the API narrows it per request.
                     _, _, _, asteroid_df, _ = self.shared_resources.get_resources()
 
                     calculation_started = time.perf_counter()
                     asteroids_data = bright_asteroids.load_bright_asteroids(
                         self.loader, self.ts, self.eph, observer_loc,
-                        max_magnitude=max_mag,
+                        max_magnitude=bright_asteroids.CACHE_MAX_MAGNITUDE,
+                        use_cache=False,  # stored once below
                         current_dt=dt_utc,
                         dataframe=asteroid_df
                     )
@@ -376,14 +312,13 @@ class UnifiedWorker:
                     count = len(asteroids_data)
 
                 elif kind == 'comets':
-                    # Nutze konfigurierbare Limits
-                    max_comets = min(1000, self.config.max_comets)
                     _, _, _, _, comet_df = self.shared_resources.get_resources()
 
                     calculation_started = time.perf_counter()
                     comets_data = comets.load_comets(
                         self.ts, self.eph, observer_loc,
-                        max_comets=max_comets,
+                        max_comets=comets.MAX_COMETS_DEFAULT,
+                        use_cache=False,  # stored once below
                         current_dt=dt_utc,
                         dataframe=comet_df
                     )
@@ -395,27 +330,20 @@ class UnifiedWorker:
                     store_comet_positions(0, loc_key, tb, lat_norm, lon_norm, elev_norm, comets_data)
                     count = len(comets_data)
 
-                elif kind == 'sunpath':
-                    # Precompute yearly sunpath curve for this location
+                else:  # sunpath: the yearly curve for this location
+                    # Normalized like the API's own computation, so both store the same curve.
                     year = dt_utc.year
-                    result = compute_sunpath_year(lat, lon, elevation, year)
-
-                    loc_key = location_key(lat_norm, lon_norm, elev_norm)
-                    year_bucket = str(year)
+                    result = compute_sunpath_year(lat_norm, lon_norm, elev_norm, year)
                     try:
-                        store_sunpath_year(loc_key, year_bucket, lat, lon, elevation, result)
+                        store_sunpath_year(loc_key, str(year), lat_norm, lon_norm, elev_norm, result)
                     except Exception as e:
                         logger.error(f"Failed to store sunpath year in DB: {e}")
                         return False
 
                     count = len(result.get('points', []))
 
-                else:
-                    logger.error(f"Unknown kind: {kind}")
-                    count = 0
-
         except Exception as e:
-            logger.error(f"Failed to acquire Advisory Lock for {computation_key}: {e}", exc_info=True)
+            logger.error(f"Precompute task {computation_key} failed: {e}", exc_info=True)
             return False
 
         with self._task_state_lock:
@@ -431,69 +359,6 @@ class UnifiedWorker:
                 calculation_seconds,
             )
         return True
-
-    def _process_on_demand_task(self, task: dict[str, Any]) -> bool:
-        """Verarbeite On-Demand Task mit Smart Interpolation"""
-        object_type = task['object_type']  # 'asteroids' or 'comets'
-        location = task['location']
-        time_bucket_str = task['time_bucket']
-        task_id = task.get('task_id', 'unknown')
-
-        dt_utc = datetime.fromisoformat(time_bucket_str.replace('Z', '+00:00'))
-        if dt_utc.tzinfo is None:
-            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-
-        logger.info(f"Processing on-demand {object_type} task {task_id}")
-
-        # Nutze On-Demand Service
-        if object_type == 'asteroids':
-            result = self.on_demand_service.compute_asteroid_bucket(
-                location['latitude'], location['longitude'], location['elevation'], dt_utc
-            )
-        else:
-            result = self.on_demand_service.compute_comet_bucket(
-                location['latitude'], location['longitude'], location['elevation'], dt_utc
-            )
-
-        success = result.status.value in {'success', 'cached'}
-
-        # Veröffentliche Status
-        self._publish_status(task_id, result.status.value, 100 if success else 0)
-
-        logger.info(f"✅ On-demand {object_type} task {task_id} completed: {result.status.value}")
-        return success
-
-    def _process_rpc_task(self, task: dict[str, Any]) -> bool:
-        """Verarbeite RPC Task (kompatibel mit bestehenden asteroid/comet workers)"""
-        # Implementierung für bestehende RPC-Kompatibilität
-        return self._process_on_demand_task(task)
-
-    def _publish_status(self, task_id: str, status: str, progress: int):
-        """Veröffentliche Task-Status"""
-        try:
-            status_msg = {
-                'task_id': task_id,
-                'status': status,
-                'progress': progress,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'worker_id': self.worker_id,
-                'worker_type': 'unified'
-            }
-
-            props = pika.BasicProperties(
-                delivery_mode=1,
-                content_type='application/json'
-            )
-
-            self.channel.basic_publish(
-                exchange='',
-                routing_key='computation.status',
-                properties=props,
-                body=json.dumps(status_msg)
-            )
-
-        except Exception as e:
-            logger.error(f"Error publishing status: {e}")
 
     def _update_metrics(self, success: bool, processing_time: float):
         """Aktualisiere Worker-Metriken"""
@@ -539,10 +404,8 @@ class UnifiedWorker:
             'last_task': last_task,
         }
 
-    # Task types that go through a persistent publication claim.  ``kind``
-    # (precompute/sunpath) or ``object_type`` (on-demand pre-warm) is
-    # resolved by ``precompute_task_key`` itself.
-    _CLAIMED_TASK_TYPES = frozenset({'precompute', 'on_demand'})
+    # Task types that go through a persistent publication claim.
+    _CLAIMED_TASK_TYPES = frozenset({'precompute'})
 
     def _release_claim(self, task: dict[str, Any], context: str) -> None:
         if task.get('type', 'precompute') not in self._CLAIMED_TASK_TYPES:
@@ -554,9 +417,19 @@ class UnifiedWorker:
             logger.exception("Could not release %s claim", context)
 
     def callback(self, ch, method, _properties, body):
-        """RabbitMQ Callback mit optimierter Fehlerbehandlung"""
+        """Ack a processed task; retry a failed one once, then dead-letter it."""
         try:
             task = json.loads(body)
+        except (TypeError, ValueError) as exc:
+            # A message that is not JSON can never succeed: dead-letter it
+            # instead of requeueing it forever.
+            logger.error("Undecodable task message: %s", exc)
+            if self._publish_dead_task(ch, {'raw': body.decode('utf-8', 'replace') if isinstance(body, bytes) else str(body)}, "undecodable message"):
+                self._safe_ack(ch, method.delivery_tag)
+            else:
+                self._safe_nack(ch, method.delivery_tag, requeue=True)
+            return
+        try:
             success = self.process_task(task)
 
             if success:
@@ -581,8 +454,13 @@ class UnifiedWorker:
                     logger.warning("Task failed, requeued for retry")
 
         except Exception as e:
+            # Same retry policy as a failed task: one redelivery, then the DLQ.
             logger.error(f"Callback error: {e}", exc_info=True)
-            self._safe_nack(ch, method.delivery_tag, requeue=True)
+            if getattr(method, 'redelivered', False) and self._publish_dead_task(ch, task, f"callback error: {e}"):
+                self._release_claim(task, "failed")
+                self._safe_ack(ch, method.delivery_tag)
+            else:
+                self._safe_nack(ch, method.delivery_tag, requeue=True)
 
     def _safe_ack(self, ch, delivery_tag):
         """basic_ack mit Fehlerbehandlung für geschlossene Channels"""
@@ -629,8 +507,7 @@ class UnifiedWorker:
 
         self.running = True
 
-        # Health publishing owns a separate RabbitMQ connection so long-running
-        # task callbacks cannot delay monitor heartbeats.
+        # Health is logged from its own thread so long tasks cannot delay it.
         heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         heartbeat_thread.start()
 
@@ -661,9 +538,6 @@ class UnifiedWorker:
 
             logger.info(f"Worker {self.worker_id} started, consuming from all queues...")
 
-            # Sende initialen Heartbeat
-            self._publish_health_status()
-
             try:
                 # Blocking consume
                 self.channel.start_consuming()
@@ -685,46 +559,23 @@ class UnifiedWorker:
         self.stop()
 
     def _heartbeat_loop(self):
-        """Publish health over a connection owned exclusively by this thread."""
-        connection = None
-        channel = None
+        """Log the worker's health every 30 seconds."""
         while self.running:
+            time.sleep(30)
+            if not self.running:
+                break
             try:
-                time.sleep(30)
-                if self.running:
-                    health = self.get_health_status()
-                    task = health['current_task'] or health['last_task']
-                    task_label = self._format_task_for_log(
-                        task,
-                        current=health['current_task'] is not None,
-                    )
-                    logger.info(
-                        f"Health: {health['tasks_processed']} tasks, "
-                        f"{health['success_rate']:.2%} success, "
-                        f"{health['memory_usage_mb']:.1f}MB mem, "
-                        f"{task_label}"
-                    )
-                    if not connection or connection.is_closed:
-                        params = pika.URLParameters(self.rabbitmq_url)
-                        params.heartbeat = 60
-                        params.blocked_connection_timeout = 30
-                        connection = pika.BlockingConnection(params)
-                        channel = connection.channel()
-                    self._publish_health_status(channel)
+                health = self.get_health_status()
+                task = health['current_task'] or health['last_task']
+                task_label = self._format_task_for_log(task, current=health['current_task'] is not None)
+                logger.info(
+                    f"Health: {health['tasks_processed']} tasks, "
+                    f"{health['success_rate']:.2%} success, "
+                    f"{health['memory_usage_mb']:.1f}MB mem, "
+                    f"{task_label}"
+                )
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
-                try:
-                    if connection and connection.is_open:
-                        connection.close()
-                except Exception:
-                    pass
-                connection = None
-                channel = None
-        try:
-            if connection and connection.is_open:
-                connection.close()
-        except Exception:
-            pass
         logger.info("Heartbeat thread exiting")
 
     @staticmethod
@@ -754,73 +605,6 @@ class UnifiedWorker:
         while not self.shutdown_requested and time.monotonic() < deadline:
             time.sleep(max(0.0, min(0.25, deadline - time.monotonic())))
 
-    def _publish_health_status(self, channel=None):
-        """Publish health on the supplied thread-owned channel."""
-        health = self.get_health_status()
-
-        try:
-            heartbeat_msg = {
-                'worker_id': self.worker_id,
-                'worker_type': 'unified',
-                'status': health['status'],
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'tasks_processed': health['tasks_processed'],
-                'tasks_failed': health['tasks_failed'],
-                'success_rate': health['success_rate'],
-                'memory_usage_mb': health['memory_usage_mb'],
-                'cpu_usage_percent': health['cpu_usage_percent'],
-                'uptime_seconds': health['uptime_seconds'],
-                'current_task': health['current_task'],
-                'last_task': health['last_task'],
-            }
-
-            props = pika.BasicProperties(
-                delivery_mode=1,
-                content_type='application/json'
-            )
-
-            publish_channel = channel or self.channel
-            if publish_channel and publish_channel.is_open:
-                publish_channel.basic_publish(
-                    exchange='',
-                    routing_key='worker.health',
-                    properties=props,
-                    body=json.dumps(heartbeat_msg)
-                )
-
-                publish_channel.basic_publish(
-                    exchange='',
-                    routing_key='computation.status',
-                    properties=props,
-                    body=json.dumps(heartbeat_msg)
-                )
-
-        except Exception as e:
-            logger.error(f"Error publishing health status: {e}")
-
-    def send_precompute_task_with_deduplication(self, kind: str, location: dict[str, Any],
-                                            time_bucket: str, magnitude: float = 20.0) -> bool:
-        """Send precompute task with RabbitMQ deduplication"""
-        task_data = {
-            'type': 'precompute',
-            'kind': kind,
-            'location': location,
-            'time_bucket': time_bucket,
-            'magnitude': magnitude,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-
-        # Generate deduplication message ID
-        message_id = generate_precompute_message_id(
-            location['latitude'],
-            location['longitude'],
-            location['elevation'],
-            time_bucket,
-            kind
-        )
-
-        return self.send_task_with_deduplication('precompute.tasks', task_data, message_id, priority=5)
-
     def stop(self):
         """Stoppe den Worker gracefully"""
         logger.info(f"Stopping Unified Worker {self.worker_id}")
@@ -839,8 +623,6 @@ class UnifiedWorker:
         logger.info(f"Worker {self.worker_id} stopped. Final stats: {health}")
 
 
-# Removed: wait_for_database() - now using worker_utils.wait_for_database()
-
 def wait_for_database(worker_id: str):
     """Wrapper for backward compatibility with start_unified_worker.py"""
     return worker_utils.wait_for_database(worker_id, check_both=True)
@@ -855,7 +637,7 @@ def main():
         hostname = socket.gethostname()
         worker_id = f'unified-worker-{hostname}'
 
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    rabbitmq_url = settings.RABBITMQ_URL
 
     logger.info("=" * 60)
     logger.info(f"Unified Worker [{worker_id}] - Starting")

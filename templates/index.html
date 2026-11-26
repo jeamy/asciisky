@@ -1,788 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="de" data-theme="green">
 <head>
-    <title>ASCII Sky - Celestial Tracker</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="./static/css/navigationArrows.css">
-    <link rel="stylesheet" href="./static/css/loadingIndicator.css">
-    <link rel="stylesheet" href="./static/css/labels.css">
-    <link rel="stylesheet" href="./static/css/app.css">
-    <link rel="stylesheet" href="./static/css/timeControls.css">
-    <link rel="stylesheet" href="./static/css/timeInputDialog.css">
-    <link rel="stylesheet" href="./static/css/objectCountDisplay.css">
-    <link rel="stylesheet" href="./static/css/constellations.css">
-    <link rel="stylesheet" href="./static/css/messier.css">
-    <link rel="stylesheet" href="./static/css/visibleObjects.css">
-    <link rel="stylesheet" href="./static/css/magnitudeFilter.css">
-    <link rel="stylesheet" href="./static/css/sunpathOverlay.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#050805">
+    <meta name="description" content="ASCII Sky: der Himmel über deinem Standort als ASCII-Karte">
+    <title>ASCII Sky</title>
+    <script>
+        // Apply the stored theme before the first paint (no flash of green).
+        try {
+            var s = JSON.parse(localStorage.getItem('asciisky_settings') || 'null');
+            if (s && ['green', 'red', 'blue', 'amber'].indexOf(s.theme) >= 0) document.documentElement.dataset.theme = s.theme;
+            if (s && (s.language === 'de' || s.language === 'en')) document.documentElement.lang = s.language;
+        } catch (e) { /* storage unavailable */ }
+    </script>
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/sky.css">
+    <link rel="stylesheet" href="/static/css/components.css">
 </head>
 <body>
-<header>
-    <h1 id="app-title">🌌 ASCII Sky Tracker</h1>
-    <div class="theme-controls" aria-label="Color themes">
-        <button id="theme-red" class="theme-btn" title="Red theme">R</button>
-        <button id="theme-green" class="theme-btn active" title="Green theme">G</button>
-        <button id="theme-blue" class="theme-btn" title="Blue theme">B</button>
-        <button id="theme-amber" class="theme-btn" title="Amber theme">A</button>
+<a class="skip-link" href="#sky" data-i18n="skip_to_sky">Zum Himmel</a>
+
+<header class="app-bar">
+    <button id="location-btn" class="app-title" type="button">
+        <span class="brand" aria-hidden="true">✦</span>
+        <span class="title-text">
+            <span class="app-name" data-i18n="app_title">ASCII Sky</span>
+            <span id="location-name" class="location-name"></span>
+        </span>
+    </button>
+
+    <div id="time-bar" class="time-bar" role="group" data-i18n-aria="sim_time_controls">
+        <button id="time-day-minus" class="icon-btn" type="button" data-i18n-title="help_day_minus">«</button>
+        <button id="time-hour-minus" class="icon-btn" type="button" data-i18n-title="help_hour_minus">‹</button>
+        <button id="time-display" class="time-display" type="button" data-i18n-title="click_to_set_time">
+            <span id="time-date"></span>
+            <span id="time-clock"></span>
+            <span id="time-sim" class="sim-badge" hidden data-i18n="sim_badge">SIM</span>
+        </button>
+        <button id="time-hour-plus" class="icon-btn" type="button" data-i18n-title="help_hour_plus">›</button>
+        <button id="time-day-plus" class="icon-btn" type="button" data-i18n-title="help_day_plus">»</button>
+        <button id="time-now" class="icon-btn" type="button" data-i18n-title="help_now">⟳</button>
     </div>
-    <div class="header-controls">
-        <button id="help-btn" class="control-btn" title="Hilfe">?</button>
-        <button id="location-btn" class="control-btn" title="Standort ändern">📍</button>
-        <button id="auth-btn" class="control-btn" title="Login / Registrieren">👤</button>
-        <div class="language-selector">
-            <button id="lang-de" class="lang-btn active">DE</button>
-            <button id="lang-en" class="lang-btn">EN</button>
-        </div>
-    </div>
-    <div class="status-bar">
-        <div id="click-info">Click on any object for details</div>
-        <div id="last-updated">-</div>
+
+    <div class="app-actions">
+        <span id="loading" class="loading-dot" hidden data-i18n-title="loading"></span>
+        <button id="appearance-btn" class="icon-btn" type="button" data-i18n-title="appearance">🎨</button>
+        <button id="auth-btn" class="icon-btn" type="button" data-i18n-title="login_register">👤</button>
+        <button id="help-btn" class="icon-btn" type="button" data-i18n-title="help_title">?</button>
     </div>
 </header>
-    
-<div class="controls">
-    <div class="object-list" id="object-list">
-        <!-- Will be populated by JavaScript -->
-    </div>
-    <!-- Magnitude-Filter wurden entfernt -->
-</div>
-    
-<!-- Simulated Time Controls (extended): << < + > >> -->
-<div id="sim-time-controls" class="sim-time-controls sim-time-extended">
-    <div class="sim-time-buttons-wrapper">
-        <button id="sim-day-minus" class="sim-time-btn" title="-1 Tag">&laquo;</button>
-        <button id="sim-hour-minus" class="sim-time-btn" title="-1 Stunde">&lsaquo;</button>
-        <button id="sim-now" class="sim-time-btn sim-time-now" title="Jetzt">+</button>
-        <button id="sim-hour-plus" class="sim-time-btn" title="+1 Stunde">&rsaquo;</button>
-        <button id="sim-day-plus" class="sim-time-btn" title="+1 Tag">&raquo;</button>
-    </div>
-    <div id="sim-time-local" class="sim-time-local">—</div>
-</div>
-    
-<div id="loading-indicator" class="loading-indicator" hidden>
-    <span class="spinner" aria-hidden="true"></span>
-    <span class="text">Loading...</span>
-</div>
-    
-<div class="main-layout">
-    <div class="left-panels">
-        <aside id="visible-objects-panel" class="visible-objects-panel" aria-live="polite"></aside>
-    </div>
-    <div class="sky-panel">
-        <div id="view-mode-tabs" class="view-mode-tabs" role="tablist" aria-label="Sky view mode">
-            <button id="view-tab-horizon" class="view-tab active" role="tab" aria-selected="true">Horizon</button>
-            <button id="view-tab-planisphere" class="view-tab" role="tab" aria-selected="false">Planisphere</button>
+
+<main class="layout">
+    <aside id="list-panel" class="panel list-panel" aria-labelledby="list-title"></aside>
+
+    <section class="sky-panel" data-i18n-aria="sky_region">
+        <div class="sky-toolbar">
+            <div class="segmented" role="tablist" data-i18n-aria="view_mode">
+                <button id="view-horizon" class="seg-btn" type="button" role="tab" aria-selected="true" data-i18n="horizon_view">Horizont</button>
+                <button id="view-planisphere" class="seg-btn" type="button" role="tab" aria-selected="false" data-i18n="planisphere_view">Planisphäre</button>
+            </div>
+            <div class="layer-toggles" role="group" data-i18n-aria="layers">
+                <button id="layer-constellations" class="toggle-btn" type="button" aria-pressed="false" data-i18n-title="constellations">✦</button>
+                <button id="layer-messier" class="toggle-btn" type="button" aria-pressed="false" data-i18n-title="messier">✧</button>
+                <button id="layer-grid" class="toggle-btn" type="button" aria-pressed="true" data-i18n-title="grid">⌗</button>
+                <button id="sunpath-btn" class="toggle-btn" type="button" data-i18n-title="sunpath_curve">☉</button>
+            </div>
+            <div class="zoom-controls" role="group" data-i18n-aria="zoom">
+                <button id="zoom-out" class="icon-btn" type="button" data-i18n-title="zoom_out">−</button>
+                <span id="zoom-label" class="zoom-label"></span>
+                <button id="zoom-in" class="icon-btn" type="button" data-i18n-title="zoom_in">+</button>
+            </div>
         </div>
-        <div id="sky-container" class="sky-container" role="tabpanel" aria-labelledby="view-tab-horizon">
-            <!-- Sky will be rendered here -->
+
+        <div id="status-banner" class="status-banner" role="status" hidden>
+            <span id="status-text"></span>
+            <button id="status-retry" class="btn btn-small" type="button" data-i18n="retry">Erneut versuchen</button>
         </div>
-    </div>
-</div>
-    
-<script type="module">
-    import { SkyRenderer } from './static/js/skyRenderer.js';
-    import { initializeSkyTracker, updateSky } from './static/js/skyManager.js';
-    import { CONFIG, OBJECT_SYMBOLS, ASTRO_CONSTANTS } from './static/js/constants.js';
-    import { setLanguage, getCurrentLanguage, t } from './static/js/i18n.js';
-    import { LocationDialog } from './static/js/locationDialog.js';
-    import { TimeInputDialog } from './static/js/timeInputDialog.js';
-    import { settingsManager } from './static/js/settings.js';
-    import { initAuthUI } from './static/js/auth.js';
-    import { initVisibleObjectsList, updateVisibleObjectsList } from './static/js/visibleObjectsList.js';
-    import { MagnitudeFilterDialog } from './static/js/magnitudeFilterDialog.js';
-    import { SunpathOverlay } from './static/js/sunpathOverlay.js';
-    
-    let renderer;
-    let locationDialog;
-    let magnitudeFilterDialog;
-    let sunpathOverlay;
-    
-    // Initialize app
-    document.addEventListener('DOMContentLoaded', async () => {
-        // 1) Einstellungen initialisieren und Session-Standort bevorzugen
-        await settingsManager.initialize();
 
-        // Gespeicherte Sprache anwenden (falls vorhanden)
-        try {
-            if (settingsManager && typeof settingsManager.getLanguage === 'function') {
-                const lang = settingsManager.getLanguage();
-                if (lang) {
-                    setLanguage(lang);
-                }
-            }
-        } catch (_) { /* noop */ }
+        <div id="sky" class="sky-viewport" tabindex="0" role="application" data-i18n-aria="sky_help_short"></div>
 
-        // 1b) Auth-Status initialisieren (Login/Registrierung/Logout)
-        try { await initAuthUI(); } catch (_) { /* noop */ }
+        <div class="sky-footer">
+            <button id="turn-left" class="icon-btn" type="button" data-i18n-title="turn_left">◁</button>
+            <span id="compass" class="compass" aria-live="polite"></span>
+            <button id="turn-right" class="icon-btn" type="button" data-i18n-title="turn_right">▷</button>
+            <span id="counts" class="counts"></span>
+        </div>
+    </section>
 
-        // 2) Renderer initialisieren (nutzt jetzt den Session-Standort)
-        renderer = initializeSkyTracker();
-        
-        // 3) Standort-Dialog initialisieren
-        locationDialog = new LocationDialog(handleLocationChange);
-        
-        // 3a) Magnitude-Filter-Dialog initialisieren
-        magnitudeFilterDialog = new MagnitudeFilterDialog();
-        
-        // 3b) Visible Objects Panel initialisieren (nach Renderer-Erstellung)
-        setTimeout(() => {
-            initVisibleObjectsList('visible-objects-panel', renderer, magnitudeFilterDialog);
-        }, 100);
-        
-        // 3d) Sunpath-Overlay initialisieren (SVG-Layer über der Sky-Ansicht)
-        const skyContainer = document.getElementById('sky-container');
-        if (skyContainer) {
-            sunpathOverlay = new SunpathOverlay(skyContainer);
-        }
-        try {
-            SunpathOverlay.preloadForCurrentLocation();
-        } catch (_) { /* noop */ }
+    <aside id="detail-panel" class="panel detail-panel" hidden></aside>
+</main>
 
-        // 4) UI nach kurzer Verzögerung aufbauen und Standort anwenden
-        setTimeout(() => {
-            setupObjectList();
-            setupLanguageButtons();
-            setupThemeButtons();
-            setupHelpButton();
-            setupLocationButton();
-            setupSimTimeControls();
-            setupMagnitudeFilters();
-            setupViewModeTabs();
-            updateUITexts();
-            
-            // Übernehme aktuellen (Session-)Standort in UI und SkyManager
-            loadSavedLocation();
-        }, 500);
-    });
-
-    function loadSavedLocation() {
-        try {
-            const loc = settingsManager.getLocation();
-            if (!loc) return;
-
-            // App-Titel aktualisieren
-            updateAppTitle(loc.name);
-
-            // Standort im SkyManager setzen und sofort updaten
-            if (renderer && renderer.skyManager) {
-                renderer.skyManager.setLocation(loc.latitude, loc.longitude, loc.elevation);
-            }
-
-            // Dialog-Defaults aktualisieren
-            if (locationDialog) {
-                locationDialog.currentLocation = {
-                    lat: loc.latitude,
-                    lon: loc.longitude,
-                    elevation: loc.elevation,
-                    name: loc.name || 'Unbekannt'
-                };
-            }
-
-        } catch (error) {
-            console.error('Error applying location after init:', error);
-        }
-    }
-        
-        // Funktion zum Einrichten der Sprachauswahl-Buttons
-        function setupLanguageButtons() {
-            const btnDE = document.getElementById('lang-de');
-            const btnEN = document.getElementById('lang-en');
-            
-            btnDE.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setLanguage === 'function') { settingsManager.setLanguage('de'); } } catch (_) { /* noop */ }
-                setLanguage('de');
-                updateLanguageButtons();
-                updateUITexts();
-                if (renderer) updateSky();
-            });
-            
-            btnEN.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setLanguage === 'function') { settingsManager.setLanguage('en'); } } catch (_) { /* noop */ }
-                setLanguage('en');
-                updateLanguageButtons();
-                updateUITexts();
-                if (renderer) updateSky();
-            });
-            
-            // Initialen Zustand setzen
-            updateLanguageButtons();
-        }
-
-        function setupThemeButtons() {
-            const body = document.body;
-            const btnRed = document.getElementById('theme-red');
-            const btnGreen = document.getElementById('theme-green');
-            const btnBlue = document.getElementById('theme-blue');
-            const btnAmber = document.getElementById('theme-amber');
-
-            if (!btnRed || !btnGreen || !btnBlue || !btnAmber) return;
-
-            const applyTheme = (theme) => {
-                body.classList.remove('theme-red', 'theme-blue', 'theme-amber');
-                // Green is default: no extra class; others use body.theme-*
-                if (theme === 'red') body.classList.add('theme-red');
-                else if (theme === 'blue') body.classList.add('theme-blue');
-                else if (theme === 'amber') body.classList.add('theme-amber');
-
-                btnRed.classList.toggle('active', theme === 'red');
-                btnGreen.classList.toggle('active', theme === 'green');
-                btnBlue.classList.toggle('active', theme === 'blue');
-                btnAmber.classList.toggle('active', theme === 'amber');
-            };
-
-            let initial = 'green';
-            try {
-                if (settingsManager && typeof settingsManager.getTheme === 'function') {
-                    const saved = settingsManager.getTheme();
-                    if (saved === 'red' || saved === 'blue' || saved === 'amber' || saved === 'green') {
-                        initial = saved;
-                    }
-                }
-            } catch (_) { /* noop */ }
-
-            applyTheme(initial);
-
-            btnRed.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('red'); } } catch (_) { /* noop */ }
-                applyTheme('red');
-            });
-            btnGreen.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('green'); } } catch (_) { /* noop */ }
-                applyTheme('green');
-            });
-            btnBlue.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('blue'); } } catch (_) { /* noop */ }
-                applyTheme('blue');
-            });
-            btnAmber.addEventListener('click', () => {
-                try { if (settingsManager && typeof settingsManager.setTheme === 'function') { settingsManager.setTheme('amber'); } } catch (_) { /* noop */ }
-                applyTheme('amber');
-            });
-        }
-        
-        // Aktualisiert die Sprachbuttons basierend auf der aktuellen Sprache
-        function updateLanguageButtons() {
-            const currentLang = getCurrentLanguage();
-            document.getElementById('lang-de').classList.toggle('active', currentLang === 'de');
-            document.getElementById('lang-en').classList.toggle('active', currentLang === 'en');
-        }
-        
-        // Aktualisiert alle UI-Texte basierend auf der aktuellen Sprache
-        function updateUITexts() {
-            document.getElementById('click-info').textContent = t('click_info');
-            
-            // Aktualisiere die View-Mode-Tabs
-            const horizonTab = document.getElementById('view-tab-horizon');
-            const planisphereTab = document.getElementById('view-tab-planisphere');
-            if (horizonTab && planisphereTab) {
-                const horizonLabel = t('horizon_view');
-                const planisphereLabel = t('planisphere_view');
-                horizonTab.textContent = horizonLabel;
-                planisphereTab.textContent = planisphereLabel;
-                horizonTab.title = horizonLabel;
-                planisphereTab.title = planisphereLabel;
-            }
-            
-            // Aktualisiere die Objektnamen in der Objektliste
-            document.querySelectorAll('.object-btn').forEach(btn => {
-                const name = btn.dataset.objectName;
-                if (name) {
-                    const displayName = t(name) || name.charAt(0).toUpperCase() + name.slice(1);
-                    // Erhalte das Symbol und füge es wieder hinzu
-                    const symbol = OBJECT_SYMBOLS[name] || '';
-                    btn.innerHTML = `${symbol} ${displayName}`;
-                }
-            });
-            
-            // Aktualisiere den Sternbilder-Button, wenn vorhanden
-            const constellationBtn = document.getElementById('constellation-toggle');
-            if (constellationBtn) {
-                constellationBtn.innerHTML = '✦ ' + t('constellations');
-                constellationBtn.title = t('toggle_constellations');
-            }
-
-            // Aktualisiere den Sonnenbahn-Button, wenn vorhanden
-            const sunpathBtn = document.getElementById('sunpath-toggle');
-            if (sunpathBtn) {
-                sunpathBtn.innerHTML = '☉ ' + t('sunpath_curve');
-                sunpathBtn.title = t('toggle_sunpath');
-            }
-            
-            // Aktualisiere den Standort-Button-Tooltip
-            document.getElementById('location-btn').title = t('location_settings');
-            
-            // Aktualisiere den App-Titel mit i18n
-            updateAppTitle();
-
-            // Simulierte Zeit: kompakte UI hat keine Labels
-            updateSimPreview();
-        }
-        
-        // Funktion zum Aktualisieren des App-Titels
-        function updateAppTitle(locationName) {
-            const appTitle = document.getElementById('app-title');
-            if (locationName) {
-                appTitle.textContent = `🌌 ${t('app_title')} - ${locationName}`;
-            } else {
-                appTitle.textContent = `🌌 ${t('app_title')}`;
-            }
-        }
-        
-        // Funktion zum Einrichten des Hilfe-Buttons
-        function setupHelpButton() {
-            const helpBtn = document.getElementById('help-btn');
-            helpBtn.addEventListener('click', () => {
-                loadCSSFile('./static/css/dialogStyles.css');
-                showHelpDialog();
-            });
-        }
-
-        // Funktion zum Anzeigen des Hilfe-Dialogs
-        function showHelpDialog() {
-            const helpContent = `
-                <h3>${t('help_title') || 'Hilfe - ASCII Sky Tracker'}</h3>
-                
-                <h4>${t('help_controls') || 'Steuerung'}</h4>
-                <ul>
-                    <li><strong>📍 ${t('location_button') || 'Standort-Button'}:</strong> ${t('help_location') || 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)'}</li>
-                    <li><strong>« ‹ + › »:</strong> ${t('help_time_controls') || 'Zeitsteuerung - Tag zurück, Stunde zurück, Jetzt (Echtzeit), Stunde vor, Tag vor'}</li>
-                    <li><strong>${t('help_time_display') || 'Zeitanzeige'}:</strong> ${t('help_time_display_desc') || 'Klickbar, um ein beliebiges Datum und eine beliebige Uhrzeit für die Simulation einzugeben'}</li>
-                    <li><strong>DE/EN:</strong> ${t('help_language') || 'Sprachwechsel zwischen Deutsch und Englisch'}</li>
-                </ul>
-
-                <h4>${t('help_sky_view') || 'Himmelsansicht'}</h4>
-                <ul>
-                    <li><strong>${t('help_object_click') || 'Objekt anklicken'}:</strong> ${t('help_object_click_desc') || 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten'}</li>
-                    <li><strong>${t('help_navigation') || 'Navigation'}:</strong> ${t('help_navigation_desc') || 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)'}</li>
-                    <li><strong>${t('help_zoom_pan') || 'Zoom und Pan'}:</strong> ${t('help_zoom_pan_desc') || 'Am Desktop können Sie über den Zoom-Button die Ansicht vergrößern. Bei gezoomter Ansicht können Sie mit gedrückter Maustaste die Ansicht nach oben und unten verschieben.'}</li>
-                    <li><strong>${t('help_view_modes') || 'Ansichten: Horizont / Planisphäre'}:</strong> ${t('help_view_modes_desc') || 'Über den Tab unter der Himmelsansicht können Sie zwischen Horizontansicht (rechteckig) und Planisphäre (runder Himmelsatlas) umschalten. In der Planisphäre zeigt die gepunktete Kurve den Horizont: Objekte über dem Horizont liegen innerhalb, Objekte darunter außerhalb der Kurve.'}</li>
-                    <li><strong>${t('help_symbols') || 'Symbole'}:</strong> ${t('help_symbols_desc') || 'Himmelsobjekte werden durch folgende Symbole dargestellt:'}</li>
-                </ul>
-                <div style="margin-left: 20px;">
-                    <table style="border-collapse: separate; border-spacing: 10px 5px;">
-                        <tr><td>☉</td><td>${t('symbol_sun') || 'Sonne'}</td></tr>
-                        <tr><td colspan="2">${t('symbol_moon') || 'Mond (phasenabhängig)'}</td></tr>
-                        <tr><td colspan="2" style="font-size: 0.9em; padding-left: 20px;">${t('symbol_moon_phases') || 'Mondphasen: 🌑 Neumond, 🌒 zunehmende Sichel, 🌓 erstes Viertel, 🌔 zunehmend, 🌕 Vollmond, 🌖 abnehmend, 🌗 letztes Viertel, 🌘 abnehmende Sichel'}</td></tr>
-                        <tr><td>☿</td><td>${t('symbol_mercury') || 'Merkur'}</td></tr>
-                        <tr><td>♀</td><td>${t('symbol_venus') || 'Venus'}</td></tr>
-                        <tr><td>♂</td><td>${t('symbol_mars') || 'Mars'}</td></tr>
-                        <tr><td>♃</td><td>${t('symbol_jupiter') || 'Jupiter'}</td></tr>
-                        <tr><td>♄</td><td>${t('symbol_saturn') || 'Saturn'}</td></tr>
-                        <tr><td>⚸</td><td>${t('symbol_asteroid') || 'Asteroiden'}</td></tr>
-                        <tr><td>☄</td><td>${t('symbol_comet') || 'Kometen'}</td></tr>
-                    </table>
-                </div>
-                <ul>
-                </ul>
-
-                <h4>${t('help_object_list') || 'Objektliste'}</h4>
-                <p>${t('help_object_list_desc') || 'Klick auf Objekttyp (Sonne, Mond, Planeten, etc.) markiert alle Objekte dieses Typs im Himmel.'}</p>
-
-                <h4>${t('help_magnitude_filters') || 'Helligkeitsfilter'}</h4>
-                <p>${t('help_magnitude_filters_desc') || 'Über den ⚙️-Button unter "Sichtbare Objekte" können Sie die Helligkeitsfilter für Asteroiden und Kometen anpassen (Magnitude 10-20). Bei Änderung der Filter werden die Daten neu berechnet, was einige Minuten dauern kann. Die Objekte werden automatisch angezeigt, sobald sie verfügbar sind.'}</p>
-
-                <h4>${t('help_messier') || 'Messier-Objekte'}</h4>
-                <p>${t('help_messier_desc') || 'Toggle (✧) für Messier-Objekte (RASC/SEDS-Katalog), Echtzeit-Alt/Az mit Auf-/Untergang/Transit; klickbar für Details.'}</p>
-
-                <h4>${t('help_simulation')}</h4>
-                <p>${t('help_simulation_desc')}</p>
-                <ul>
-                    <li><strong>«</strong> ${t('help_day_minus')}</li>
-                    <li><strong>‹</strong> ${t('help_hour_minus')}</li>
-                    <li><strong>+</strong> ${t('help_now')}</li>
-                    <li><strong>›</strong> ${t('help_hour_plus')}</li>
-                    <li><strong>»</strong> ${t('help_day_plus')}</li>
-                </ul>
-                <p>${t('help_simulation_desc2')}</p>
-
-                <h4>${t('help_location_change')}</h4>
-                <p>${t('help_location_change_desc')}</p>
-
-                <h4>${t('help_registration') || 'Registrierung & Konten'}</h4>
-                <p>${t('help_registration_desc1') || 'Die Login- und Registrierungsfunktion ist ein Komfort-Feature für diese Demo. Die Anwendung lässt sich vollständig auch ohne Login nutzen.'}</p>
-                <p>${t('help_registration_desc2') || 'Bei der Registrierung werden Benutzername, ein sicher gehashes Passwort sowie optionale Benutzereinstellungen wie Standort, Anzeigeeinstellungen, simulierte Zeit, Helligkeitsfilter, Farbthema und Sprache gespeichert.'}</p>
-                <p>${t('help_registration_desc3') || 'Wichtig: Es gibt keinen Passwort-Reset und keinen Support dafür. Wenn das Passwort vergessen wird, kann das Konto nicht wiederhergestellt werden – in diesem Fall einfach ein neues Konto anlegen.'}</p>
-
-                <h4>${t('help_github')}</h4>
-                <p>${t('help_github_desc')}</p>
-                <p><a href="https://github.com/jeamy/asciisky" target="_blank" style="color: var(--primary-color); text-decoration: underline;">https://github.com/jeamy/asciisky</a></p>
-            `;
-
-            // Erstelle Dialog-Container
-            const dialog = document.createElement('div');
-            dialog.className = 'help-dialog-overlay';
-            dialog.innerHTML = `
-                <div class="help-dialog">
-                    <button class="dialog-close" onclick="this.closest('.help-dialog-overlay').remove()">×</button>
-                    <div class="help-content">${helpContent}</div>
-                </div>
-            `;
-
-            document.body.appendChild(dialog);
-
-            // Schließe Dialog bei Klick außerhalb
-            dialog.addEventListener('click', (e) => {
-                if (e.target === dialog) {
-                    dialog.remove();
-                }
-            });
-        }
-
-        // Funktion zum Einrichten des Standort-Buttons
-        function setupLocationButton() {
-            const locationBtn = document.getElementById('location-btn');
-            locationBtn.addEventListener('click', () => {
-                // Lade die CSS-Datei für den Standort-Dialog
-                loadCSSFile('./static/css/dialogStyles.css');
-                // Zeige den Dialog an
-                locationDialog.show();
-            });
-        }
-
-        // Simulierte Zeit: erweiterte UI (<< < + > >>)
-        function setupSimTimeControls() {
-            try {
-                const btnDayMinus = document.getElementById('sim-day-minus');
-                const btnHourMinus = document.getElementById('sim-hour-minus');
-                const btnNow = document.getElementById('sim-now');
-                const btnHourPlus = document.getElementById('sim-hour-plus');
-                const btnDayPlus = document.getElementById('sim-day-plus');
-                const timeDisplay = document.getElementById('sim-time-local');
-
-                if (!btnDayMinus || !btnHourMinus || !btnNow || !btnHourPlus || !btnDayPlus || !timeDisplay) return;
-                
-                // Erstelle den TimeInputDialog
-                const timeInputDialog = new TimeInputDialog(async (offsetMinutes) => {
-                    // Callback für Zeitänderungen
-                    updateSimPreview();
-                    if (renderer) {
-                        await updateSky();
-                        // Refresh object dialog if visible (after update completes)
-                        renderer.refreshDialogIfVisible();
-                    }
-                });
-
-                const applyDelta = async (delta) => {
-                    const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
-                    const next = Math.max(-525600, Math.min(525600, (offsetMinutes || 0) + delta));
-                    settingsManager.setSimulatedTime(next);
-                    updateSimPreview();
-                    if (renderer) {
-                        await updateSky();
-                        // Refresh object dialog if visible (after update completes)
-                        renderer.refreshDialogIfVisible();
-                    }
-                };
-
-                // Siderischer Tag: 23h 56m 4s = 1436.067 Minuten
-                const SIDEREAL_DAY_MINUTES = 23 * 60 + 56 + 4/60; // 1436.067 Minuten
-                const SOLAR_DAY_MINUTES = 24 * 60; // 1440 Minuten
-
-                btnDayMinus.addEventListener('click', () => applyDelta(-SOLAR_DAY_MINUTES));
-                btnHourMinus.addEventListener('click', () => applyDelta(-60));
-                btnNow.addEventListener('click', async () => {
-                    settingsManager.setSimulatedTime(0);
-                    updateSimPreview();
-                    if (renderer) {
-                        await updateSky();
-                        // Refresh object dialog if visible (after update completes)
-                        renderer.refreshDialogIfVisible();
-                    }
-                });
-                btnHourPlus.addEventListener('click', () => applyDelta(60));
-                btnDayPlus.addEventListener('click', () => applyDelta(SOLAR_DAY_MINUTES));
-                
-                // Mache die Zeitanzeige klickbar
-                timeDisplay.addEventListener('click', () => {
-                    // Lade die CSS-Datei für den Zeit-Dialog
-                    loadCSSFile('./static/css/timeInputDialog.css');
-                    // Zeige den Dialog an
-                    timeInputDialog.show();
-                });
-                timeDisplay.title = t('click_to_set_time') || 'Klicken, um eine benutzerdefinierte Zeit einzugeben';
-
-                updateSimPreview();
-                // Laufende Aktualisierung der Anzeige jede Sekunde
-                if (!window.__simTimeTicker) {
-                    window.__simTimeTicker = setInterval(updateSimPreview, 1000);
-                }
-            } catch (e) {
-                console.error('Failed to setup simulated time controls:', e);
-            }
-        }
-
-        function updateSimPreview() {
-            try {
-                const el = document.getElementById('sim-time-local');
-                if (!el) return;
-                const sim = settingsManager.getSimulatedTimeOffset();
-                const off = (sim && typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
-                const dt = new Date(Date.now() + off * 60000);
-                // Format date and time using current UI language
-                const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'de';
-                const locale = lang === 'en' ? 'en-US' : 'de-DE';
-                // Use selected location's timezone (IANA), fall back to browser timezone
-                const loc = settingsManager.getLocation && settingsManager.getLocation();
-                const tz = (loc && typeof loc.timezone === 'string' && loc.timezone) ? loc.timezone : undefined;
-                const tzOpts = tz ? { timeZone: tz } : {};
-                const dateStr = dt.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', ...tzOpts });
-                const timeStr = dt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, ...tzOpts });
-                el.textContent = `${dateStr} ${timeStr}`;
-            } catch (_) { /* noop */ }
-        }
-        
-        // Funktion zum Laden einer CSS-Datei
-        function loadCSSFile(url) {
-            // Prüfe, ob die CSS-Datei bereits geladen wurde
-            const links = document.getElementsByTagName('link');
-            for (let i = 0; i < links.length; i++) {
-                if (links[i].href.includes(url)) {
-                    return; // CSS bereits geladen
-                }
-            }
-            
-            // Füge die CSS-Datei hinzu
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.type = 'text/css';
-            link.href = url;
-            document.head.appendChild(link);
-        }
-        
-        function setupViewModeTabs() {
-            const tabsContainer = document.getElementById('view-mode-tabs');
-            const horizonBtn = document.getElementById('view-tab-horizon');
-            const planisphereBtn = document.getElementById('view-tab-planisphere');
-            if (!tabsContainer || !horizonBtn || !planisphereBtn || !renderer) return;
-
-            const applyActive = (mode) => {
-                const isHorizon = mode === 'horizon';
-                horizonBtn.classList.toggle('active', isHorizon);
-                planisphereBtn.classList.toggle('active', !isHorizon);
-                horizonBtn.setAttribute('aria-selected', isHorizon ? 'true' : 'false');
-                planisphereBtn.setAttribute('aria-selected', !isHorizon ? 'true' : 'false');
-                const skyEl = document.getElementById('sky-container');
-                if (skyEl) {
-                    skyEl.setAttribute('aria-labelledby', isHorizon ? 'view-tab-horizon' : 'view-tab-planisphere');
-                }
-            };
-
-            let initialMode = 'horizon';
-            try {
-                if (settingsManager && typeof settingsManager.getViewMode === 'function') {
-                    const saved = settingsManager.getViewMode();
-                    if (saved === 'horizon' || saved === 'planisphere') {
-                        initialMode = saved;
-                    }
-                }
-            } catch (_) { /* noop */ }
-
-            try {
-                if (renderer && typeof renderer.setViewMode === 'function') {
-                    renderer.setViewMode(initialMode);
-                }
-            } catch (_) { /* noop */ }
-
-            applyActive(initialMode);
-
-            horizonBtn.addEventListener('click', () => {
-                if (!renderer || typeof renderer.setViewMode !== 'function') return;
-                renderer.setViewMode('horizon');
-                applyActive('horizon');
-            });
-
-            planisphereBtn.addEventListener('click', () => {
-                if (!renderer || typeof renderer.setViewMode !== 'function') return;
-                renderer.setViewMode('planisphere');
-                applyActive('planisphere');
-            });
-        }
-        
-        // Handler für Standortänderungen
-        async function handleLocationChange(location) {
-            // Aktualisiere den Titel mit dem neuen Standort und i18n-Unterstützung
-            updateAppTitle(location.name);
-            
-            // Aktualisiere die Koordinaten im SkyManager
-            if (renderer && renderer.skyManager) {
-                renderer.skyManager.setLocation(location.lat, location.lon, location.elevation);
-                // Aktualisiere den Himmel mit der exportierten updateSky-Funktion
-                updateSky();
-            }
-
-            // Speichere den Standort über den SettingsManager und synchronisiere mit dem Server
-            try {
-                await settingsManager.setLocation(location.lat, location.lon, location.elevation, location.name);
-                console.log('Location saved to server via SettingsManager');
-            } catch (error) {
-                console.error('Error saving location to server:', error);
-            }
-
-            try {
-                if (sunpathOverlay && typeof SunpathOverlay.preloadForCurrentLocation === 'function') {
-                    sunpathOverlay.data = null;
-                    sunpathOverlay.currentKey = null;
-                    SunpathOverlay.preloadForCurrentLocation();
-                }
-            } catch (e) {
-                console.error('Failed to preload sunpath data after location change:', e);
-            }
-        }
-        
-        // Zeitzone nach Standortänderung aktualisieren (nach Server-Response)
-        window.addEventListener('locationTimezoneUpdated', () => {
-            try { updateSimPreview(); } catch (_) { /* noop */ }
-        });
-
-        function setupObjectList() {
-            const container = document.getElementById('object-list');
-            if (!container) return;
-            
-            // Leere den Container zuerst
-            container.innerHTML = '';
-            
-            // Verwende OBJECT_SYMBOLS direkt, nicht über CONFIG
-            Object.entries(OBJECT_SYMBOLS).forEach(([name, symbol]) => {
-                // Asteroiden und Kometen nicht anzeigen
-                if (name === 'asteroid' || name === 'comet') return;
-                
-                const btn = document.createElement('button');
-                btn.className = 'object-btn';
-                btn.dataset.objectName = name; // Speichere den originalen Namen als Datensatz
-                const displayName = t(name) || name.charAt(0).toUpperCase() + name.slice(1);
-                btn.innerHTML = `${symbol} ${displayName}`;
-                btn.onclick = () => {
-                    // Toggle selection
-                    const isSelected = btn.classList.contains('active');
-                    document.querySelectorAll('.object-btn').forEach(b => b.classList.remove('active'));
-                    
-                    if (!isSelected && renderer) {
-                        btn.classList.add('active');
-                        renderer.selectObject(name, true); // true = show dialog
-                    } else if (renderer) {
-                        renderer.clearSelection();
-                    }
-                };
-                container.appendChild(btn);
-            });
-            
-            // Sternbilder-Button hinzufügen
-            if (CONFIG.CONSTELLATIONS?.ENABLE_CONSTELLATION_LAYER) {
-                const constellationBtn = document.createElement('button');
-                constellationBtn.id = 'constellation-toggle';
-                constellationBtn.className = 'object-btn';
-                constellationBtn.innerHTML = '✦ ' + t('constellations');
-                constellationBtn.title = t('toggle_constellations');
-                const initialVisible = !!(renderer && renderer.zodiacRenderer && renderer.zodiacRenderer.visible);
-                if (initialVisible) {
-                    constellationBtn.classList.add('active');
-                }
-                constellationBtn.onclick = async () => {
-                    if (renderer && renderer.zodiacRenderer) {
-                        // Load data if not already loaded
-                        if (renderer.zodiacRenderer.constellations.length === 0) {
-                            const location = renderer.location || settingsManager.getLocation();
-                            const timeISO = settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO();
-                            await renderer.zodiacRenderer.fetchZodiacData(location, timeISO);
-                        }
-                        
-                        const isActive = renderer.zodiacRenderer.toggleVisibility();
-                        constellationBtn.classList.toggle('active', isActive);
-                    }
-                };
-                container.appendChild(constellationBtn);
-
-                // Messier-Button zwischen Sternbilder und Sonnenbahn
-                const messierBtn = document.createElement('button');
-                messierBtn.id = 'messier-toggle';
-                messierBtn.className = 'object-btn';
-                messierBtn.innerHTML = '✧ ' + t('messier');
-                messierBtn.title = t('toggle_messier');
-                messierBtn.onclick = async () => {
-                    try {
-                        if (renderer && renderer.messierRenderer) {
-                            if (!renderer.messierRenderer.objects.length) {
-                                const location = renderer.location || settingsManager.getLocation();
-                                const timeISO = settingsManager.getSimulatedTimeISO && settingsManager.getSimulatedTimeISO();
-                                await renderer.messierRenderer.fetchMessierData(location, timeISO);
-                            }
-                            const isActive = renderer.messierRenderer.toggleVisibility();
-                            messierBtn.classList.toggle('active', isActive);
-                        }
-                    } catch (e) {
-                        console.error('Failed to toggle Messier overlay:', e);
-                    }
-                };
-                container.appendChild(messierBtn);
-
-                // Sonnenbahn-Button neben Sternbilder hinzufügen
-                const sunpathBtn = document.createElement('button');
-                sunpathBtn.id = 'sunpath-toggle';
-                sunpathBtn.className = 'object-btn';
-                sunpathBtn.innerHTML = '☉ ' + t('sunpath_curve');
-                sunpathBtn.title = t('toggle_sunpath');
-                sunpathBtn.onclick = async () => {
-                    try {
-                        if (!sunpathOverlay) return;
-                        await sunpathOverlay.toggleForCurrentLocation();
-                        const isActive = !!sunpathOverlay.visible;
-                        sunpathBtn.classList.toggle('active', isActive);
-                    } catch (e) {
-                        console.error('Failed to toggle sunpath overlay:', e);
-                    }
-                };
-                container.appendChild(sunpathBtn);
-            }
-        }
-        
-        // Funktion zum Einrichten der Navigationspfeile - nicht mehr benötigt, da im SkyRenderer implementiert
-        function setupNavigationArrows() {
-            // Leere Funktion, da die Pfeile jetzt im SkyRenderer erstellt werden
-            console.log('Navigation arrows are now created in SkyRenderer');
-        }
-        
-        function setupMagnitudeFilters() {
-            // Leere Funktion für Kompatibilität
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' || e.key === 'Esc') {
-                try {
-                    if (sunpathOverlay && sunpathOverlay.visible) {
-                        sunpathOverlay.hide();
-                    }
-                    const sunpathBtn = document.getElementById('sunpath-toggle');
-                    if (sunpathBtn) {
-                        sunpathBtn.classList.remove('active');
-                    }
-                } catch (_) { /* noop */ }
-            }
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!sunpathOverlay || !sunpathOverlay.visible) {
-                return;
-            }
-            try {
-                const overlayRoot = sunpathOverlay.root;
-                const tooltipEl = sunpathOverlay.tooltip;
-                const sunpathBtn = document.getElementById('sunpath-toggle');
-                const target = e.target;
-                if (overlayRoot && overlayRoot.contains(target)) {
-                    return;
-                }
-                if (tooltipEl && tooltipEl.contains && tooltipEl.contains(target)) {
-                    return;
-                }
-                if (sunpathBtn && sunpathBtn.contains(target)) {
-                    return;
-                }
-                sunpathOverlay.hide();
-                if (sunpathBtn) {
-                    sunpathBtn.classList.remove('active');
-                }
-            } catch (_) { /* noop */ }
-        });
-    </script>
+<script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

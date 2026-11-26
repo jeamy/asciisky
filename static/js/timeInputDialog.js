@@ -1,203 +1,82 @@
+// Dialog for a chosen date and time at the observer's place.
 import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
+import { el } from './ui/dom.js';
+import { AppDialog, statusLine } from './ui/dialog.js';
 
-function getLocationTimezone() {
-    try {
-        const loc = settingsManager.getLocation && settingsManager.getLocation();
-        if (loc && typeof loc.timezone === 'string' && loc.timezone) return loc.timezone;
-    } catch (_) { /* noop */ }
-    return null;
+const pad2 = (v) => String(v).padStart(2, '0');
+
+function zonedParts(date, timeZone) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(date);
+    const get = (type) => Number(parts.find((p) => p.type === type)?.value);
+    return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour') % 24, minute: get('minute') };
 }
 
-function getZonedParts(date, timeZone) {
-    const fmt = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
-    const parts = fmt.formatToParts(date);
-    const get = (type) => {
-        const p = parts.find(x => x.type === type);
-        return p ? Number(p.value) : NaN;
-    };
-    return {
-        year: get('year'),
-        month: get('month'),
-        day: get('day'),
-        hour: get('hour'),
-        minute: get('minute')
-    };
-}
-
-function zonedDateTimeToUtcMillis({ year, month, day, hour, minute }, timeZone) {
-    // Convert a wall-clock time in `timeZone` into UTC milliseconds.
-    // Uses a small fixed-point iteration to handle DST transitions.
-    const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
-    let guessUtc = targetAsUtc;
+/** UTC milliseconds of a wall-clock time in ``timeZone``. */
+export function zonedToUtcMillis({ year, month, day, hour, minute }, timeZone) {
+    const target = Date.UTC(year, month - 1, day, hour, minute, 0);
+    let guess = target;
     for (let i = 0; i < 3; i++) {
-        const zp = getZonedParts(new Date(guessUtc), timeZone);
-        const guessAsUtc = Date.UTC(zp.year, zp.month - 1, zp.day, zp.hour, zp.minute, 0);
-        const diff = guessAsUtc - targetAsUtc;
-        guessUtc = guessUtc - diff;
+        const p = zonedParts(new Date(guess), timeZone);
+        const diff = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, 0) - target;
+        guess -= diff;
         if (diff === 0) break;
     }
-    return guessUtc;
+    return guess;
 }
 
 export class TimeInputDialog {
-    constructor(onTimeChange) {
-        this.onTimeChange = onTimeChange;
-        this.dialogElement = null;
+    /** @param {(offsetMinutes: number) => void} onChange */
+    constructor(onChange) {
+        this.onChange = onChange;
+        this.dialog = new AppDialog('time-dialog');
     }
 
-    show() {
-        // Entferne vorhandenen Dialog, falls vorhanden
-        if (this.dialogElement) {
-            this.dialogElement.remove();
-        }
-
-        // Hole aktuelle Zeit-Einstellungen
-        const { offsetMinutes } = settingsManager.getSimulatedTimeOffset();
-        const tz = getLocationTimezone();
-        const currentDate = new Date(Date.now() + offsetMinutes * 60000);
-
-        // Formatiere Datum und Zeit für die Eingabefelder (in Standort-Zeitzone, falls vorhanden)
-        let year, month, day, hours, minutes;
+    open() {
+        const tz = settingsManager.getLocation().timezone || undefined;
+        const now = settingsManager.getSkyDate();
+        let p;
         try {
-            if (tz) {
-                const p = getZonedParts(currentDate, tz);
-                year = p.year;
-                month = String(p.month).padStart(2, '0');
-                day = String(p.day).padStart(2, '0');
-                hours = String(p.hour).padStart(2, '0');
-                minutes = String(p.minute).padStart(2, '0');
-            } else {
-                year = currentDate.getFullYear();
-                month = String(currentDate.getMonth() + 1).padStart(2, '0');
-                day = String(currentDate.getDate()).padStart(2, '0');
-                hours = String(currentDate.getHours()).padStart(2, '0');
-                minutes = String(currentDate.getMinutes()).padStart(2, '0');
-            }
+            p = tz ? zonedParts(now, tz) : null;
         } catch (_) {
-            year = currentDate.getFullYear();
-            month = String(currentDate.getMonth() + 1).padStart(2, '0');
-            day = String(currentDate.getDate()).padStart(2, '0');
-            hours = String(currentDate.getHours()).padStart(2, '0');
-            minutes = String(currentDate.getMinutes()).padStart(2, '0');
+            p = null;
         }
-        
-        // Erstelle Dialog-Element
-        this.dialogElement = document.createElement('div');
-        this.dialogElement.className = 'time-dialog-overlay';
-        this.dialogElement.innerHTML = `
-            <div class="time-dialog">
-                <button class="dialog-close">&times;</button>
-                <h3>${t('custom_time_title') || 'Benutzerdefinierte Zeit'}</h3>
-                <div class="time-input-container">
-                    <div class="time-input-group">
-                        <label for="time-date">${t('date') || 'Datum'}:</label>
-                        <input type="date" id="time-date" value="${year}-${month}-${day}">
-                    </div>
-                    <div class="time-input-group">
-                        <label for="time-time">${t('time') || 'Zeit'}:</label>
-                        <input type="time" id="time-time" value="${hours}:${minutes}">
-                    </div>
-                </div>
-                <div class="time-dialog-buttons">
-                    <button id="time-reset" class="time-dialog-btn">${t('sim_time_reset') || 'Zurücksetzen'}</button>
-                    <button id="time-apply" class="time-dialog-btn time-apply-btn">${t('apply') || 'Anwenden'}</button>
-                </div>
-            </div>
-        `;
+        p = p || { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate(), hour: now.getHours(), minute: now.getMinutes() };
 
-        // Füge Dialog zum Body hinzu
-        document.body.appendChild(this.dialogElement);
-
-        // Event-Listener für Schließen-Button
-        const closeButton = this.dialogElement.querySelector('.dialog-close');
-        closeButton.addEventListener('click', () => this.close());
-
-        // Event-Listener für Klick außerhalb des Dialogs
-        this.dialogElement.addEventListener('click', (e) => {
-            if (e.target === this.dialogElement) {
-                this.close();
-            }
-        });
-
-        // Event-Listener für Zurücksetzen-Button
-        const resetButton = document.getElementById('time-reset');
-        resetButton.addEventListener('click', () => {
-            this.applyTime(0);
-            this.close();
-        });
-
-        // Event-Listener für Anwenden-Button
-        const applyButton = document.getElementById('time-apply');
-        applyButton.addEventListener('click', () => {
-            this.applyCustomTime();
-        });
-    }
-
-    close() {
-        if (this.dialogElement) {
-            this.dialogElement.remove();
-            this.dialogElement = null;
-        }
-    }
-
-    applyCustomTime() {
-        try {
-            const dateInput = document.getElementById('time-date');
-            const timeInput = document.getElementById('time-time');
-            
-            if (!dateInput || !timeInput) return;
-            
-            const dateValue = dateInput.value;
-            const timeValue = timeInput.value;
-            
-            if (!dateValue || !timeValue) {
-                alert(t('invalid_time_input') || 'Bitte geben Sie ein gültiges Datum und eine gültige Zeit ein.');
+        this.dialog.setTitle(t('custom_time_title'));
+        const date = el('input', { type: 'date', id: 'time-date', required: true, value: `${p.year}-${pad2(p.month)}-${pad2(p.day)}` });
+        const time = el('input', { type: 'time', id: 'time-time', required: true, value: `${pad2(p.hour)}:${pad2(p.minute)}` });
+        const status = statusLine();
+        const form = el('form', { class: 'form-grid' },
+            el('label', { for: 'time-date' }, t('date')), date,
+            el('label', { for: 'time-time' }, t('time')), time,
+            el('p', { class: 'dialog-hint form-wide' }, tz ? `${t('time_zone')}: ${tz}` : ''),
+            el('div', { class: 'form-actions' },
+                el('button', { type: 'button', class: 'btn', onclick: () => this._apply(0) }, t('now')),
+                el('button', { type: 'submit', class: 'btn btn-primary' }, t('apply'))),
+            status);
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const [y, mo, d] = date.value.split('-').map(Number);
+            const [hh, mm] = time.value.split(':').map(Number);
+            if (![y, mo, d, hh, mm].every(Number.isFinite)) {
+                status.textContent = t('invalid_time_input');
                 return;
             }
-            
-            const tz = getLocationTimezone();
-
-            // Erstelle ein Datum-Objekt aus den Eingaben
-            // Die Eingabe soll in der Standort-Zeitzone interpretiert werden (nicht Browser-Zone)
-            let selectedMillis;
-            if (tz) {
-                const [y, m, d] = dateValue.split('-').map(Number);
-                const [hh, mm] = timeValue.split(':').map(Number);
-                selectedMillis = zonedDateTimeToUtcMillis({ year: y, month: m, day: d, hour: hh, minute: mm }, tz);
-            } else {
-                // Fallback: Browser-lokal
-                selectedMillis = new Date(`${dateValue}T${timeValue}`).getTime();
-            }
-
-            // Berechne den Offset in Minuten zur aktuellen Zeit (epoch-basiert)
-            const nowMillis = Date.now();
-            const offsetMinutes = Math.round((selectedMillis - nowMillis) / 60000);
-            
-            // Wende den Offset an
-            this.applyTime(offsetMinutes);
-            this.close();
-        } catch (error) {
-            console.error('Error applying custom time:', error);
-            alert(t('time_input_error') || 'Fehler bei der Zeiteingabe. Bitte versuchen Sie es erneut.');
-        }
+            const millis = tz
+                ? zonedToUtcMillis({ year: y, month: mo, day: d, hour: hh, minute: mm }, tz)
+                : new Date(y, mo - 1, d, hh, mm).getTime();
+            this._apply(Math.round((millis - Date.now()) / 60000));
+        });
+        this.dialog.setBody(form);
+        this.dialog.open();
+        date.focus();
     }
 
-    applyTime(offsetMinutes) {
-        // Setze den Offset in den Einstellungen
-        settingsManager.setSimulatedTime(offsetMinutes);
-        
-        // Rufe den Callback auf, wenn vorhanden
-        if (typeof this.onTimeChange === 'function') {
-            this.onTimeChange(offsetMinutes);
-        }
+    _apply(offsetMinutes) {
+        this.dialog.close();
+        this.onChange(offsetMinutes);
     }
 }

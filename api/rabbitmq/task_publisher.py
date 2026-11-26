@@ -1,28 +1,27 @@
 """
-RabbitMQ Task Publisher für asynchrone Precompute-Tasks
+RabbitMQ publisher for asynchronous precompute tasks.
 
-Sendet Tasks an Worker-Queues ohne auf Antwort zu warten.
-Worker speichern Ergebnisse in Cache/DB.
+Tasks are sent to the worker queues without waiting for an answer; the
+workers store their results in PostgreSQL.  A persistent claim per task key
+(``precompute_task_claims``) deduplicates publications across processes.
 """
 import asyncio
 import hashlib
 import json
 import logging
 import threading
-import time
-import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import pika
+from pika import exceptions as pika_exceptions
 
 import settings
 from db_utils import claim_precompute_task, release_precompute_task
-from workers.worker_utils import precompute_task_key
+from workers.worker_utils import declare_computation_queues, precompute_task_key
 
 logger = logging.getLogger(__name__)
 
-# Thread-local storage für Connections
+# One connection per thread: pika's BlockingConnection is not thread-safe.
 _thread_local = threading.local()
 
 
@@ -47,92 +46,74 @@ async def trigger_precompute_task(
     )
 
 
+def _drop_thread_connection() -> None:
+    connection = getattr(_thread_local, 'connection', None)
+    if connection is not None:
+        try:
+            connection.close()
+        except Exception:
+            pass
+    _thread_local.connection = None
+    _thread_local.channel = None
+
+
+_ROUTING_NAMES = {'asteroids': 'asteroid', 'comets': 'comet'}
+
+
 class TaskPublisher:
-    """
-    Publisher für asynchrone Background-Tasks
-    
-    Sendet Tasks an RabbitMQ Queues ohne auf Reply zu warten.
-    Worker verarbeiten Tasks und speichern in Cache/DB.
-    """
-    
+    """Publishes precompute tasks to the computation exchange with broker confirms."""
+
     def __init__(self, rabbitmq_url: str):
-        """
-        Initialisiert Task Publisher
-        
-        Args:
-            rabbitmq_url: RabbitMQ Connection URL
-        """
         self.rabbitmq_url = rabbitmq_url
-        # Keine globale Connection - wird pro Thread erstellt
-    
+
     def _get_connection(self):
-        """Holt oder erstellt thread-local Connection"""
-        if not hasattr(_thread_local, 'connection') or _thread_local.connection is None or _thread_local.connection.is_closed:
-            try:
-                params = pika.URLParameters(self.rabbitmq_url)
-                params.heartbeat = 600
-                params.blocked_connection_timeout = 300
-                
-                _thread_local.connection = pika.BlockingConnection(params)
-                _thread_local.channel = _thread_local.connection.channel()
-                
-                # Exchange deklarieren
-                _thread_local.channel.exchange_declare(
-                    exchange='computation.direct',
-                    exchange_type='direct',
-                    durable=True
-                )
-                _thread_local.channel.queue_declare(queue='computation.dead', durable=True)
-                
-                # Queues deklarieren (RabbitMQ 4.x kompatibel)
-                # Idempotent: Wenn Queue existiert, passiert nichts
-                _thread_local.channel.queue_declare(
-                    queue='asteroid.compute',
-                    durable=True,
-                    arguments={
-                        'x-queue-type': 'classic',
-                        'x-max-priority': 10,
-                        'x-message-ttl': 3600000,
-                    }
-                )
-                
-                _thread_local.channel.queue_declare(
-                    queue='comet.compute',
-                    durable=True,
-                    arguments={
-                        'x-queue-type': 'classic',
-                        'x-max-priority': 10,
-                        'x-message-ttl': 3600000,
-                    }
-                )
-                
-                _thread_local.channel.queue_declare(
-                    queue='precompute.tasks',
-                    durable=True,
-                    arguments={'x-max-priority': 10}
-                )
-                
-                # Bindings
-                _thread_local.channel.queue_bind(
-                    exchange='computation.direct',
-                    queue='asteroid.compute',
-                    routing_key='compute.asteroid'
-                )
-                _thread_local.channel.confirm_delivery()
-                
-                _thread_local.channel.queue_bind(
-                    exchange='computation.direct',
-                    queue='comet.compute',
-                    routing_key='compute.comet'
-                )
-                
-                logger.info(f"TaskPublisher connected to RabbitMQ (thread {threading.current_thread().name})")
-            except Exception as e:
-                logger.error(f"Failed to connect to RabbitMQ: {e}")
-                raise
-        
+        """Return this thread's connection and channel, opening them when needed."""
+        connection = getattr(_thread_local, 'connection', None)
+        if connection is None or connection.is_closed:
+            params = pika.URLParameters(self.rabbitmq_url)
+            params.heartbeat = 600
+            params.blocked_connection_timeout = 300
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
+            # Same queue arguments as the workers, so neither side redeclares
+            # a queue with conflicting arguments.
+            declare_computation_queues(channel)
+            channel.confirm_delivery()
+            _thread_local.connection = connection
+            _thread_local.channel = channel
+            logger.info("TaskPublisher connected to RabbitMQ (thread %s)", threading.current_thread().name)
+        else:
+            # A BlockingConnection only answers broker heartbeats during I/O.
+            # Processing pending events here keeps an idle connection alive
+            # and surfaces a connection the broker has already closed.
+            connection.process_data_events(0)
         return _thread_local.connection, _thread_local.channel
-    
+
+    def _publish(self, routing_key: str, task_id: str, priority: int, body: str) -> None:
+        """Publish with confirm; reconnect once when a stale connection fails."""
+        for attempt in (1, 2):
+            try:
+                _, channel = self._get_connection()
+                confirmed = channel.basic_publish(
+                    exchange='computation.direct',
+                    routing_key=routing_key,
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,
+                        content_type='application/json',
+                        message_id=task_id,
+                        priority=priority,
+                    ),
+                    body=body,
+                )
+                if confirmed is False:
+                    raise RuntimeError(f"Broker did not confirm task {task_id}")
+                return
+            except (pika_exceptions.AMQPConnectionError, pika_exceptions.AMQPChannelError):
+                _drop_thread_connection()
+                if attempt == 2:
+                    raise
+                logger.info("RabbitMQ connection was stale, reconnecting once")
+
     def publish_precompute_task(
         self,
         kind: str,
@@ -142,22 +123,12 @@ class TaskPublisher:
         priority: int = 5,
         bucket_hours: int = 1,
     ) -> str:
-        """
-        Publiziert einen Precompute-Task
-        
-        Args:
-            kind: 'asteroids', 'comets', 'celestial', 'constellations'
-            location: {'latitude': float, 'longitude': float, 'elevation': float}
-            time_bucket: ISO-Format Zeitstempel
-            magnitude: Optional max magnitude
-            priority: Task-Priorität (0-10, höher = wichtiger)
-            bucket_hours: Cache-Bucketgröße in Stunden
-            
-        Returns:
-            Task-ID
+        """Publish one precompute task ('asteroids' or 'comets') and return its id.
+
+        A task whose key is already claimed is not published again.
         """
         task_data = {
-            'type': 'precompute',  # Task-Typ für unified_worker
+            'type': 'precompute',
             'kind': kind,
             'location': location,
             'time_bucket': time_bucket,
@@ -169,215 +140,24 @@ class TaskPublisher:
         key = precompute_task_key(task_data)
         task_id = f"{kind}_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
         task_data['task_id'] = task_id
-        
-        # Routing Key basierend auf Kind (singular!)
-        kind_singular = {
-            'asteroids': 'asteroid',
-            'comets': 'comet',
-            'celestial': 'celestial',
-            'constellations': 'constellation'
-        }.get(kind, kind)
-        routing_key = f'compute.{kind_singular}'
-        
-        try:
-            if not claim_precompute_task(key):
-                logger.debug("Task already queued/active: %s", key)
-                return task_id
-            # Hole thread-local Connection
-            connection, channel = self._get_connection()
-            
-            confirmed = channel.basic_publish(
-                exchange='computation.direct',
-                routing_key=routing_key,
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
-                    content_type='application/json',
-                    message_id=task_id,
-                    priority=priority,
-                ),
-                body=json.dumps(task_data)
-            )
-            
-            if confirmed is False:
-                raise RuntimeError(f"Broker did not confirm task {task_id}")
-            logger.debug(f"Published task {task_id} to {routing_key}")
+        routing_key = f"compute.{_ROUTING_NAMES.get(kind, kind)}"
+
+        if not claim_precompute_task(key):
+            logger.debug("Task already queued/active: %s", key)
             return task_id
-            
-        except Exception as e:
+        try:
+            self._publish(routing_key, task_id, priority, json.dumps(task_data))
+            logger.debug("Published task %s to %s", task_id, routing_key)
+            return task_id
+        except Exception as exc:
             try:
                 release_precompute_task(key)
             except Exception:
                 logger.exception("Could not release failed task claim %s", key)
-            logger.error(f"Failed to publish task: {e}")
-            # Cleanup thread-local bei Fehler
-            if hasattr(_thread_local, 'connection'):
-                try:
-                    _thread_local.connection.close()
-                except Exception:
-                    pass
-                _thread_local.connection = None
-                _thread_local.channel = None
+            logger.error("Failed to publish task: %s", exc)
+            _drop_thread_connection()
             raise
 
-    def publish_sunpath_task(
-        self,
-        location: dict[str, float],
-        year: int,
-        priority: int = 5
-    ) -> str:
-        """Publiziert einen Sunpath-Precompute-Task in die precompute.tasks-Queue.
-
-        Der UnifiedWorker verarbeitet diesen Task (kind='sunpath') und speichert
-        das Ergebnis als yearly sunpath in PostgreSQL.
-        """
-        from datetime import datetime, timezone
-
-        task_id = f"sunpath_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
-        # Verwende Jahresanfang als Bucket-Zeit, damit pro Standort/Jahr genau
-        # ein deterministischer Task-Key entsteht
-        year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
-
-        task_data = {
-            'task_id': task_id,
-            'type': 'precompute',
-            'kind': 'sunpath',
-            'location': location,
-            'time_bucket': year_start.isoformat(),
-            'magnitude': None,
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'priority': priority
-        }
-
-        key = precompute_task_key(task_data)
-        try:
-            if not claim_precompute_task(key):
-                return task_id
-            connection, channel = self._get_connection()
-
-            confirmed = channel.basic_publish(
-                exchange='',
-                routing_key='precompute.tasks',
-                properties=pika.BasicProperties(
-                    delivery_mode=2,
-                    content_type='application/json',
-                    priority=priority
-                ),
-                body=json.dumps(task_data)
-            )
-            if confirmed is False:
-                raise RuntimeError(f"Broker did not confirm task {task_id}")
-
-            logger.debug(f"Published sunpath task {task_id} to precompute.tasks for year={year}")
-            return task_id
-
-        except Exception as e:
-            try:
-                release_precompute_task(key)
-            except Exception:
-                logger.exception("Could not release failed sunpath claim %s", key)
-            logger.error(f"Failed to publish sunpath task: {e}")
-            if hasattr(_thread_local, 'connection'):
-                try:
-                    _thread_local.connection.close()
-                except Exception:
-                    pass
-                _thread_local.connection = None
-                _thread_local.channel = None
-            raise
-
-    def publish_on_demand_task(self, task_data: dict[str, Any]) -> str:
-        """Publish a validated on-demand task with broker confirmation."""
-        object_type = task_data.get("object_type")
-        if object_type not in {"asteroids", "comets"}:
-            raise ValueError("object_type must be 'asteroids' or 'comets'")
-        if not isinstance(task_data.get("location"), dict) or not task_data.get("time_bucket"):
-            raise ValueError("on-demand task requires location and time_bucket")
-
-        task_data = dict(task_data)
-        task_data["type"] = "on_demand"
-        task_id = task_data.setdefault("task_id", f"{object_type}_ondemand_{uuid.uuid4().hex[:12]}")
-        routing_key = f"compute.{object_type[:-1]}"
-        try:
-            _, channel = self._get_connection()
-            confirmed = channel.basic_publish(
-                exchange="computation.direct",
-                routing_key=routing_key,
-                properties=pika.BasicProperties(
-                    delivery_mode=2,
-                    content_type="application/json",
-                    message_id=task_id,
-                    priority=int(task_data.get("priority", 5)),
-                ),
-                body=json.dumps(task_data),
-            )
-            if confirmed is False:
-                raise RuntimeError(f"Broker did not confirm task {task_id}")
-            return task_id
-        except Exception:
-            logger.exception("Failed to publish on-demand task %s", task_id)
-            raise
-    
-    def publish_batch(self, tasks: list) -> list:
-        """
-        Publiziert mehrere Tasks als Batch
-        
-        Args:
-            tasks: Liste von Task-Dicts
-            
-        Returns:
-            Liste von Task-IDs
-        """
-        task_ids = []
-        
-        for task in tasks:
-            try:
-                task_id = self.publish_precompute_task(
-                    kind=task['kind'],
-                    location=task['location'],
-                    time_bucket=task['time_bucket'],
-                    magnitude=task.get('magnitude'),
-                    priority=task.get('priority', 5),
-                    bucket_hours=task.get('bucket_hours', 1),
-                )
-                task_ids.append(task_id)
-            except Exception as e:
-                logger.error(f"Failed to publish task in batch: {e}")
-        
-        return task_ids
-    
     def close(self):
-        """Schließt thread-local Verbindung"""
-        try:
-            if hasattr(_thread_local, 'connection') and _thread_local.connection and not _thread_local.connection.is_closed:
-                _thread_local.connection.close()
-                logger.info("TaskPublisher connection closed")
-                _thread_local.connection = None
-                _thread_local.channel = None
-        except Exception as e:
-            logger.error(f"Error closing connection: {e}")
-
-
-# Singleton Instance
-_publisher = None
-_publisher_lock = threading.Lock()
-
-def get_task_publisher() -> TaskPublisher | None:
-    """
-    Lazy initialization von Task Publisher
-
-    Returns:
-        TaskPublisher instance oder None
-    """
-    global _publisher
-
-    if _publisher is None and settings.RABBITMQ_ENABLED:
-        with _publisher_lock:
-            if _publisher is None and settings.RABBITMQ_ENABLED:
-                try:
-                    _publisher = TaskPublisher(settings.RABBITMQ_URL)
-                except Exception as e:
-                    logger.error(f"Failed to initialize TaskPublisher: {e}")
-                    _publisher = None
-
-    return _publisher
+        """Close this thread's connection."""
+        _drop_thread_connection()

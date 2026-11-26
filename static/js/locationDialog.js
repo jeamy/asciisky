@@ -1,339 +1,159 @@
-// Location Dialog für ASCII Sky Tracker
+// Location dialog: place search (Nominatim), elevation (Open-Meteo) and
+// manual coordinates.  Search results are third-party text and go in as text
+// nodes only (S3).
+import { API_ENDPOINTS, DEFAULT_LOCATION } from './constants.js';
 import { t } from './i18n.js';
-import { API_ENDPOINTS, ASTRO_CONSTANTS } from './constants.js';
+import { el } from './ui/dom.js';
+import { AppDialog, statusLine } from './ui/dialog.js';
 
-export class LocationDialog {
-    constructor(onLocationChange) {
-        this.onLocationChange = onLocationChange;
-        this.dialog = null;
-        this.overlay = null;
-        this.currentLocation = {
-            lat: ASTRO_CONSTANTS.VIENNA_LAT,
-            lon: ASTRO_CONSTANTS.VIENNA_LON,
-            elevation: ASTRO_CONSTANTS.VIENNA_ELEVATION,
-            name: 'Vienna'
-        };
-    }
+const MAX_RESULTS = 5;
 
-    show() {
-        // Entferne vorhandenen Dialog, falls vorhanden
-        this.removeDialog();
-        
-        // Erstelle den Modal-Overlay
-        this.overlay = document.createElement('div');
-        this.overlay.className = 'modal-overlay';
-        
-        // Erstelle den Dialog
-        this.dialog = document.createElement('div');
-        this.dialog.id = 'location-dialog';
-        this.dialog.className = 'dialog location-dialog';
-        
-        // Dialog-Inhalt
-        this.dialog.innerHTML = `
-            <div class="dialog-header">
-                <h3>${t('location_settings')}</h3>
-                <button id="location-dialog-close">${t('close')}</button>
-            </div>
-            <div class="dialog-content">
-                <div class="location-search">
-                    <input type="text" id="location-search-input" placeholder="${t('search_location')}" />
-                    <button id="location-search-button">${t('search')}</button>
-                </div>
-                <div class="location-results" id="location-results"></div>
-                <div class="current-location">
-                    <h4>${t('current_location')}</h4>
-                    <div id="current-location-display">
-                        ${this.currentLocation.name} (${this.currentLocation.lat.toFixed(4)}, ${this.currentLocation.lon.toFixed(4)})
-                    </div>
-                </div>
-                <div class="manual-coordinates">
-                    <h4>${t('manual_coordinates')}</h4>
-                    <div class="coordinate-inputs">
-                        <div class="input-group">
-                            <label for="lat-input">${t('latitude')}:</label>
-                            <input type="number" id="lat-input" step="0.0001" value="${this.currentLocation.lat}" />
-                        </div>
-                        <div class="input-group">
-                            <label for="lon-input">${t('longitude')}:</label>
-                            <input type="number" id="lon-input" step="0.0001" value="${this.currentLocation.lon}" />
-                        </div>
-                        <div class="input-group">
-                            <label for="elevation-input">${t('elevation')}:</label>
-                            <input type="number" id="elevation-input" step="1" value="${this.currentLocation.elevation || ASTRO_CONSTANTS.VIENNA_ELEVATION}" />
-                        </div>
-                        <div class="input-group">
-                            <label for="location-name-input">${t('location_name')}:</label>
-                            <input type="text" id="location-name-input" value="${this.currentLocation.name}" />
-                        </div>
-                    </div>
-                    <button id="apply-coordinates-button">${t('apply')}</button>
-                </div>
-            </div>
-        `;
-        
-        // Füge den Dialog zum Overlay hinzu und das Overlay zum DOM
-        this.overlay.appendChild(this.dialog);
-        document.body.appendChild(this.overlay);
-        
-        // Event-Listener hinzufügen
-        this.setupEventListeners();
-    }
-    
-    removeDialog() {
-        if (this.overlay) {
-            this.overlay.remove();
-            this.overlay = null;
-            this.dialog = null;
-        }
-    }
-    
-    setupEventListeners() {
-        // Close-Button
-        document.getElementById('location-dialog-close').addEventListener('click', () => {
-            this.removeDialog();
-        });
-        
-        // Schließen bei Klick auf den Overlay außerhalb des Dialogs
-        this.overlay.addEventListener('click', (e) => {
-            if (e.target === this.overlay) {
-                this.removeDialog();
-            }
-        });
-        
-        // Suche-Button
-        document.getElementById('location-search-button').addEventListener('click', () => {
-            this.searchLocation();
-        });
-        
-        // Enter-Taste im Suchfeld
-        document.getElementById('location-search-input').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.searchLocation();
-            }
-        });
-        
-        // Koordinaten anwenden
-        document.getElementById('apply-coordinates-button').addEventListener('click', () => {
-            this.applyManualCoordinates();
-        });
-    }
-    
-    searchLocation() {
-        const searchInput = document.getElementById('location-search-input').value.trim();
-        if (!searchInput) return;
-        
-        const resultsContainer = document.getElementById('location-results');
-        resultsContainer.innerHTML = `<div class="loading">${t('searching')}...</div>`;
-        
-        // OpenStreetMap Nominatim API verwenden
-        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchInput)}`)
-            .then(response => response.json())
-            .then(data => {
-                this.displaySearchResults(data);
-            })
-            .catch(error => {
-                console.error('Error searching location:', error);
-                resultsContainer.innerHTML = `<div class="error">${t('search_error')}</div>`;
-            });
-    }
-    
-    displaySearchResults(results) {
-        const resultsContainer = document.getElementById('location-results');
-        resultsContainer.innerHTML = '';
-        
-        if (!results || results.length === 0) {
-            resultsContainer.innerHTML = `<div class="no-results">${t('no_results_found')}</div>`;
-            return;
-        }
-        
-        // Maximal 5 Ergebnisse anzeigen
-        const limitedResults = results.slice(0, 5);
-        
-        // Überschrift für Suchergebnisse hinzufügen
-        const resultsHeader = document.createElement('h4');
-        resultsHeader.textContent = t('search_results') || 'Search Results';
-        resultsContainer.appendChild(resultsHeader);
-        
-        limitedResults.forEach(result => {
-            const resultItem = document.createElement('div');
-            resultItem.className = 'location-result-item';
-            resultItem.innerHTML = `
-                <div class="location-name">${result.display_name}</div>
-                <div class="location-coords">${parseFloat(result.lat).toFixed(4)}, ${parseFloat(result.lon).toFixed(4)}</div>
-            `;
-            
-            // Vorschau-Container für diesen Standort
-            const previewContainer = document.createElement('div');
-            previewContainer.className = 'location-preview-container';
-            previewContainer.style.display = 'none'; // Standardmäßig ausgeblendet
-            previewContainer.innerHTML = `
-                <div class="location-preview">
-                    <h5>${t('location_preview') || 'Location Preview'}</h5>
-                    <div class="preview-map" id="preview-map-${result.place_id}"></div>
-                    <div class="preview-info">
-                        <p><strong>${t('name') || 'Name'}:</strong> ${result.display_name.split(',')[0]}</p>
-                        <p><strong>${t('coordinates') || 'Coordinates'}:</strong> ${parseFloat(result.lat).toFixed(4)}, ${parseFloat(result.lon).toFixed(4)}</p>
-                        <p><strong>${t('elevation') || 'Elevation'}:</strong> <span id="elevation-preview-${result.place_id}">${t('fetching') || 'Fetching...'}</span></p>
-                    </div>
-                </div>
-            `;
-            
-            resultItem.addEventListener('click', async () => {
-                // Alle anderen Vorschauen ausblenden
-                document.querySelectorAll('.location-preview-container').forEach(container => {
-                    container.style.display = 'none';
-                });
-                
-                // Diese Vorschau einblenden
-                previewContainer.style.display = 'block';
-                
-                // Höhe abrufen und anzeigen
-                const elevationSpan = document.getElementById(`elevation-preview-${result.place_id}`);
-                if (elevationSpan) {
-                    elevationSpan.textContent = t('fetching_elevation') || 'Fetching elevation...';
-                    const elevation = await this.getElevationForCoordinates(result.lat, result.lon);
-                    if (elevation !== null) {
-                        elevationSpan.textContent = `${elevation} m`;
-                    } else {
-                        elevationSpan.textContent = t('elevation_not_available') || 'Not available';
-                    }
-                }
-                
-                // Standort auswählen
-                this.selectLocation(result);
-            });
-            
-            resultsContainer.appendChild(resultItem);
-            resultsContainer.appendChild(previewContainer);
-        });
-    }
-    
-    // Funktion zur Höhenermittlung über Open-Meteo API
-    async getElevationForCoordinates(lat, lon) {
-        try {
-            // Status anzeigen
-            const elevationInput = document.getElementById('elevation-input');
-            if (elevationInput) {
-                elevationInput.value = t('fetching_elevation') || 'Fetching elevation...';
-            }
-
-            const params = new URLSearchParams({ latitude: lat, longitude: lon });
-            const response = await fetch(`${API_ENDPOINTS.ELEVATION}?${params}`);
-            if (!response.ok) {
-                throw new Error(`Elevation API returned HTTP ${response.status}`);
-            }
-            const data = await response.json();
-            const elevation = data?.elevation?.[0];
-            if (Number.isFinite(elevation)) {
-                return elevation;
-            }
-        } catch (error) {
-            console.error('Error fetching elevation:', error);
-        }
+async function fetchElevation(lat, lon, signal) {
+    try {
+        const params = new URLSearchParams({ latitude: String(lat), longitude: String(lon) });
+        const resp = await fetch(`${API_ENDPOINTS.ELEVATION}?${params}`, { signal });
+        if (!resp.ok) return null;
+        const value = (await resp.json())?.elevation?.[0];
+        return Number.isFinite(value) ? Math.round(value) : null;
+    } catch (_) {
         return null;
     }
-    
-    async selectLocation(location) {
-        // Höhe abrufen
-        let elevation = ASTRO_CONSTANTS.VIENNA_ELEVATION; // Standard-Höhe als Fallback
-        
-        this.currentLocation = {
-            lat: parseFloat(location.lat),
-            lon: parseFloat(location.lon),
-            elevation: elevation, // Vorläufig Standard-Höhe
-            name: location.display_name.split(',')[0]
-        };
-        
-        // Aktualisiere die Anzeige
-        document.getElementById('current-location-display').textContent = 
-            `${this.currentLocation.name} (${this.currentLocation.lat.toFixed(4)}, ${this.currentLocation.lon.toFixed(4)})`;
-        
-        // Aktualisiere die Eingabefelder
-        document.getElementById('lat-input').value = this.currentLocation.lat;
-        document.getElementById('lon-input').value = this.currentLocation.lon;
-        document.getElementById('location-name-input').value = this.currentLocation.name;
-        document.getElementById('elevation-input').value = elevation; // Setze zunächst den Standardwert
-        
-        // Callback mit Standard-Höhe aufrufen, damit die Cache-Anzeige sofort aktualisiert wird
-        if (this.onLocationChange) {
-            this.onLocationChange(this.currentLocation);
-        }
-        
-        // Automatische Cache-Berechnung für den neuen Standort auslösen
-        this.triggerAutomaticPrecompute(this.currentLocation);
-        
-        // Höhe automatisch ermitteln
-        const fetchedElevation = await this.getElevationForCoordinates(location.lat, location.lon);
-        if (fetchedElevation !== null) {
-            elevation = fetchedElevation;
-            this.currentLocation.elevation = elevation;
-            
-            // Höhe aktualisieren
-            document.getElementById('elevation-input').value = this.currentLocation.elevation;
-            
-            // Callback erneut aufrufen mit der aktualisierten Höhe
-            if (this.onLocationChange) {
-                this.onLocationChange(this.currentLocation);
-            }
-            
-            // Automatische Cache-Berechnung mit aktualisierter Höhe auslösen
-            this.triggerAutomaticPrecompute(this.currentLocation);
+}
+
+export class LocationDialog {
+    /** @param {(loc: {latitude, longitude, elevation, name}) => void} onApply */
+    constructor(onApply) {
+        this.onApply = onApply;
+        this.dialog = new AppDialog('location-dialog');
+        this.dialog.onClose = () => this._abort();
+        this._controller = null;
+    }
+
+    _abort() {
+        this._controller?.abort();
+        this._controller = null;
+    }
+
+    _signal() {
+        this._abort();
+        this._controller = new AbortController();
+        return this._controller.signal;
+    }
+
+    open(current) {
+        const loc = current || DEFAULT_LOCATION;
+        this.dialog.setTitle(t('location_settings'));
+
+        this.searchInput = el('input', { type: 'search', id: 'loc-search', autocomplete: 'off', placeholder: t('search_location'), 'aria-label': t('search_location') });
+        const searchForm = el('form', { class: 'field-row', role: 'search' },
+            this.searchInput,
+            el('button', { type: 'submit', class: 'btn' }, t('search')));
+        searchForm.addEventListener('submit', (e) => { e.preventDefault(); this._search(); });
+        this.results = el('ul', { class: 'result-list', 'aria-label': t('search_results') });
+        this.searchStatus = statusLine();
+
+        this.latInput = el('input', { type: 'number', id: 'loc-lat', step: 'any', min: -90, max: 90, required: true, value: loc.latitude });
+        this.lonInput = el('input', { type: 'number', id: 'loc-lon', step: 'any', min: -180, max: 180, required: true, value: loc.longitude });
+        this.elevInput = el('input', { type: 'number', id: 'loc-elev', step: '1', value: Number.isFinite(loc.elevation) ? loc.elevation : '' });
+        this.nameInput = el('input', { type: 'text', id: 'loc-name', maxlength: 80, value: loc.name || '' });
+        this.formStatus = statusLine();
+        const form = el('form', { class: 'form-grid' },
+            el('label', { for: 'loc-lat' }, t('latitude')), this.latInput,
+            el('label', { for: 'loc-lon' }, t('longitude')), this.lonInput,
+            el('label', { for: 'loc-elev' }, t('elevation')), this.elevInput,
+            el('label', { for: 'loc-name' }, t('location_name')), this.nameInput,
+            el('div', { class: 'form-actions' },
+                el('button', { type: 'button', class: 'btn', onclick: () => this._fillElevation() }, t('fetch_elevation')),
+                el('button', { type: 'submit', class: 'btn btn-primary' }, t('apply'))),
+            this.formStatus);
+        form.addEventListener('submit', (e) => { e.preventDefault(); this._apply(); });
+
+        this.dialog.setBody(
+            el('p', { class: 'dialog-hint' }, `${t('current_location')}: ${loc.name || '—'} (${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)})`),
+            el('h3', {}, t('search')), searchForm, this.searchStatus, this.results,
+            el('h3', {}, t('manual_coordinates')), form);
+        this.dialog.open();
+        this.searchInput.focus();
+    }
+
+    async _search() {
+        const q = this.searchInput.value.trim();
+        if (!q) return;
+        const signal = this._signal();
+        this.results.replaceChildren();
+        this.searchStatus.textContent = `${t('searching')}…`;
+        try {
+            const params = new URLSearchParams({ format: 'json', q, limit: String(MAX_RESULTS) });
+            const resp = await fetch(`${API_ENDPOINTS.GEOCODE}?${params}`, { signal, headers: { Accept: 'application/json' } });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if (signal.aborted) return;
+            const list = Array.isArray(data) ? data.slice(0, MAX_RESULTS) : [];
+            this.searchStatus.textContent = list.length ? '' : t('no_results_found');
+            this.results.replaceChildren(...list.map((r) => this._resultItem(r)));
+        } catch (error) {
+            if (error?.name === 'AbortError') return;
+            console.error('Location search failed:', error);
+            this.searchStatus.textContent = t('search_error');
         }
     }
-    
-    applyManualCoordinates() {
-        const lat = parseFloat(document.getElementById('lat-input').value);
-        const lon = parseFloat(document.getElementById('lon-input').value);
-        const elevation = parseFloat(document.getElementById('elevation-input').value);
-        const name = document.getElementById('location-name-input').value.trim() || 'Custom Location';
-        
-        // Validierung
-        if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-            alert(t('invalid_coordinates'));
+
+    _resultItem(result) {
+        const lat = Number.parseFloat(result.lat);
+        const lon = Number.parseFloat(result.lon);
+        const title = String(result.display_name || '');
+        const button = el('button', { type: 'button', class: 'result-item' },
+            el('span', { class: 'result-name' }, title),
+            el('span', { class: 'result-coords' }, `${lat.toFixed(4)}, ${lon.toFixed(4)}`));
+        button.addEventListener('click', () => this._pick({ lat, lon, name: title.split(',')[0].trim() }));
+        return el('li', {}, button);
+    }
+
+    /** A result fills the form; its elevation is fetched once, then it is applied (L29). */
+    async _pick({ lat, lon, name }) {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        this.latInput.value = lat;
+        this.lonInput.value = lon;
+        this.nameInput.value = name;
+        this.elevInput.value = '';
+        this.formStatus.textContent = t('fetching_elevation');
+        const signal = this._signal();
+        const elevation = await fetchElevation(lat, lon, signal);
+        if (signal.aborted || !this.dialog.isOpen) return;
+        this.elevInput.value = elevation ?? '';
+        this.formStatus.textContent = elevation == null ? t('elevation_not_available') : '';
+        this._apply();
+    }
+
+    async _fillElevation() {
+        const lat = Number.parseFloat(this.latInput.value);
+        const lon = Number.parseFloat(this.lonInput.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            this.formStatus.textContent = t('invalid_coordinates');
             return;
         }
-        
-        // Validierung der Höhe (einfache Plausibilitätsprüfung)
-        const validElevation = !isNaN(elevation) ? elevation : ASTRO_CONSTANTS.VIENNA_ELEVATION;
-        
-        this.currentLocation = { lat, lon, elevation: validElevation, name };
-        
-        // Aktualisiere die Anzeige
-        document.getElementById('current-location-display').textContent = 
-            `${this.currentLocation.name} (${this.currentLocation.lat.toFixed(4)}, ${this.currentLocation.lon.toFixed(4)})`;
-        
-        // Callback aufrufen
-        if (this.onLocationChange) {
-            this.onLocationChange(this.currentLocation);
+        this.formStatus.textContent = t('fetching_elevation');
+        const signal = this._signal();
+        const elevation = await fetchElevation(lat, lon, signal);
+        if (signal.aborted || !this.dialog.isOpen) return;
+        if (elevation == null) {
+            this.formStatus.textContent = t('elevation_not_available');
+        } else {
+            this.elevInput.value = elevation;
+            this.formStatus.textContent = '';
         }
-        
-        // Automatische Cache-Berechnung für manuell eingegebenen Standort auslösen
-        this.triggerAutomaticPrecompute(this.currentLocation);
-        
-        // Dialog schließen nach Übernahme der Koordinaten
-        this.removeDialog();
     }
-    
-    // Automatische Cache-Berechnung für neuen Standort auslösen
-    async triggerAutomaticPrecompute(location) {
-        try {
-            // Importiere API_ENDPOINTS dynamisch
-            const { API_ENDPOINTS } = await import('./constants.js');
-            
-            // Berechne automatisch Cache für die nächsten 48 Stunden
-            const today = new Date();
-            const twoDaysLater = new Date();
-            twoDaysLater.setDate(today.getDate() + 2);
-            
-            const startDate = today.toISOString().split('T')[0];
-            const endDate = twoDaysLater.toISOString().split('T')[0];
-            
-            // Legacy precompute trigger - disabled after RabbitMQ migration
-            // RabbitMQ automatically triggers precompute on cache miss
-            console.log(`[RabbitMQ] Precompute will be triggered automatically on first request for ${location.name}`);
-            
-        } catch (error) {
-            console.error('Error triggering automatic precompute:', error);
+
+    _apply() {
+        const lat = Number.parseFloat(this.latInput.value);
+        const lon = Number.parseFloat(this.lonInput.value);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            this.formStatus.textContent = t('invalid_coordinates');
+            return;
         }
+        const elev = Number.parseFloat(this.elevInput.value);
+        const name = this.nameInput.value.trim() || t('custom_location');
+        this.dialog.close();
+        this.onApply({ latitude: lat, longitude: lon, elevation: Number.isFinite(elev) ? elev : 0, name });
     }
 }

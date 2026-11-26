@@ -1,0 +1,179 @@
+{
+ "_comment": "Grid of the renderer before the 2026-11 redesign (skyRenderer.js), sky over 48.2N 16.37E at 2026-11-26T20:00Z; emoji mapped to the text glyphs (☀️→☉, 🌖→☾). Rows not listed are blank.",
+ "bodies": {
+  "sun": {
+   "name": "sun",
+   "altitude": -47.81532662038029,
+   "azimuth": 295.56390087189294,
+   "magnitude": -26.74
+  },
+  "moon": {
+   "name": "moon",
+   "altitude": 29.10312415210004,
+   "azimuth": 81.79487300739638,
+   "magnitude": -12.6187059387811
+  },
+  "mercury": {
+   "name": "mercury",
+   "altitude": -51.908378978932824,
+   "azimuth": 323.71296693738446,
+   "magnitude": -0.6721165413577224
+  },
+  "venus": {
+   "name": "venus",
+   "altitude": -50.97563617898305,
+   "azimuth": 356.57126783115575,
+   "magnitude": -4.904551075438594
+  },
+  "mars": {
+   "name": "mars",
+   "altitude": -14.662363098316298,
+   "azimuth": 49.28398740950878,
+   "magnitude": 0.5263227927104022
+  },
+  "jupiter": {
+   "name": "jupiter",
+   "altitude": -12.5545005529393,
+   "azimuth": 52.77726712284857,
+   "magnitude": -2.163319795408273
+  },
+  "saturn": {
+   "name": "saturn",
+   "altitude": 41.17485447236396,
+   "azimuth": 198.27732188251866,
+   "magnitude": 0.5874205928035625
+  },
+  "uranus": {
+   "name": "uranus",
+   "altitude": 48.13890375569179,
+   "azimuth": 116.89214198482097,
+   "magnitude": 5.7
+  },
+  "neptune": {
+   "name": "neptune",
+   "altitude": 38.183991651196955,
+   "azimuth": 205.82856568334344,
+   "magnitude": 7.8
+  }
+ },
+ "horizon": {
+  "geometry": {
+   "mode": "horizon",
+   "cols": 80,
+   "rows": 40,
+   "fovDeg": 360,
+   "centerAz": 180
+  },
+  "rows": [
+   [
+    0,
+    "+90"
+   ],
+   [
+    7,
+    "+60"
+   ],
+   [
+    9,
+    "                          ♅"
+   ],
+   [
+    11,
+    "                                            ♄"
+   ],
+   [
+    12,
+    "                                              ♆"
+   ],
+   [
+    13,
+    "+30"
+   ],
+   [
+    14,
+    "                   ☾"
+   ],
+   [
+    20,
+    "╭────────────────────O──────────────────S───────────────────W──────────────────╮"
+   ],
+   [
+    23,
+    "            ♂"
+   ],
+   [
+    26,
+    "-30"
+   ],
+   [
+    30,
+    "                                                                 ☉"
+   ],
+   [
+    31,
+    "                                                                       ☿      ♀"
+   ],
+   [
+    33,
+    "-60"
+   ],
+   [
+    39,
+    "-90"
+   ]
+  ]
+ },
+ "planisphere": {
+  "geometry": {
+   "mode": "planisphere",
+   "cols": 80,
+   "rows": 80,
+   "rotation": 0,
+   "staticRotation": 180,
+   "aspect": 2.25,
+   "scale": 0.7
+  },
+  "rows": [
+   [
+    1,
+    "                                        S"
+   ],
+   [
+    34,
+    "                                             ♄ ♆"
+   ],
+   [
+    38,
+    "                             ♅"
+   ],
+   [
+    40,
+    " O                                                                             W"
+   ],
+   [
+    41,
+    "                      ☾"
+   ],
+   [
+    48,
+    "                ♃                                                            ☉"
+   ],
+   [
+    49,
+    "                 ♂"
+   ],
+   [
+    55,
+    "                                                                 ☿"
+   ],
+   [
+    58,
+    "                                          ♀"
+   ],
+   [
+    79,
+    "                                        N"
+   ]
+  ]
+ }
+}

@@ -15,8 +15,6 @@ DATA_DIR = Path(os.environ.get("ASCII_SKY_DATA_DIR", _DEFAULT_DATA_DIR)).resolve
 DATA_CACHE_DIR = DATA_DIR / "cache"
 
 # Commonly accessed data files
-DE421_PATH = DATA_DIR / "de421.bsp"
-HIPPARCOS_MAIN_PATH = DATA_DIR / "hip_main.dat"
 CONSTELLATIONSHIP_PATH = DATA_DIR / "constellationship.fab"
 COMET_ELEMENTS_PATH = DATA_CACHE_DIR / "COMET_ELEMENTS.txt"
 MPCORB_PATH = DATA_CACHE_DIR / "MPCORB.DAT.gz"

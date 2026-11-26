@@ -148,7 +148,6 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300
 # Worker Setup
 PRECOMPUTE_WORKERS=2
 UNIFIED_WORKERS=2
-WORKER_MONITOR=1
 
 # Precompute Settings
 ASCII_SKY_PRECOMPUTE_HOURS=168
@@ -411,7 +410,6 @@ run_tests() {
         echo "RABBITMQ_B=worker-b.example.org"
         echo "RABBITMQ_C=worker-c.example.org"
         echo "UNIFIED_WORKERS=8"
-        echo "WORKER_MONITOR=1"
         exit 1
     fi
     print_info "Loading .env file..."

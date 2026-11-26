@@ -1,0 +1,128 @@
+/* Layer order for all stylesheets of asciisky (loaded first). */
+@layer tokens, base, layout, sky, components;
+
+/*
+ * Colour themes.  Each theme sets the same semantic tokens; components read
+ * only these.  --fg-dim and --fg-muted keep a contrast of at least 4.5:1 on
+ * --bg and --surface (checked by test_frontend_theme_contrast).
+ */
+@layer tokens {
+    :root,
+    :root[data-theme="green"] {
+        --accent: #00ff00;
+        --accent-rgb: 0 255 0;
+        --fg: #7dff7d;
+        --fg-dim: #4fcf4f;
+        --fg-muted: #3fae3f;
+        --bg: #050805;
+        --surface: #0b120b;
+        --surface-2: #122012;
+        --border: #1f4a1f;
+        --ui-bg: #0f2a0f;
+        --ui-bg-hover: #174017;
+        --ui-bg-active: #1f5a1f;
+        --on-accent: #001a00;
+        --danger: #ff8080;
+        --band-astro: rgb(0 90 60 / .45);
+        --band-naut: rgb(0 140 80 / .30);
+        --band-civil: rgb(120 220 140 / .20);
+        --curve-rise: #d8ff5a;
+        --curve-set: #3fe0b0;
+        --curve-transit: #9dff9d;
+    }
+
+    :root[data-theme="red"] {
+        /* Dark adaptation: no colour but red anywhere. */
+        --accent: #ff4b4b;
+        --accent-rgb: 255 75 75;
+        --fg: #ff7a7a;
+        --fg-dim: #e25858;
+        --fg-muted: #de5454;
+        --bg: #0a0404;
+        --surface: #140909;
+        --surface-2: #200e0e;
+        --border: #4d1a1a;
+        --ui-bg: #2a0f0f;
+        --ui-bg-hover: #401616;
+        --ui-bg-active: #5a1d1d;
+        --on-accent: #1a0000;
+        --danger: #ffb0b0;
+        --band-astro: rgb(90 10 10 / .5);
+        --band-naut: rgb(140 25 25 / .35);
+        --band-civil: rgb(220 70 70 / .22);
+        --curve-rise: #ff9a9a;
+        --curve-set: #c83a3a;
+        --curve-transit: #ff6b6b;
+    }
+
+    :root[data-theme="blue"] {
+        --accent: #4fd5ff;
+        --accent-rgb: 79 213 255;
+        --fg: #9be6ff;
+        --fg-dim: #5cbfe0;
+        --fg-muted: #4aa6c6;
+        --bg: #03070a;
+        --surface: #081118;
+        --surface-2: #0d1c27;
+        --border: #1b4258;
+        --ui-bg: #0c2636;
+        --ui-bg-hover: #12384f;
+        --ui-bg-active: #194d6b;
+        --on-accent: #001520;
+        --danger: #ff9a9a;
+        --band-astro: rgb(1 54 107 / .45);
+        --band-naut: rgb(0 96 192 / .30);
+        --band-civil: rgb(141 207 248 / .20);
+        --curve-rise: #ffd166;
+        --curve-set: #5b9dff;
+        --curve-transit: #9be6ff;
+    }
+
+    :root[data-theme="amber"] {
+        --accent: #ffc857;
+        --accent-rgb: 255 200 87;
+        --fg: #ffd98a;
+        --fg-dim: #d9ad52;
+        --fg-muted: #c29844;
+        --bg: #0a0703;
+        --surface: #141008;
+        --surface-2: #20190c;
+        --border: #4d3b17;
+        --ui-bg: #2a200c;
+        --ui-bg-hover: #3f3012;
+        --ui-bg-active: #594418;
+        --on-accent: #1a1200;
+        --danger: #ff9a7a;
+        --band-astro: rgb(90 60 0 / .45);
+        --band-naut: rgb(150 100 10 / .30);
+        --band-civil: rgb(255 210 120 / .18);
+        --curve-rise: #ffe08a;
+        --curve-set: #e08a3a;
+        --curve-transit: #ffc857;
+    }
+
+    :root {
+        --glow: 0 0 6px rgb(var(--accent-rgb) / .35);
+        --overlay-constellation: rgb(var(--accent-rgb) / .7);
+        --overlay-messier: rgb(var(--accent-rgb) / .95);
+        --grid-line: rgb(var(--accent-rgb) / .22);
+        --horizon: rgb(var(--accent-rgb) / .9);
+        --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+        --radius: 6px;
+        --gap: 12px;
+        --bar-h: 52px;
+        --tap: 40px;
+        --sheet-peek: 56px;
+        --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, "Liberation Mono", monospace;
+        --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+        color-scheme: dark;
+    }
+
+    @media (pointer: coarse) {
+        :root { --tap: 44px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        :root { --glow: none; }
+    }
+}

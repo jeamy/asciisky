@@ -3,19 +3,15 @@ API routes for magnitude filter settings
 """
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
-
 import settings
+from api.models import MagnitudeFilters
 from api.routes.auth import _get_user_by_id, _session_clear_user
 
 router = APIRouter()
-
-class MagnitudeFilters(BaseModel):
-    asteroidMaxMagnitude: float | None = None
-    cometMaxMagnitude: float | None = None
-
+logger = logging.getLogger(__name__)
 
 def get_user_filters_from_db(user_id: int) -> dict | None:
     """Load magnitude filters from database for a specific user"""
@@ -31,7 +27,7 @@ def get_user_filters_from_db(user_id: int) -> dict | None:
             return filters
         return None
     except Exception as e:
-        print(f"Error loading user filters from DB: {e}")
+        logger.warning("Error loading user filters from DB: %s", e)
         return None
 
 
@@ -56,7 +52,7 @@ def save_user_filters_to_db(user_id: int, filters: dict) -> bool:
         db_save_user_settings(int(user_id), merged_settings)
         return True
     except Exception as e:
-        print(f"Error saving user filters to DB: {e}")
+        logger.warning("Error saving user filters to DB: %s", e)
         return False
 
 
@@ -78,6 +74,15 @@ def _resolve_session_user_id(request: Request) -> int | None:
     return int(user["id"])
 
 
+SESSION_FILTERS_KEY = "filters"
+
+
+def session_filters(request: Request) -> dict | None:
+    """Filters an anonymous visitor chose; they live in that visitor's session only."""
+    filters = request.session.get(SESSION_FILTERS_KEY) if hasattr(request, "session") else None
+    return filters if isinstance(filters, dict) else None
+
+
 def _get_filters_sync(request: Request) -> dict:
     """Blocking body of GET /filters (session/DB lookup + optional file read)."""
     user_id = _resolve_session_user_id(request)
@@ -86,58 +91,44 @@ def _get_filters_sync(request: Request) -> dict:
         filters = get_user_filters_from_db(user_id)
         if filters:
             return {"success": True, "filters": filters, "source": "database"}
+    else:
+        filters = session_filters(request)
+        if filters:
+            return {"success": True, "filters": {**settings.get_magnitude_filters(), **filters}, "source": "session"}
 
-    filters = settings.get_magnitude_filters()
-    return {"success": True, "filters": filters, "source": "file"}
+    return {"success": True, "filters": settings.get_magnitude_filters(), "source": "defaults"}
 
 
 def _set_filters_sync(request: Request, filters: MagnitudeFilters) -> dict:
-    """Blocking body of POST /filters (session/DB lookup + DB or file write)."""
+    """Blocking body of POST /filters.
+
+    Signed-in users store their filters in the database.  Anonymous visitors
+    keep theirs in their own session: the server-wide defaults in
+    ``cache/user_settings.json`` are never written by a request.
+    """
     user_id = _resolve_session_user_id(request)
 
     if user_id is not None:
-        old_filters = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
+        base = get_user_filters_from_db(user_id) or settings.get_default_magnitude_filters()
     else:
-        old_filters = settings.get_magnitude_filters()
+        base = {**settings.get_magnitude_filters(), **(session_filters(request) or {})}
 
-    old_asteroid = old_filters.get("asteroidMaxMagnitude")
-    old_comet = old_filters.get("cometMaxMagnitude")
-
-    updated_filters = old_filters.copy()
+    updated_filters = dict(base)
     if filters.asteroidMaxMagnitude is not None:
         updated_filters["asteroidMaxMagnitude"] = float(filters.asteroidMaxMagnitude)
     if filters.cometMaxMagnitude is not None:
         updated_filters["cometMaxMagnitude"] = float(filters.cometMaxMagnitude)
 
     if user_id is not None:
-        success = save_user_filters_to_db(user_id, updated_filters)
-        if not success:
+        if not save_user_filters_to_db(user_id, updated_filters):
             raise HTTPException(status_code=500, detail="Failed to save filters to database")
         storage = "database"
     else:
-        settings.set_magnitude_filters(
-            asteroid_max=filters.asteroidMaxMagnitude,
-            comet_max=filters.cometMaxMagnitude
-        )
-        storage = "file"
+        request.session[SESSION_FILTERS_KEY] = updated_filters
+        storage = "session"
 
-    filters_changed = (
-        (filters.asteroidMaxMagnitude is not None and
-         old_asteroid != filters.asteroidMaxMagnitude) or
-        (filters.cometMaxMagnitude is not None and
-         old_comet != filters.cometMaxMagnitude)
-    )
-
-    if filters_changed:
-        print(f"Filters changed from {old_filters} to {updated_filters} (storage: {storage})")
-        print("No cache invalidation needed - filtering happens at API level")
-
-    return {
-        "success": True,
-        "filters": updated_filters,
-        "cache_invalidated": False,  # No cache invalidation needed - filtering at API level
-        "storage": storage
-    }
+    # Filtering happens per request on unfiltered buckets: no cache invalidation.
+    return {"success": True, "filters": updated_filters, "cache_invalidated": False, "storage": storage}
 
 
 @router.get("/filters")
@@ -148,14 +139,14 @@ async def get_filters(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/filters")
 async def set_filters(filters: MagnitudeFilters, request: Request):
-    """Set magnitude filter settings and invalidate cache"""
+    """Set magnitude filter settings for this user or session."""
     try:
         return await asyncio.to_thread(_set_filters_sync, request, filters)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

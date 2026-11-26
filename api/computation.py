@@ -1,4 +1,7 @@
+import logging
 import math
+import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 
 from skyfield import almanac
@@ -7,6 +10,8 @@ from skyfield.magnitudelib import planetary_magnitude
 
 from data_paths import DATA_DIR
 from timezone_utils import get_tzinfo
+
+logger = logging.getLogger(__name__)
 
 # Load Skyfield data
 LOADER = Loader(str(DATA_DIR))
@@ -63,28 +68,28 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _compute_body_position(body, observer, t):
-    """Return apparent alt/az and Earth-center distance (au) for a body."""
-    astrometric = observer.at(t).observe(body)
-    apparent = astrometric.apparent()
-    alt, az, _distance = apparent.altaz()
+def _compute_body_position(body, observer_at, earth_at):
+    """Return apparent alt/az and Earth-center distance (au) for a body.
 
-    earth_center = eph['earth'].at(t)
-    earth_to_body = earth_center.observe(body)
-    earth_distance = earth_to_body.distance().au
-
+    ``observer_at`` and ``earth_at`` are the observer's and the geocenter's
+    positions at the snapshot time, computed once per snapshot.
+    """
+    astrometric = observer_at.observe(body)
+    alt, az, _distance = astrometric.apparent().altaz()
+    earth_distance = earth_at.observe(body).distance().au
     return astrometric, alt, az, earth_distance
 
 
-def _body_magnitude(name: str, astrometric, t) -> float:
+def _moon_phase_factor(phase_degrees: float) -> float:
+    return 0.5 * (1 - math.cos(math.radians(phase_degrees)))
+
+
+def _body_magnitude(name: str, astrometric, moon_phase_degrees: float | None = None) -> float:
     if name == 'sun':
         return _DEFAULT_MAGNITUDES['sun']
 
     if name == 'moon':
-        moon_phase = almanac.moon_phase(eph, t)
-        moon_phase_angle = float(moon_phase.radians)
-        phase_factor = 0.5 * (1 - math.cos(moon_phase_angle))
-        return moon_apparent_magnitude(phase_factor)
+        return moon_apparent_magnitude(_moon_phase_factor(moon_phase_degrees or 0.0))
 
     if name in ('mercury', 'venus', 'mars', 'jupiter', 'saturn'):
         try:
@@ -95,52 +100,52 @@ def _body_magnitude(name: str, astrometric, t) -> float:
     return _DEFAULT_MAGNITUDES.get(name, 0)
 
 
-def _localize_naive(naive_dt: datetime, timezone_obj):
-    if hasattr(timezone_obj, 'localize'):
-        return timezone_obj.localize(naive_dt)
-    return naive_dt.replace(tzinfo=timezone_obj)
+# Rise, set and transit change once per local day: cache them per rounded
+# location, local date and body (``/celestial`` is polled every minute).
+_DAILY_EVENTS_MAX = 4096
+_daily_events: OrderedDict[tuple, tuple[str | None, str | None, str | None]] = OrderedDict()
+_daily_events_lock = threading.Lock()
 
 
-def _compute_transit_time(rise_time: str, set_time: str, tz, local_dt: datetime) -> str | None:
-    rise_naive = datetime.strptime(rise_time, '%H:%M').replace(
-        year=local_dt.year, month=local_dt.month, day=local_dt.day)
-    set_naive = datetime.strptime(set_time, '%H:%M').replace(
-        year=local_dt.year, month=local_dt.month, day=local_dt.day)
-    rise_dt = _localize_naive(rise_naive, tz)
-    set_dt = _localize_naive(set_naive, tz)
-    if set_dt < rise_dt:
-        set_dt += timedelta(days=1)
-    transit_dt = rise_dt + (set_dt - rise_dt) / 2
-    return transit_dt.strftime('%H:%M')
+def _search_daily_events(body, location, tz, day) -> tuple[str | None, str | None, str | None]:
+    """First rise, first set and upper transit within the local day, as '%H:%M'."""
+    start = _local_midnight(day, tz)
+    end = _local_midnight(day + timedelta(days=1), tz)
+    t0 = ts.from_datetime(start)
+    t1 = ts.from_datetime(end)
 
-
-def _find_rise_set_transit(body, location, tz, dt_utc: datetime):
-    """Return (rise_time, set_time, transit_time) as '%H:%M' strings or None."""
-    f = almanac.risings_and_settings(eph, body, location)
-    local_dt = dt_utc.astimezone(tz)
-    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    utc_midnight = local_midnight.astimezone(timezone.utc)
-    start_time = ts.from_datetime(utc_midnight)
-    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
-    times, events = almanac.find_discrete(start_time, end_time, f)
-
-    rise_time, set_time = None, None
-    today_local = local_dt.date()
-
+    rise_time = set_time = transit_time = None
+    times, events = almanac.find_discrete(t0, t1, almanac.risings_and_settings(eph, body, location))
     for ti, event in zip(times, events):
-        event_local = ti.utc_datetime().astimezone(tz)
-        if event_local.date() == today_local:
-            local_time_str = event_local.strftime('%H:%M')
-            if event == 1 and rise_time is None:
-                rise_time = local_time_str
-            elif event == 0 and set_time is None:
-                set_time = local_time_str
+        local = ti.utc_datetime().astimezone(tz)
+        if event == 1 and rise_time is None:
+            rise_time = local.strftime('%H:%M')
+        elif event == 0 and set_time is None:
+            set_time = local.strftime('%H:%M')
 
-    transit_time = None
-    if rise_time and set_time:
-        transit_time = _compute_transit_time(rise_time, set_time, tz, local_dt)
-
+    times, events = almanac.find_discrete(t0, t1, almanac.meridian_transits(eph, body, location))
+    for ti, event in zip(times, events):
+        if event == 1:  # upper transit
+            transit_time = ti.utc_datetime().astimezone(tz).strftime('%H:%M')
+            break
     return rise_time, set_time, transit_time
+
+
+def _find_rise_set_transit(name: str, body, location, tz, dt_utc: datetime, loc_key: tuple):
+    """Return (rise_time, set_time, transit_time) of the local day as '%H:%M' or None."""
+    day = dt_utc.astimezone(tz).date()
+    key = (loc_key, day, name)
+    with _daily_events_lock:
+        cached = _daily_events.get(key)
+        if cached is not None:
+            _daily_events.move_to_end(key)
+            return cached
+    result = _search_daily_events(body, location, tz, day)
+    with _daily_events_lock:
+        _daily_events[key] = result
+        while len(_daily_events) > _DAILY_EVENTS_MAX:
+            _daily_events.popitem(last=False)
+    return result
 
 
 def _build_body_entry(
@@ -167,37 +172,37 @@ def _build_body_entry(
     }
 
 
-def _add_moon_phase(body_entry: dict, astrometric, t) -> None:
-    illumination = astrometric.fraction_illuminated(eph['sun'])
-    phase_degrees = almanac.moon_phase(eph, t).degrees
-    phase_name = ""
-    if phase_degrees < 22.5 or phase_degrees >= 337.5:
-        phase_name = "new_moon"
-    elif phase_degrees < 67.5:
-        phase_name = "waxing_crescent"
-    elif phase_degrees < 112.5:
-        phase_name = "first_quarter"
-    elif phase_degrees < 177.5:
-        phase_name = "waxing_gibbous"
-    elif phase_degrees < 182.5:
-        phase_name = "full_moon"
-    elif phase_degrees < 247.5:
-        phase_name = "waning_gibbous"
-    elif phase_degrees < 292.5:
-        phase_name = "last_quarter"
-    else:
-        phase_name = "waning_crescent"
-    body_entry["phase"] = illumination
-    body_entry["phase_name"] = phase_name
+_MOON_PHASE_NAMES = (
+    "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous",
+    "full_moon", "waning_gibbous", "last_quarter", "waning_crescent",
+)
 
 
-def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc: datetime) -> dict:
+def moon_phase_name(phase_degrees: float) -> str:
+    """Name of the phase: eight sectors of 45 degrees, each centered on its phase."""
+    return _MOON_PHASE_NAMES[int(((phase_degrees + 22.5) % 360) // 45)]
+
+
+def _add_moon_phase(body_entry: dict, astrometric, phase_degrees: float) -> None:
+    body_entry["phase"] = astrometric.fraction_illuminated(eph['sun'])
+    body_entry["phase_name"] = moon_phase_name(phase_degrees)
+
+
+def compute_celestial_snapshot(
+    lat: float, lon: float, elevation: float, dt_utc: datetime, only: str | None = None,
+) -> dict:
+    """Positions, magnitudes and daily events of the solar system bodies.
+
+    ``only`` restricts the snapshot to one body (``/celestial/{body_id}``).
+    """
     dt_utc = _ensure_utc(dt_utc)
 
     tz = get_tzinfo(lat, lon)
     t = ts.from_datetime(dt_utc)
     location = wgs84.latlon(lat, lon, elevation_m=elevation)
-    observer = eph['earth'] + location
+    observer_at = (eph['earth'] + location).at(t)
+    earth_at = eph['earth'].at(t)
+    loc_key = (round(lat, 4), round(lon, 4), round(elevation))
 
     result = {
         "time": dt_utc.isoformat(),
@@ -206,14 +211,21 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
         "loading": False
     }
 
-    for name, body in CELESTIAL_BODIES.items():
+    bodies = CELESTIAL_BODIES.items() if only is None else [(only, CELESTIAL_BODIES[only])]
+    moon_phase_degrees = None
+    if only in (None, 'moon'):
+        moon_phase_degrees = float(almanac.moon_phase(eph, t).degrees)
+
+    for name, body in bodies:
         try:
-            astrometric, alt, az, earth_distance = _compute_body_position(body, observer, t)
-            mag = _body_magnitude(name, astrometric, t)
+            astrometric, alt, az, earth_distance = _compute_body_position(body, observer_at, earth_at)
+            mag = _body_magnitude(name, astrometric, moon_phase_degrees)
 
             try:
-                rise_time, set_time, transit_time = _find_rise_set_transit(body, location, tz, dt_utc)
+                rise_time, set_time, transit_time = _find_rise_set_transit(
+                    name, body, location, tz, dt_utc, loc_key)
             except Exception:
+                logger.debug("Rise/set search failed for %s", name, exc_info=True)
                 rise_time, set_time, transit_time = None, None, None
 
             body_entry = _build_body_entry(
@@ -222,17 +234,18 @@ def compute_celestial_snapshot(lat: float, lon: float, elevation: float, dt_utc:
             )
 
             if name == 'moon':
-                _add_moon_phase(body_entry, astrometric, t)
+                _add_moon_phase(body_entry, astrometric, moon_phase_degrees)
 
             result["bodies"][name] = body_entry
-        except Exception as e:
-            print(f"Error calculating position for {name}: {e!s}")
-            continue
+        except Exception:
+            logger.exception("Error calculating position for %s", name)
 
     return result
 
 
-SUNPATH_VERSION = 5
+# 6: twilight day windows end at the next local midnight on DST days (L15),
+#    the upper transit is taken from the event type.
+SUNPATH_VERSION = 6
 
 
 def _local_midnight(day: datetime, tz) -> datetime:
@@ -267,18 +280,14 @@ def _build_sun_events_by_date(times, events, tz):
     return sun_events_by_date
 
 
-def _build_transit_events_by_date(transit_times, transit_events, location, sun, tz):
+def _build_transit_events_by_date(transit_times, transit_events, tz):
+    """Local time of the upper transit (event 1) per local date."""
     transit_events_by_date = {}
     for ti, ev in zip(transit_times, transit_events):
-        try:
-            dt_local = ti.utc_datetime().astimezone(tz)
-            d = dt_local.date()
-            alt_deg = (location.at(ti).observe(sun).apparent().altaz()[0].degrees)
-            prev = transit_events_by_date.get(d)
-            if prev is None or alt_deg > prev[1]:
-                transit_events_by_date[d] = (dt_local, alt_deg, int(ev))
-        except Exception:
+        if ev != 1:
             continue
+        dt_local = ti.utc_datetime().astimezone(tz)
+        transit_events_by_date.setdefault(dt_local.date(), dt_local)
     return transit_events_by_date
 
 
@@ -451,8 +460,7 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
 
     transit_func = almanac.meridian_transits(eph, sun, location)
     transit_times, transit_events = almanac.find_discrete(t_start, t_end, transit_func)
-    transit_events_by_date = _build_transit_events_by_date(
-        transit_times, transit_events, location, sun, tz)
+    transit_events_by_date = _build_transit_events_by_date(transit_times, transit_events, tz)
 
     has_twilight, all_segments = _build_twilight_segments(t_start, t_end, twilight_f)
 
@@ -468,16 +476,15 @@ def compute_sunpath_year(lat: float, lon: float, elevation: float, year: int) ->
         twilight_periods = {'astronomical': [], 'nautical': [], 'civil': []}
         if has_twilight:
             day_start_local = lm
-            day_end_local = lm + timedelta(days=1)
+            # The next local midnight, not lm + 24 h: DST days last 23 or 25 hours.
+            day_end_local = _local_midnight(current + timedelta(days=1), tz)
             raw_periods, segment_idx = _collect_twilight_periods(
                 day_start_local, day_end_local, all_segments, segment_idx, tz)
 
             for kind in twilight_periods:
                 twilight_periods[kind] = _merge_sorted_periods(sorted(raw_periods[kind]))
 
-        transit_dt = None
-        if day_date in transit_events_by_date:
-            transit_dt = transit_events_by_date[day_date][0]
+        transit_dt = transit_events_by_date.get(day_date)
 
         points.append(_build_day_point(
             day_date, sunrise_dt, sunset_dt, transit_dt, twilight_periods, tz))

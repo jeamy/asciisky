@@ -13,12 +13,21 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# RabbitMQ Settings (für Migration)
-RABBITMQ_URL = os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@127.0.0.1:5672/')
-RABBITMQ_ENABLED = os.environ.get('USE_RABBITMQ', 'false').lower() in ('true', '1', 'yes', 'on')
-RABBITMQ_TIMEOUT = int(os.environ.get('RABBITMQ_TIMEOUT', '30'))
-RABBITMQ_RETRY_ATTEMPTS = int(os.environ.get('RABBITMQ_RETRY_ATTEMPTS', '3'))
-FALLBACK_TO_OLD_ON_ERROR = os.environ.get('FALLBACK_TO_OLD_ON_ERROR', 'true').lower() in ('true', '1', 'yes', 'on')
+def is_production() -> bool:
+    return os.environ.get("ASCII_SKY_ENV", "development").lower() in {"production", "prod"}
+
+
+def require_non_default_secret(name: str, value: str) -> str:
+    """Fail closed when a production process still uses the 'changeme' default."""
+    if is_production() and "changeme" in value:
+        raise RuntimeError(f"{name} still uses the default credentials; set it in production")
+    return value
+
+
+# RabbitMQ connection shared by the API, the coordinator and the workers
+RABBITMQ_URL = require_non_default_secret(
+    "RABBITMQ_URL", os.environ.get('RABBITMQ_URL', 'amqp://admin:changeme@127.0.0.1:5672/')
+)
 
 # Pfad zur Einstellungsdatei
 SETTINGS_FILE = os.path.join("cache", "user_settings.json")

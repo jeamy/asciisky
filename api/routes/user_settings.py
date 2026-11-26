@@ -1,11 +1,13 @@
+import asyncio
 import copy
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg.errors import ForeignKeyViolation
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from api.models import LocationPayload, MagnitudeFilters
 from api.routes.auth import _get_user_by_id, _session_clear_user
 from db_utils import get_user_settings as db_get_user_settings
 from db_utils import save_user_settings as db_save_user_settings
@@ -17,12 +19,18 @@ router = APIRouter()
 
 
 class UserSettingsModel(BaseModel):
-    location: dict[str, Any] | None = None
+    """Settings a signed-in user may store.
+
+    ``location`` and ``filters`` are validated because the precompute
+    coordinator reads every stored location (an unchecked value would break
+    its query for all users).
+    """
+    location: LocationPayload | None = None
     display: dict[str, Any] | None = None
     simTime: dict[str, Any] | None = None
-    filters: dict[str, Any] | None = None
-    theme: str | None = None
-    language: str | None = None
+    filters: MagnitudeFilters | None = None
+    theme: str | None = Field(default=None, max_length=20)
+    language: str | None = Field(default=None, max_length=5)
     options: dict[str, Any] | None = None
 
 
@@ -38,11 +46,12 @@ def _default_user_settings() -> dict[str, Any]:
             "elevation": float(base_location.get("elevation", 171.0)),
             "name": base_location.get("name", "Wien"),
         },
+        # No centerAz here: the page derives it from an older horizontalShift
+        # when a stored record has no centerAz yet.
         "display": {
-            "horizontalShift": 0,
+            "viewMode": "horizon",
         },
         "simTime": {
-            "enabled": False,
             "offsetMinutes": 0,
         },
         "filters": copy.deepcopy(base_filters),
@@ -81,52 +90,47 @@ def _require_authenticated_user(request: Request) -> int:
     return int(user["id"])
 
 
+def _load_settings_sync(request: Request) -> dict[str, Any]:
+    user_id = _require_authenticated_user(request)
+    stored = db_get_user_settings(user_id)
+    if stored is None:
+        return _default_user_settings()
+    return _merge_settings(_default_user_settings(), stored)
+
+
+def _save_settings_sync(request: Request, incoming: dict[str, Any]) -> dict[str, Any]:
+    user_id = _require_authenticated_user(request)
+    current = db_get_user_settings(user_id) or {}
+    final_settings = _merge_settings(_merge_settings(_default_user_settings(), current), incoming)
+    try:
+        db_save_user_settings(user_id, final_settings)
+    except ForeignKeyViolation:
+        # The user may have been deleted after session validation.
+        _session_clear_user(request)
+        raise HTTPException(status_code=401, detail="Session user no longer exists") from None
+    return final_settings
+
+
 @router.get("/user/settings")
 async def get_user_settings(request: Request) -> dict[str, Any]:
-    """Return settings JSON for the currently authenticated user.
-
-    The user_id is taken from the session; unauthenticated callers receive 401.
-    """
-    user_id = _require_authenticated_user(request)
-    logger.info("GET /user/settings user_id=%s", user_id)
-
+    """Return the settings of the signed-in user (401 for anonymous callers)."""
     try:
-        stored = db_get_user_settings(int(user_id))
-        logger.info("GET /user/settings user_id=%s stored_exists=%s", user_id, stored is not None)
-        if stored is None:
-            return _default_user_settings()
-        return _merge_settings(_default_user_settings(), stored)
+        return await asyncio.to_thread(_load_settings_sync, request)
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("Loading user settings failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.put("/user/settings")
-async def update_user_settings(
-    payload: UserSettingsModel,
-    request: Request,
-) -> dict[str, Any]:
-    """Upsert settings JSON for the currently authenticated user.
-
-    The request body corresponds to the structure of SettingsManager.settings.
-    Partial updates are allowed; missing fields fall back to existing values or
-    defaults.
-    """
-    user_id = _require_authenticated_user(request)
-    logger.info("PUT /user/settings user_id=%s", user_id)
-
+async def update_user_settings(payload: UserSettingsModel, request: Request) -> dict[str, Any]:
+    """Upsert the signed-in user's settings; omitted fields keep their values."""
+    incoming = payload.model_dump(exclude_unset=True)
     try:
-        current = db_get_user_settings(int(user_id)) or {}
-        incoming = {k: v for k, v in payload.model_dump(exclude_unset=True).items()}
-        logger.info("PUT /user/settings user_id=%s incoming=%s current=%s", user_id, incoming, current)
-        merged_current = _merge_settings(_default_user_settings(), current)
-        final_settings = _merge_settings(merged_current, incoming)
-        db_save_user_settings(int(user_id), final_settings)
-        logger.info("PUT /user/settings user_id=%s saved", user_id)
-        return final_settings
-    except ForeignKeyViolation:
-        # User may have been deleted by an administrator after session
-        # validation but before the settings upsert.
-        _session_clear_user(request)
-        raise HTTPException(status_code=401, detail="Session user no longer exists")
+        return await asyncio.to_thread(_save_settings_sync, request, incoming)
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("Saving user settings failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

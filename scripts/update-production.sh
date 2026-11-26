@@ -106,7 +106,6 @@ if [ "$UPDATE_WORKER_B" != "false" ]; then
     scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_B:~/asciisky/scripts/lib/docker-build.sh" 2>/dev/null ||       ssh "$RABBITMQ_B" "mkdir -p ~/asciisky/scripts/lib"
     scp -q "${SCRIPT_DIR}/lib/docker-build.sh" "$RABBITMQ_B:~/asciisky/scripts/lib/docker-build.sh" || true
     ssh "$RABBITMQ_B" "cd ~/asciisky && source scripts/lib/docker-build.sh && asciisky_prepare_data_dirs . && BUILD_NO_CACHE=${BUILD_NO_CACHE:-1} asciisky_compose_build docker-compose.workers.yml . && asciisky_tag_aliases asciisky-web:latest && asciisky_verify_image asciisky-web:latest"         || error_exit "Build/verify failed on worker B"
-    # worker_monitor is commented out in docker-compose.workers.yml — do not --scale it
     ssh "$RABBITMQ_B" "cd ~/asciisky && source .env && docker compose -f docker-compose.workers.yml up -d --scale unified_worker=\${UNIFIED_WORKERS:-\${PRECOMPUTE_WORKERS:-8}}"         || error_exit "Restart failed on worker B"
     
     success "Worker B updated"
@@ -142,17 +141,14 @@ docker compose -f docker-compose.production.yml ps
 echo ""
 echo "🔍 Monitoring:"
 echo "   RabbitMQ UI:        http://$RABBITMQ_MAIN:15672"
-echo "   Worker Monitor:     http://$RABBITMQ_B:8080 (Unified Worker Dashboard)"
 echo "   Worker Connections: Should see unified workers + 3 precompute (main)"
 echo "   Precompute Queue:   Queues → precompute.tasks (with deduplication)"
-echo "   Smart Interpolation: Enabled via ENABLE_SMART_INTERPOLATION=true"
-echo "   Hybrid Deduplication: RabbitMQ + PostgreSQL Advisory Locks active"
+echo "   Deduplication:      persistent task claims + PostgreSQL advisory locks"
 echo ""
 echo "📝 Useful commands:"
 echo "   docker logs -f asciisky-precompute-coordinator  # Precompute coordinator"
 echo "   docker compose -f docker-compose.production.yml logs -f precompute_worker  # Precompute worker (main)"
 echo "   ssh $RABBITMQ_B 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
-echo "   # worker_monitor service is currently disabled in docker-compose.workers.yml"
 echo "   ssh $RABBITMQ_C 'cd ~/asciisky && docker compose -f docker-compose.workers.yml logs -f unified_worker'  # Unified workers"
 echo ""
 echo "🔒 Hybrid Deduplication Commands:"

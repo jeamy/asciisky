@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS cached_positions (
     observer_lon DOUBLE PRECISION NOT NULL,
     observer_elevation DOUBLE PRECISION NOT NULL,
     computed_at TIMESTAMP NOT NULL,
-    position_data BYTEA NOT NULL,          -- Serialisierte Position-Daten (pickle)
+    position_data BYTEA NOT NULL,          -- Position data as UTF-8 JSON
     UNIQUE(object_type, location_key, time_bucket)
 );
 

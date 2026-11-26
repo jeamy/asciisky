@@ -1,0 +1,203 @@
+/*
+ * Page layout.  Desktop: app bar, then list | sky | details.  Tablet: the
+ * details float over the right edge.  Phone: compact bar, sky over the full
+ * width, time bar in the thumb zone, the list as a bottom sheet.
+ */
+@layer layout {
+    body {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        overflow: hidden;
+    }
+
+    .app-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--gap);
+        min-height: var(--bar-h);
+        padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+        padding-top: max(6px, env(safe-area-inset-top));
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex: none;
+    }
+
+    .app-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        min-height: var(--tap);
+        padding: 2px 8px;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: var(--radius);
+        text-align: left;
+    }
+    .app-title:hover { border-color: var(--border); background: var(--ui-bg); }
+    .brand { font-size: 1.3rem; color: var(--accent); text-shadow: var(--glow); }
+    .title-text { display: flex; flex-direction: column; min-width: 0; }
+    .app-name { font-weight: 600; letter-spacing: .02em; }
+    .location-name { color: var(--fg-dim); font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28ch; }
+    .location-name::before { content: "📍 "; }
+
+    .time-bar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-inline: auto;
+    }
+
+    .app-actions { display: flex; align-items: center; gap: 4px; }
+
+    .layout {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(240px, 280px);
+        grid-template-areas: "list sky detail";
+    }
+    body:not(.has-detail) .layout { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) 0; }
+
+    .list-panel { grid-area: list; border-right: 1px solid var(--border); }
+    .detail-panel { grid-area: detail; border-left: 1px solid var(--border); }
+
+    .panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--surface);
+    }
+    .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 8px 8px 14px;
+        border-bottom: 1px solid var(--border);
+    }
+    .panel-title { font-size: 1rem; display: flex; gap: 6px; align-items: center; min-width: 0; }
+    .panel-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 6px 16px; }
+    .sheet-grip { display: none; }
+
+    .sky-panel {
+        grid-area: sky;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    /* Tablet: two columns, details as an overlay on the right. */
+    @media (max-width: 1023px) {
+        .layout,
+        body:not(.has-detail) .layout { grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); grid-template-areas: "list sky"; }
+        .detail-panel {
+            position: fixed;
+            right: 8px;
+            top: calc(var(--bar-h) + 8px);
+            width: min(300px, calc(100vw - 16px));
+            max-height: calc(100dvh - var(--bar-h) - 16px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 8px 30px rgb(0 0 0 / .6);
+            z-index: 20;
+        }
+    }
+
+    /* Phone: one column, time bar at the bottom, list as a bottom sheet. */
+    @media (max-width: 767px) {
+        :root { --bar-h: 48px; }
+        .app-bar { gap: 6px; }
+        .app-name { display: none; }
+        .location-name { color: var(--fg); font-size: 1rem; max-width: 40vw; }
+
+        .time-bar {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: calc(var(--sheet-peek) + env(safe-area-inset-bottom));
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            z-index: 15;
+        }
+        .time-bar { gap: 2px; }
+        .time-bar .icon-btn { min-width: var(--tap); padding: 0; }
+        .time-bar .time-display { flex: 1; justify-content: center; padding: 0 6px; min-width: 0; }
+        /* "Now" only does something in simulated time; there it also marks
+           the simulation, so the badge goes and the step buttons keep 44 px. */
+        .time-bar:not(.is-sim) #time-now { display: none; }
+        .time-bar .sim-badge { display: none; }
+        .time-bar.is-sim #time-now { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+        .layout,
+        body:not(.has-detail) .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sky"; }
+        .sky-panel { padding-bottom: calc(var(--sheet-peek) + var(--tap) + 10px + env(safe-area-inset-bottom)); }
+
+        .list-panel,
+        .detail-panel {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            top: auto;
+            width: auto;
+            border: 1px solid var(--border);
+            border-bottom: 0;
+            border-radius: 14px 14px 0 0;
+            padding-bottom: env(safe-area-inset-bottom);
+            box-shadow: 0 -8px 30px rgb(0 0 0 / .55);
+            transition: height .2s ease;
+            z-index: 16;
+        }
+        .list-panel[data-sheet="peek"] { height: calc(var(--sheet-peek) + env(safe-area-inset-bottom)); }
+        .list-panel[data-sheet="half"] { height: 50dvh; z-index: 18; }
+        .list-panel[data-sheet="full"] { height: calc(100dvh - var(--bar-h)); z-index: 18; }
+        .list-panel[data-sheet="peek"] .panel-body { display: none; }
+        .list-panel .panel-head { border-bottom: 0; padding-top: 0; }
+
+        .sheet-grip {
+            display: block;
+            width: 100%;
+            height: 20px;
+            border: 0;
+            background: none;
+            position: relative;
+        }
+        .sheet-grip::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 8px;
+            width: 40px;
+            height: 4px;
+            margin-left: -20px;
+            border-radius: 2px;
+            background: var(--fg-muted);
+        }
+
+        .detail-panel { max-height: 60dvh; z-index: 19; }
+    }
+
+    /* Phone in landscape: the sheet becomes a narrow column on the right. */
+    @media (max-width: 1023px) and (max-height: 500px) and (orientation: landscape) {
+        .time-bar { position: static; margin-inline: auto; padding: 0; border: 0; background: none; }
+        .layout,
+        body:not(.has-detail) .layout { grid-template-columns: minmax(0, 1fr) 220px; grid-template-areas: "sky list"; }
+        .sky-panel { padding-bottom: 0; }
+        .list-panel,
+        .list-panel[data-sheet] {
+            position: static;
+            height: auto;
+            border-radius: 0;
+            border: 0;
+            border-left: 1px solid var(--border);
+            box-shadow: none;
+        }
+        .list-panel .panel-body { display: block !important; }
+        .sheet-grip { display: none; }
+    }
+}

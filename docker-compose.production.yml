@@ -12,7 +12,7 @@ services:
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
 
     # Performance Tuning (8 Cores, 16GB RAM, SSD - max 8GB für App)
@@ -67,7 +67,7 @@ services:
       - "15672:15672"  # Management UI
     environment:
       - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-changeme}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}
       - RABBITMQ_DEFAULT_VHOST=/
       - RABBITMQ_NODENAME=rabbit@rabbitmq-asciisky
     volumes:
@@ -102,15 +102,11 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       
       # RabbitMQ Configuration
-      - USE_RABBITMQ=true
-      - USE_RABBITMQ_ASTEROIDS=true
-      - USE_RABBITMQ_COMETS=true
       - RABBITMQ_PERCENTAGE=100
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - RABBITMQ_TIMEOUT=120
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}@rabbitmq:5672/
       
       # Explicit production secret; Compose refuses to start without it.
       - ASCII_SKY_ENV=production
@@ -126,13 +122,6 @@ services:
       - ASCII_SKY_ASTEROIDS_EVENTS_MAX=${ASCII_SKY_ASTEROIDS_EVENTS_MAX:-50}
       - ASCII_SKY_COMET_EVENTS_MAX=${ASCII_SKY_COMET_EVENTS_MAX:-50}
       
-      # Smart Interpolation
-      - ENABLE_SMART_INTERPOLATION=${ENABLE_SMART_INTERPOLATION:-true}
-      - INTERPOLATION_STRATEGY=${INTERPOLATION_STRATEGY:-smart_interpolation}
-      - ENABLE_ON_DEMAND_COMPUTATION=${ENABLE_ON_DEMAND_COMPUTATION:-true}
-      - INTERPOLATION_ENABLED_PERCENTAGE=${INTERPOLATION_ENABLED_PERCENTAGE:-100.0}
-      - ENABLE_INTERPOLATION_BACKGROUND_TASKS=${ENABLE_INTERPOLATION_BACKGROUND_TASKS:-true}
-      - INTERPOLATION_CACHE_COMPUTED=${INTERPOLATION_CACHE_COMPUTED:-true}
       
     depends_on:
       postgres:
@@ -169,7 +158,7 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       
     depends_on:
       postgres:
@@ -198,7 +187,7 @@ services:
       - TZ=Europe/Berlin
       
       # RabbitMQ Configuration
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}@rabbitmq:5672/
       - RABBITMQ_HEARTBEAT=60
       
       # Precompute Settings
@@ -212,7 +201,7 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       
     depends_on:
       postgres:
@@ -244,10 +233,10 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-asciisky}
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       
       # RabbitMQ Configuration
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set}@rabbitmq:5672/
       - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-60}
       - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-2}
       

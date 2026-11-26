@@ -7,7 +7,6 @@ from skyfield.data import mpc
 
 import bright_asteroids
 import precompute_coordinator
-from api import smart_interpolation
 from astronomy_utils import build_event_time_grid
 from workers import worker_utils
 
@@ -96,24 +95,6 @@ def test_precompute_task_key_includes_bucket_size():
     assert worker_utils.precompute_task_key(task).endswith("20260701T18_6h")
 
 
-def test_smart_interpolation_stores_with_configured_bucket_hours(monkeypatch):
-    stored = {}
-
-    def fake_store(user_id, loc_key, bucket, lat, lon, elevation, objects):
-        stored["bucket"] = bucket
-
-    monkeypatch.setattr(smart_interpolation, "store_asteroid_positions", fake_store)
-    smart_interpolation._store_bucket(
-        "asteroids",
-        46.7632,
-        14.8417,
-        405,
-        datetime(2026, 7, 1, 22, 37, tzinfo=timezone.utc),
-        [{"name": "test"}],
-        bucket_hours=6,
-    )
-
-    assert stored["bucket"] == "20260701T18"
 
 
 def test_event_grid_step_is_configurable(monkeypatch):
@@ -123,37 +104,3 @@ def test_event_grid_step_is_configurable(monkeypatch):
     _, times, step = build_event_time_grid(ts, anchor, days=2)
     assert step == 15
     assert len(times) == 193
-
-
-def test_smart_interpolation_uses_claimed_high_priority_publisher(monkeypatch):
-    published = {}
-
-    def fake_publish(self, **kwargs):
-        published.update(kwargs)
-        return "comets-test"
-
-    monkeypatch.setattr(
-        "api.rabbitmq.task_publisher.TaskPublisher.publish_precompute_task",
-        fake_publish,
-    )
-    smart_interpolation._trigger_background_worker(
-        "comets",
-        46.7632,
-        14.8417,
-        405,
-        datetime(2026, 7, 3, 3, tzinfo=timezone.utc),
-        bucket_hours=6,
-    )
-    assert published["kind"] == "comets"
-    assert published["priority"] == 10
-    assert published["bucket_hours"] == 6
-    assert published["location"]["latitude"] == 46.7632
-
-
-def test_small_body_frontend_loaders_share_url_builder():
-    with open("static/js/skyRenderer.js", encoding="utf-8") as source_file:
-        source = source_file.read()
-    assert "async loadSmallBodies(token, endpoint, keyPrefix, label)" in source
-    assert "this.loadSmallBodies(token, API_ENDPOINTS.ASTEROIDS" in source
-    assert "this.loadSmallBodies(token, API_ENDPOINTS.COMETS" in source
-    assert "`${API_ENDPOINTS.COMETS}?nocache=1`" not in source

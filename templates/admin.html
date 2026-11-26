@@ -1,20 +1,19 @@
 <!DOCTYPE html>
-<html>
+<html lang="de" data-theme="green">
 <head>
-    <title>ASCII Sky - Admin</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <link rel="stylesheet" href="/static/css/dialogStyles.css">
-    <link rel="stylesheet" href="/static/css/admin.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>ASCII Sky – Benutzerverwaltung</title>
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/components.css">
 </head>
 <body>
-<header>
-    <h1 id="admin-title">👤 Benutzerverwaltung</h1>
-</header>
-<main>
-    <p><a href="/">Zurück zur Hauptseite</a></p>
-    <div id="admin-error" class="auth-error"></div>
-    <table class="admin-users-table">
+<main class="admin-main">
+    <h1>Benutzerverwaltung</h1>
+    <p><a href="/">Zurück zum Himmel</a></p>
+    <p id="admin-error" class="admin-error" role="alert"></p>
+    <table class="admin-table">
         <thead>
             <tr>
                 <th>ID</th>

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+import time as monotonic_time
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -17,29 +17,27 @@ from db_utils import store_sunpath_year
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
 @router.get("/celestial")
 async def get_celestial_objects(request: Request, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None):
-    """Get positions of celestial objects. Always computed in real-time."""
+    """Positions of the Sun, Moon and planets; rise/set/transit are cached per local day."""
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
-        
-        # Always compute fresh - no caching for celestial objects
-        snapshot = await asyncio.to_thread(compute_celestial_snapshot, lat, lon, elevation, dt_utc)
-        # No background tasks needed - celestial is always computed fresh
-        return snapshot
+        return await asyncio.to_thread(compute_celestial_snapshot, lat, lon, elevation, dt_utc)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Celestial request failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
- 
+
 @router.get("/celestial/sunpath")
 async def get_sunpath_year(request: Request, lat: float = None, lon: float = None, elevation: float = None, year: int = None, time: str | None = None):
-    """Return sunrise/sunset curve for a full year at the given or session location.
+    """Sunrise/sunset curve for a full year at the given or session location.
 
-    The result contains one entry per calendar day with local sunrise/sunset and day length
-    in hours, suitable for plotting as a curve.
+    One entry per calendar day with local sunrise/sunset, transit, twilight and
+    day length; cached per location and year.
     """
     try:
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
@@ -50,86 +48,58 @@ async def get_sunpath_year(request: Request, lat: float = None, lon: float = Non
         loc_key = location_key(lat_norm, lon_norm, elev_norm)
         year_bucket = str(target_year)
 
-        nocache = "nocache" in request.query_params
-
-        # Respect nocache flag for debugging, otherwise prefer cached data
-        if nocache:
-            cached = None
-        else:
+        try:
             cached = await asyncio.to_thread(get_cached_sunpath_year, loc_key, year_bucket)
-
+        except Exception:
+            # Like storing below, the cache is best-effort: compute without it.
+            logger.warning("Could not read cached sunpath for loc_key=%s year=%s", loc_key, year_bucket, exc_info=True)
+            cached = None
         if cached is not None:
-            logger.info("Sunpath cache HIT for loc_key=%s year=%s", loc_key, year_bucket)
+            logger.debug("Sunpath cache HIT for loc_key=%s year=%s", loc_key, year_bucket)
             return cached
 
-        logger.info("Sunpath cache MISS for loc_key=%s year=%s - starting computation", loc_key, year_bucket)
-
-        start_ts = datetime.now(timezone.utc)
-
-        # Compute sunpath directly in a background thread to avoid blocking the event loop
+        started = monotonic_time.monotonic()
         sunpath_data = await asyncio.to_thread(
-            compute_sunpath_year,
-            lat_norm,
-            lon_norm,
-            elev_norm,
-            target_year,
+            compute_sunpath_year, lat_norm, lon_norm, elev_norm, target_year,
         )
-
-        end_ts = datetime.now(timezone.utc)
-        duration = (end_ts - start_ts).total_seconds()
-        try:
-            points_len = len(sunpath_data.get("points", [])) if isinstance(sunpath_data, dict) else None
-        except Exception:
-            points_len = None
         logger.info(
-            "Sunpath computation DONE for loc_key=%s year=%s in %.2fs (points=%s)",
-            loc_key,
-            year_bucket,
-            duration,
-            points_len,
+            "Sunpath computed for loc_key=%s year=%s in %.2fs (points=%d)",
+            loc_key, year_bucket, monotonic_time.monotonic() - started, len(sunpath_data["points"]),
         )
 
         try:
             await asyncio.to_thread(
-                store_sunpath_year,
-                loc_key,
-                year_bucket,
-                lat_norm,
-                lon_norm,
-                elev_norm,
-                sunpath_data,
+                store_sunpath_year, loc_key, year_bucket, lat_norm, lon_norm, elev_norm, sunpath_data,
             )
         except Exception:
-            # Caching is best-effort; computation result is still returned
-            pass
+            # Caching is best-effort; the computed result is still returned.
+            logger.warning("Could not store sunpath for loc_key=%s year=%s", loc_key, year_bucket, exc_info=True)
 
         return sunpath_data
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Error while handling sunpath request: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error while handling sunpath request")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/celestial/{body_id}")
 async def get_celestial_object(body_id: str, request: Request, lat: float = None, lon: float = None, elevation: float = None, time: str | None = None):
-    """Get position of a specific celestial object. Always computed in real-time."""
+    """Position of one solar system body (computes only that body)."""
+    if body_id not in CELESTIAL_BODIES:
+        raise HTTPException(status_code=404, detail=f"Celestial body '{body_id}' not found")
     try:
-        if body_id not in CELESTIAL_BODIES:
-            raise HTTPException(status_code=404, detail=f"Celestial body '{body_id}' not found")
-
         lat, lon, elevation = get_location_params(request, lat, lon, elevation)
         dt_utc = parse_time_param(time)
-        
-        # Always compute fresh - no caching for celestial objects
-        snapshot = await asyncio.to_thread(compute_celestial_snapshot, lat, lon, elevation, dt_utc)
-        
-        # No background tasks needed - celestial is always computed fresh
-        if body_id in snapshot["bodies"]:
-            return {**snapshot["bodies"][body_id], "id": body_id}
-        else:
-            raise HTTPException(status_code=500, detail=f"Snapshot missing body '{body_id}'")
+        snapshot = await asyncio.to_thread(
+            compute_celestial_snapshot, lat, lon, elevation, dt_utc, body_id,
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Celestial body request failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    body = snapshot["bodies"].get(body_id)
+    if body is None:
+        raise HTTPException(status_code=500, detail=f"Could not compute '{body_id}'")
+    return {**body, "id": body_id}

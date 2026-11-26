@@ -1,24 +1,17 @@
-#!/usr/bin/env python3
-"""
-Test Script for Hybrid Deduplication (RabbitMQ + Advisory Locks)
-===============================================================
+"""Deduplication of precompute tasks: persistent task claims and advisory locks.
 
-This script tests the Phase 3 implementation:
-- RabbitMQ Message Deduplication for task distribution
-- PostgreSQL Advisory Locks for database operations
+The publisher takes a claim per canonical task key (``precompute_task_claims``)
+before it publishes; a worker holds a PostgreSQL advisory lock while it
+computes one key.  The integration tests skip without PostgreSQL/RabbitMQ.
 """
-
-import os
-import sys
 import time
+import uuid
 
 import psycopg
 import pytest
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from cache_utils import location_key
+import settings
+from api.rabbitmq.task_publisher import TaskPublisher
 from db_utils import (
     POSTGRES_DB,
     POSTGRES_HOST,
@@ -26,26 +19,40 @@ from db_utils import (
     POSTGRES_PORT,
     POSTGRES_USER,
     _advisory_lock_id,
+    release_precompute_task,
 )
-from workers.unified_worker import UnifiedWorker, generate_precompute_message_id
+from workers.worker_utils import precompute_task_key
+
+LOCATION = {"latitude": 46.7632, "longitude": 14.8417, "elevation": 405}
 
 
-def test_message_id_generation():
-    """Test deterministic message ID generation"""
-    print("🧪 Testing Message ID Generation...")
-    
-    # Same parameters should generate same ID
-    id1 = generate_precompute_message_id(46.7632, 14.8417, 405, "20251114T18", "asteroids")
-    id2 = generate_precompute_message_id(46.7632, 14.8417, 405, "20251114T18", "asteroids")
-    
-    # Different parameters should generate different ID
-    id3 = generate_precompute_message_id(46.7632, 14.8417, 405, "20251114T19", "asteroids")
-    
-    assert id1 == id2, "Same parameters should generate same ID"
-    assert id1 != id3, "Different parameters should generate different ID"
-    assert len(id1) == 64, "SHA256 should be 64 characters"
-    
-    print(f"✅ Message ID generation works: {id1[:16]}...")
+def _task(time_bucket: str, kind: str = "asteroids") -> dict:
+    return {"kind": kind, "location": LOCATION, "time_bucket": time_bucket, "bucket_hours": 1}
+
+
+def test_task_key_is_deterministic_and_bucketed():
+    first = precompute_task_key(_task("2025-11-14T18:00:00+00:00"))
+    same_bucket = precompute_task_key(_task("2025-11-14T18:59:00+00:00"))
+    next_bucket = precompute_task_key(_task("2025-11-14T19:00:00+00:00"))
+    comets = precompute_task_key(_task("2025-11-14T18:00:00+00:00", "comets"))
+
+    assert first == same_bucket
+    assert first != next_bucket
+    assert first != comets
+    # Elevation is normalized to 10 m steps.
+    assert first.startswith("asteroids_46.7632_14.8417_410_")
+
+
+def test_publisher_skips_an_already_claimed_task(monkeypatch):
+    published = []
+    publisher = TaskPublisher("amqp://test")
+    monkeypatch.setattr("api.rabbitmq.task_publisher.claim_precompute_task", lambda _key: False)
+    monkeypatch.setattr(publisher, "_publish", lambda *args: published.append(args))
+
+    task_id = publisher.publish_precompute_task("asteroids", LOCATION, "2025-11-14T18:00:00+00:00")
+
+    assert task_id.startswith("asteroids_")
+    assert published == []
 
 
 @pytest.mark.integration
@@ -83,132 +90,31 @@ def test_advisory_locks():
         second.close()
 
 
-def test_deduplication_logic():
-    """Test the deduplication logic"""
-    print("🧪 Testing Deduplication Logic...")
-    
-    # Create test parameters
-    lat, lon, elevation = 46.7632, 14.8417, 405
-    time_bucket = "20251114T18"
-    object_type = "asteroids"
-    
-    # Generate message ID
-    message_id = generate_precompute_message_id(lat, lon, elevation, time_bucket, object_type)
-    
-    # Create computation key for Advisory Locks
-    loc_key = location_key(lat, lon, elevation)
-    computation_key = f"precompute_{object_type}:{loc_key}:{time_bucket}"
-    
-    print(f"📝 Message ID: {message_id[:16]}...")
-    print(f"🔒 Computation Key: {computation_key}")
-    
-    # Verify both are deterministic
-    message_id_2 = generate_precompute_message_id(lat, lon, elevation, time_bucket, object_type)
-    assert message_id == message_id_2, "Message IDs should be deterministic"
-    
-    print("✅ Deduplication logic is consistent")
-
-
 @pytest.mark.integration
-def test_hybrid_integration():
-    """Test hybrid RabbitMQ + Advisory Locks integration"""
-    print("🧪 Testing Hybrid Integration...")
-    
+def test_publisher_publishes_once_per_claim():
+    """Two publications of one key reach the broker once (needs PostgreSQL and RabbitMQ)."""
+    # A bucket far in the past keeps the test task apart from real ones.
+    time_bucket = f"1999-01-01T{uuid.uuid4().int % 24:02d}:00:00+00:00"
+    task = _task(time_bucket)
+    publisher = TaskPublisher(settings.RABBITMQ_URL)
+    published = []
+    original = publisher._publish
+
+    def counting_publish(*args):
+        published.append(args)
+        return original(*args)
+
+    publisher._publish = counting_publish
     try:
-        # Initialize worker (this will test RabbitMQ connection)
-        rabbitmq_url_env = os.getenv('RABBITMQ_URL')
-        if rabbitmq_url_env:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(rabbitmq_url_env)
-            rabbitmq_user = parsed.username or os.getenv('RABBITMQ_USER', 'admin')
-            rabbitmq_password = parsed.password or os.getenv('RABBITMQ_PASSWORD', 'changeme')
-            rabbitmq_host = parsed.hostname or os.getenv('RABBITMQ_HOST', 'rabbitmq')
-            rabbitmq_port = parsed.port or os.getenv('RABBITMQ_PORT', '5672')
-            rabbitmq_vhost = parsed.path or '/'
-            if not rabbitmq_vhost.startswith('/'):
-                rabbitmq_vhost = f"/{rabbitmq_vhost}"
-            rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
-        else:
-            rabbitmq_user = os.getenv('RABBITMQ_USER', 'admin')
-            rabbitmq_password = os.getenv('RABBITMQ_PASSWORD', 'changeme')
-            rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
-            rabbitmq_port = os.getenv('RABBITMQ_PORT', '5672')
-            rabbitmq_url = f"amqp://{rabbitmq_user}:{rabbitmq_password}@{rabbitmq_host}:{rabbitmq_port}/"
-        
-        worker = UnifiedWorker(
-            worker_id="test_worker",
-            rabbitmq_url=rabbitmq_url
-        )
-        
-        if not worker.connect():
-            pytest.skip("RabbitMQ integration service is not available")
-        
-        # Test queue declaration with deduplication
-        worker._declare_queues()
-        print("✅ Queues declared with deduplication arguments")
-        
-        # Test message sending
-        test_location = {
-            'latitude': 46.7632,
-            'longitude': 14.8417,
-            'elevation': 405,
-            'name': 'Test Location'
-        }
-        
-        success = worker.send_precompute_task_with_deduplication(
-            'asteroids', test_location, '20251114T18', 20.0
-        )
-        
-        if success:
-            print("✅ Task sent with RabbitMQ deduplication")
-        else:
-            print("❌ Failed to send task with deduplication")
-            pytest.fail("Could not publish a deduplicated task")
-        
-        worker.disconnect()
-    except Exception as e:
-        pytest.skip(f"RabbitMQ integration service is not available: {e}")
-
-
-def main():
-    """Run all tests"""
-    print("🚀 Testing Hybrid Deduplication Implementation")
-    print("=" * 50)
-    
-    tests = [
-        ("Message ID Generation", test_message_id_generation),
-        ("Advisory Locks", test_advisory_locks),
-        ("Deduplication Logic", test_deduplication_logic),
-        ("Hybrid Integration", test_hybrid_integration)
-    ]
-    
-    passed = 0
-    total = len(tests)
-    
-    for test_name, test_func in tests:
-        print(f"\n📋 Running: {test_name}")
+        publisher.publish_precompute_task("asteroids", LOCATION, time_bucket)
+        publisher.publish_precompute_task("asteroids", LOCATION, time_bucket)
+    except Exception as exc:
+        pytest.skip(f"PostgreSQL/RabbitMQ integration services are not available: {exc}")
+    finally:
         try:
-            # Tests signal failure via assert (AssertionError), so no exception means PASS
-            test_func()
-            passed += 1
-            print(f"✅ {test_name} PASSED")
-        except AssertionError as e:
-            print(f"❌ {test_name} FAILED: {e}")
-        except Exception as e:
-            print(f"❌ {test_name} ERROR: {e}")
-    
-    print("\n" + "=" * 50)
-    print(f"📊 Test Results: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("🎉 All tests passed! Hybrid deduplication is working.")
-        return True
-    else:
-        print("⚠️  Some tests failed. Check the implementation.")
-        return False
+            release_precompute_task(precompute_task_key(task))
+        except Exception:
+            pass
+        publisher.close()
 
-
-if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    assert len(published) == 1

@@ -1,0 +1,61 @@
+@layer base {
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.4 var(--font-ui);
+        -webkit-text-size-adjust: 100%;
+    }
+
+    h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.2; }
+    p { margin: 0 0 .6em; }
+
+    a { color: var(--accent); }
+    a:hover { color: var(--fg); }
+
+    button, input, select { font: inherit; color: inherit; }
+
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .45; }
+
+    :focus { outline: none; }
+    :focus-visible { box-shadow: var(--focus); border-radius: var(--radius); }
+
+    [hidden] { display: none !important; }
+
+    .skip-link {
+        position: absolute;
+        left: 8px;
+        top: -100px;
+        z-index: 100;
+        padding: 8px 12px;
+        background: var(--accent);
+        color: var(--on-accent);
+        border-radius: var(--radius);
+    }
+    .skip-link:focus { top: 8px; }
+
+    .muted { color: var(--fg-muted); }
+
+    input[type="text"], input[type="search"], input[type="number"], input[type="password"],
+    input[type="date"], input[type="time"] {
+        width: 100%;
+        min-height: var(--tap);
+        padding: 6px 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+    input:focus-visible { border-color: var(--accent); }
+    input[type="range"] { accent-color: var(--accent); width: 100%; }
+
+    ::selection { background: rgb(var(--accent-rgb) / .35); }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+}

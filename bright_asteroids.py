@@ -35,15 +35,15 @@ MPCORB_URL = 'https://www.minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz'
 MAX_ASTEROIDS = 5000
 # H-limit for prefiltering by absolute magnitude (smaller = brighter)
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_ABSOLUTE_MAG', '12.0'))
-# V-limit for final apparent magnitude filtering
+# Default display limit (V) when a user has no filter of their own
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_ASTEROID_MAX_APPARENT_MAG', '10.0'))
+# Limit the cached buckets are computed to; the API filters per user on top
+# of it, so it must cover the faintest user filter (the dialog allows 20).
+CACHE_MAX_MAGNITUDE = 20.0
 ASTEROID_EVENTS_MAX = max(0, int(os.environ.get('ASCII_SKY_ASTEROIDS_EVENTS_MAX', '50')))
 
-# Module-specific cache granularity for per-location/time asteroid list.
-# Use a 1-hour time bucket; TTL must cover the 30-day precompute window
-# so that snapshots created up to 30 days earlier remain valid.
+# Granularity of the per-location/time asteroid buckets.
 ASTEROID_CACHE_BUCKET_HOURS = int(os.environ.get('ASTEROID_CACHE_BUCKET_HOURS', '1'))
-ASTEROID_CACHE_TTL_SECONDS = int(os.environ.get('ASTEROID_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))
 
 # IAU H-G asteroid magnitude system
 def vectorized_asteroid_apparent_magnitude(H, G, r, delta, phase_angle_deg):

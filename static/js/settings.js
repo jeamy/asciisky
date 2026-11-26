@@ -1,491 +1,351 @@
-// Settings Manager für AsciiSky
-// Verwaltet persistente Einstellungen wie Standort und Horizontalverschiebung
-import { API_ENDPOINTS, ASTRO_CONSTANTS } from './constants.js';
+// Settings of asciisky: kept in localStorage, synchronised with the session
+// location and, for signed-in users, with the user settings on the server.
+import { API_ENDPOINTS, CONFIG, DEFAULT_LOCATION, THEMES } from './constants.js';
+
+const STORAGE_KEY = 'asciisky_settings';
+const MAX_SIM_OFFSET_MIN = 525600; // one year
+const wrap360 = (deg) => ((deg % 360) + 360) % 360;
+
+function defaultSettings() {
+    return {
+        location: { ...DEFAULT_LOCATION },
+        display: { centerAz: 180, fovDeg: null, viewMode: 'horizon', planisphereRotation: 0, planisphereZoom: 1 },
+        simTime: { offsetMinutes: 0 },
+    };
+}
 
 export class SettingsManager {
     constructor() {
         this.authenticatedUserId = null;
         this.settings = this.loadSettings();
-        this.serverSynced = false;
+        this._saveTimer = null;
+        this._listeners = new Set();
     }
 
-    // Lade Einstellungen aus dem localStorage
+    /** Called with the settings after every change. */
+    onChange(fn) {
+        this._listeners.add(fn);
+        return () => this._listeners.delete(fn);
+    }
+
     loadSettings() {
         try {
-            const savedSettings = localStorage.getItem('asciisky_settings');
-            if (savedSettings) {
-                return JSON.parse(savedSettings);
-            }
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) return this.migrate(JSON.parse(saved));
         } catch (error) {
             console.error('Error loading settings:', error);
         }
-
-        // Default-Einstellungen zurückgeben, wenn keine gespeichert sind
-        return {
-            location: {
-                latitude: 48.2082,  // Wien
-                longitude: 16.3738,
-                elevation: 171.0,
-                name: "Wien",
-                timezone: 'Europe/Vienna'
-            },
-            display: {
-                horizontalShift: 0,
-                viewMode: 'horizon'
-            },
-            // Simulierte Zeit: deaktiviert per Default
-            simTime: {
-                enabled: false,
-                offsetMinutes: 0
-            }
-        };
+        return defaultSettings();
     }
 
-    // Speichere Einstellungen im localStorage
+    /** Bring older stored settings to the current shape. */
+    migrate(s) {
+        const out = { ...defaultSettings(), ...(s && typeof s === 'object' ? s : {}) };
+        const display = { ...defaultSettings().display, ...(out.display || {}) };
+        // horizontalShift (azimuth at column 1) became centerAz (azimuth in the middle).
+        if (typeof display.horizontalShift === 'number' && !(s?.display && typeof s.display.centerAz === 'number')) {
+            display.centerAz = wrap360(display.horizontalShift + 180);
+        }
+        delete display.horizontalShift;
+        out.display = display;
+        out.location = { ...DEFAULT_LOCATION, ...(out.location || {}) };
+        const off = Number(out.simTime?.offsetMinutes);
+        out.simTime = { offsetMinutes: Number.isFinite(off) ? off : 0 };
+        delete out.asteroidMaxMagnitude;
+        delete out.cometMaxMagnitude;
+        return out;
+    }
+
     saveSettings() {
         try {
-            localStorage.setItem('asciisky_settings', JSON.stringify(this.settings));
-            // Konsolenausgabe entfernt
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
         } catch (error) {
             console.error('Error saving settings:', error);
         }
-
-        // Fire-and-forget Sync in die Datenbank; Fehler sollen die UI nicht blockieren
-        this.saveUserSettingsToServer().catch(err => {
-            console.error('Error saving user settings to server:', err);
-        });
-    }
-
-    // Diese Methoden wurden entfernt, da die Magnitude-Filter nicht mehr benötigt werden
-
-    // Standortdaten abrufen
-    getLocation() {
-        return this.settings.location || {
-            latitude: 48.2082,  // Wien
-            longitude: 16.3738,
-            elevation: 171.0,
-            name: "Wien",
-            timezone: 'Europe/Vienna'
-        };
-    }
-
-    // Horizontale Verschiebung speichern
-    setHorizontalShift(shift) {
-        if (!this.settings.display) {
-            this.settings.display = {};
+        for (const fn of this._listeners) {
+            try { fn(this.settings); } catch (e) { console.error(e); }
         }
-        this.settings.display.horizontalShift = shift;
-        this.saveSettings();
-        return shift;
+        // Debounced: dragging the view changes centerAz many times a second.
+        if (this.authenticatedUserId) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = setTimeout(() => {
+                this.saveUserSettingsToServer().catch((err) => console.error('Error saving user settings:', err));
+            }, 800);
+        }
     }
 
-    // Horizontale Verschiebung abrufen
-    getHorizontalShift() {
-        return this.settings.display?.horizontalShift || 0;
+    _display() {
+        if (!this.settings.display) this.settings.display = {};
+        return this.settings.display;
+    }
+
+    getLocation() {
+        return this.settings.location || { ...DEFAULT_LOCATION };
+    }
+
+    // --- view ---
+    getCenterAz() {
+        const v = this.settings.display?.centerAz;
+        return Number.isFinite(v) ? wrap360(v) : 180;
+    }
+
+    setCenterAz(az) {
+        this._display().centerAz = wrap360(Math.round(az * 10) / 10);
+        this.saveSettings();
+    }
+
+    /** Stored field of view, or null for the default of the screen size. */
+    getFov() {
+        const v = this.settings.display?.fovDeg;
+        return CONFIG.FOV_LEVELS.includes(v) ? v : null;
+    }
+
+    setFov(fov) {
+        this._display().fovDeg = CONFIG.FOV_LEVELS.includes(fov) ? fov : null;
+        this.saveSettings();
     }
 
     getViewMode() {
-        try {
-            const display = this.settings.display || {};
-            const mode = display.viewMode;
-            if (mode === 'horizon' || mode === 'planisphere') {
-                return mode;
-            }
-        } catch (_) { }
-        return 'horizon';
+        const mode = this.settings.display?.viewMode;
+        return mode === 'planisphere' ? 'planisphere' : 'horizon';
     }
 
     setViewMode(mode) {
-        const allowed = ['horizon', 'planisphere'];
-        const finalMode = allowed.includes(mode) ? mode : 'horizon';
-        if (!this.settings.display) {
-            this.settings.display = {};
-        }
-        this.settings.display.viewMode = finalMode;
+        this._display().viewMode = mode === 'planisphere' ? 'planisphere' : 'horizon';
         this.saveSettings();
-        return finalMode;
     }
 
-    // Planisphären-Rotation speichern
-    setPlanisphereRotation(rotation) {
-        if (!this.settings.display) {
-            this.settings.display = {};
-        }
-        this.settings.display.planisphereRotation = rotation;
-        this.saveSettings();
-        return rotation;
-    }
-
-    // Planisphären-Rotation abrufen
     getPlanisphereRotation() {
-        return this.settings.display?.planisphereRotation || 0;
+        const v = this.settings.display?.planisphereRotation;
+        return Number.isFinite(v) ? wrap360(v) : 0;
     }
 
-    // --- Theme & Sprache ---
+    setPlanisphereRotation(rotation) {
+        this._display().planisphereRotation = wrap360(Math.round(rotation * 10) / 10);
+        this.saveSettings();
+    }
 
+    getPlanisphereZoom() {
+        const v = this.settings.display?.planisphereZoom;
+        return CONFIG.PLANISPHERE_ZOOM_LEVELS.includes(v) ? v : 1;
+    }
+
+    setPlanisphereZoom(zoom) {
+        this._display().planisphereZoom = CONFIG.PLANISPHERE_ZOOM_LEVELS.includes(zoom) ? zoom : 1;
+        this.saveSettings();
+    }
+
+    // --- theme and language ---
     getTheme() {
-        try {
-            const theme = this.settings?.theme;
-            if (theme === 'red' || theme === 'blue' || theme === 'amber' || theme === 'green') {
-                return theme;
-            }
-        } catch (_) { /* noop */ }
-        return 'green';
+        return THEMES.includes(this.settings?.theme) ? this.settings.theme : 'green';
     }
 
     setTheme(theme) {
-        const allowed = ['green', 'blue', 'red', 'amber'];
-        if (!allowed.includes(theme)) {
-            return this.getTheme();
-        }
-        if (!this.settings) this.settings = {};
+        if (!THEMES.includes(theme)) return this.getTheme();
         this.settings.theme = theme;
         this.saveSettings();
         return theme;
     }
 
     getLanguage() {
-        try {
-            const lang = this.settings?.language;
-            if (lang === 'de' || lang === 'en') {
-                return lang;
-            }
-        } catch (_) { /* noop */ }
-        return 'de';
+        const lang = this.settings?.language;
+        return lang === 'en' || lang === 'de' ? lang : null;
     }
 
     setLanguage(lang) {
-        const allowed = ['de', 'en'];
-        if (!allowed.includes(lang)) {
-            return this.getLanguage();
-        }
-        if (!this.settings) this.settings = {};
+        if (lang !== 'de' && lang !== 'en') return this.getLanguage();
         this.settings.language = lang;
         this.saveSettings();
         return lang;
     }
 
-    getConstellationsVisible() {
-        try {
-            const opts = this.settings?.options;
-            if (opts && typeof opts.showConstellations === 'boolean') {
-                return !!opts.showConstellations;
-            }
-        } catch (_) { /* noop */ }
-        return false;
+    // --- layers ---
+    _option(name, fallback) {
+        const v = this.settings?.options?.[name];
+        return typeof v === 'boolean' ? v : fallback;
     }
 
-    setConstellationsVisible(visible) {
-        if (!this.settings) this.settings = {};
+    _setOption(name, value) {
         if (!this.settings.options) this.settings.options = {};
-        this.settings.options.showConstellations = !!visible;
+        this.settings.options[name] = !!value;
         this.saveSettings();
-        return this.getConstellationsVisible();
     }
 
-    getMessierVisible() {
-        try {
-            const opts = this.settings?.options;
-            if (opts && typeof opts.showMessier === 'boolean') {
-                return !!opts.showMessier;
-            }
-        } catch (_) { /* noop */ }
-        return true;
+    getConstellationsVisible() { return this._option('showConstellations', false); }
+    setConstellationsVisible(v) { this._setOption('showConstellations', v); }
+    getMessierVisible() { return this._option('showMessier', false); }
+    setMessierVisible(v) { this._setOption('showMessier', v); }
+    getGridVisible() { return this._option('showGrid', true); }
+    setGridVisible(v) { this._setOption('showGrid', v); }
+
+    // --- simulated time ---
+    getSimulatedOffsetMinutes() {
+        const off = Number(this.settings.simTime?.offsetMinutes);
+        return Number.isFinite(off) ? off : 0;
     }
 
-    setMessierVisible(visible) {
-        if (!this.settings) this.settings = {};
-        if (!this.settings.options) this.settings.options = {};
-        this.settings.options.showMessier = !!visible;
-        this.saveSettings();
-        return this.getMessierVisible();
-    }
-
-    // --- Simulierte Zeit ---
-    // Liefert den aktuell gesetzten Versatz in Minuten und den Aktivierungsstatus
-    getSimulatedTimeOffset() {
-        const sim = this.settings.simTime || { enabled: false, offsetMinutes: 0 };
-        const off = (typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
-        // Aktiv nur, wenn Offset != 0 (kein separater Toggle mehr)
-        const autoEnabled = off !== 0;
-        return {
-            enabled: autoEnabled,
-            offsetMinutes: off
-        };
-    }
-
-    // Ob simulierte Zeit aktiviert ist
     isSimulatedTimeEnabled() {
-        const sim = this.settings.simTime || { enabled: false, offsetMinutes: 0 };
-        const off = (typeof sim.offsetMinutes === 'number') ? sim.offsetMinutes : 0;
-        return off !== 0;
+        return this.getSimulatedOffsetMinutes() !== 0;
     }
 
-    // Setzt den Versatz in Minuten; der Aktivierungsstatus ist optional.
-    // Wenn 'enabled' nicht angegeben ist, wird automatisch aktiviert, wenn offsetMinutes != 0.
-    setSimulatedTime(offsetMinutes = 0, enabled) {
-        if (!this.settings.simTime) this.settings.simTime = { enabled: false, offsetMinutes: 0 };
-        const off = Number.isFinite(offsetMinutes) ? Math.max(-525600, Math.min(525600, Math.trunc(offsetMinutes))) : 0; // clamp +/- 1 year
-        const en = (typeof enabled === 'undefined') ? (off !== 0) : !!enabled;
-        this.settings.simTime.enabled = en;
-        this.settings.simTime.offsetMinutes = off;
+    setSimulatedTime(offsetMinutes = 0) {
+        const off = Number.isFinite(offsetMinutes)
+            ? Math.max(-MAX_SIM_OFFSET_MIN, Math.min(MAX_SIM_OFFSET_MIN, Math.trunc(offsetMinutes)))
+            : 0;
+        this.settings.simTime = { offsetMinutes: off };
         this.saveSettings();
-        return this.getSimulatedTimeOffset();
+        return off;
     }
 
-    // Gibt eine ISO-8601 Zeit (UTC, mit 'Z') zurück, wenn simulierte Zeit aktiv ist, sonst null
+    /** The time the sky shows: now plus the simulated offset. */
+    getSkyDate() {
+        return new Date(Date.now() + this.getSimulatedOffsetMinutes() * 60000);
+    }
+
+    /** ISO time (UTC) when a simulated time is set, otherwise null (the server uses now). */
     getSimulatedTimeISO() {
-        try {
-            const { enabled, offsetMinutes } = this.getSimulatedTimeOffset();
-            if (!enabled) return null;
-            const dt = new Date(Date.now() + (offsetMinutes || 0) * 60000);
-            return dt.toISOString(); // UTC mit Z-Suffix
-        } catch (e) {
-            console.error('Error computing simulated time ISO:', e);
-            return null;
-        }
+        return this.isSimulatedTimeEnabled() ? this.getSkyDate().toISOString() : null;
     }
 
-    // Versucht, user-spezifische Einstellungen aus der Datenbank zu laden
+    // --- server sync ---
     async loadUserSettingsFromServer() {
-        // 1) Prüfen, ob ein authentifizierter Benutzer per Session vorhanden ist
         try {
-            const meResp = await fetch(`${API_ENDPOINTS.AUTH_ME}`, {
-                credentials: 'same-origin'
-            });
-            if (!meResp.ok) {
-                this.authenticatedUserId = null;
-                return;
-            }
-            const meData = await meResp.json();
-            if (!meData || !meData.authenticated || !meData.user || typeof meData.user.id !== 'number') {
-                this.authenticatedUserId = null;
-                return;
-            }
-            this.authenticatedUserId = meData.user.id;
+            const meResp = await fetch(API_ENDPOINTS.AUTH_ME, { credentials: 'same-origin' });
+            const me = meResp.ok ? await meResp.json() : null;
+            this.authenticatedUserId = me?.authenticated && typeof me.user?.id === 'number' ? me.user.id : null;
         } catch (err) {
-            console.error('Error checking auth state for user settings:', err);
+            console.error('Error checking auth state:', err);
             this.authenticatedUserId = null;
-            return;
         }
-
         if (!this.authenticatedUserId) return;
 
-        // 2) Settings für den eingeloggten Benutzer laden (Session-basiert, ohne user_id-Query)
         try {
-            const url = `${API_ENDPOINTS.USER_SETTINGS_GET}`;
-            const resp = await fetch(url, { credentials: 'same-origin' });
+            const resp = await fetch(API_ENDPOINTS.USER_SETTINGS, { credentials: 'same-origin' });
             if (!resp.ok) {
-                if (resp.status === 401 || resp.status === 403) {
-                    this.authenticatedUserId = null;
-                }
+                if (resp.status === 401 || resp.status === 403) this.authenticatedUserId = null;
                 return;
             }
-            const serverSettings = await resp.json();
-            if (!serverSettings || typeof serverSettings !== 'object') return;
-
-            this.settings = this.mergeSettings(this.settings || {}, serverSettings);
-            // Persistiere gemergte Settings lokal für Offline-Verwendung
-            try {
-                localStorage.setItem('asciisky_settings', JSON.stringify(this.settings));
-            } catch (_) { /* noop */ }
+            const server = await resp.json();
+            if (!server || typeof server !== 'object') return;
+            this.settings = this.migrate(this.mergeSettings(this.settings || {}, server));
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings)); } catch (_) { /* noop */ }
         } catch (err) {
             console.error('Error loading user settings from server:', err);
         }
     }
 
-    // Speichert aktuelle Einstellungen in der Datenbank (falls ein authentifizierter Benutzer bekannt ist)
     async saveUserSettingsToServer() {
         if (!this.authenticatedUserId) return;
-        try {
-            const url = `${API_ENDPOINTS.USER_SETTINGS_SET}`;
-            const resp = await fetch(url, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify(this.settings || {})
-            });
-            if (!resp.ok) {
-                if (resp.status === 401 || resp.status === 403) {
-                    this.authenticatedUserId = null;
-                    return;
-                }
-                console.error('Error saving user settings to server: HTTP', resp.status);
-            }
-        } catch (err) {
-            console.error('Error saving user settings to server:', err);
+        const resp = await fetch(API_ENDPOINTS.USER_SETTINGS, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(this.settings || {}),
+        });
+        if (!resp.ok) {
+            if (resp.status === 401 || resp.status === 403) this.authenticatedUserId = null;
+            else console.error('Error saving user settings: HTTP', resp.status);
         }
     }
 
-    // Hilfsfunktion zum Mergen von Settings-Objekten (flach + einfache verschachtelte Objekte)
     mergeSettings(base, override) {
         const result = { ...(base || {}) };
         if (!override || typeof override !== 'object') return result;
-
         for (const [key, value] of Object.entries(override)) {
-            if (
-                value && typeof value === 'object' && !Array.isArray(value) &&
-                result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])
-            ) {
-                result[key] = { ...result[key], ...value };
-            } else {
-                result[key] = value;
-            }
+            const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+            result[key] = isObj(value) && isObj(result[key]) ? { ...result[key], ...value } : value;
         }
         return result;
     }
 
-    // Ruft die Standortdaten aus der Session ab (Backend-Session via Cookie)
     async fetchSessionLocation() {
         try {
-            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_GET}`, {
-                credentials: 'same-origin'
-            });
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, { credentials: 'same-origin' });
             if (!resp.ok) return null;
-            const data = await resp.json();
-            const loc = data && data.location ? data.location : null;
+            const loc = (await resp.json())?.location;
             if (loc && typeof loc.latitude === 'number' && typeof loc.longitude === 'number') {
-                // Übernehme Session-Standort als bevorzugte Quelle
+                const current = this.getLocation();
                 this.settings.location = {
-                    latitude: parseFloat(loc.latitude),
-                    longitude: parseFloat(loc.longitude),
-                    elevation: typeof loc.elevation === 'number' ? parseFloat(loc.elevation) : (this.settings.location?.elevation ?? ASTRO_CONSTANTS.VIENNA_ELEVATION),
-                    name: loc.name || this.settings.location?.name || 'Unbekannt',
-                    timezone: loc.timezone || this.settings.location?.timezone
+                    latitude: loc.latitude,
+                    longitude: loc.longitude,
+                    elevation: typeof loc.elevation === 'number' ? loc.elevation : current.elevation,
+                    name: loc.name || current.name,
+                    timezone: loc.timezone || current.timezone,
                 };
                 this.saveSettings();
                 return this.settings.location;
             }
-            return null;
         } catch (err) {
             console.error('Error fetching session location:', err);
-            return null;
         }
+        return null;
     }
 
-    // Speichert den Standort direkt in der Session (Backend-Session via Cookie)
     async saveSessionLocation(location) {
+        if (!location) return false;
         try {
-            if (!location) return false;
-            const payload = {
-                latitude: location.latitude,
-                longitude: location.longitude,
-                elevation: location.elevation,
-                name: location.name || 'Unbekannt'
-            };
-            const resp = await fetch(`${API_ENDPOINTS.SESSION_LOCATION_POST}`, {
+            const resp = await fetch(API_ENDPOINTS.SESSION_LOCATION, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
-                body: JSON.stringify(payload)
+                body: JSON.stringify({
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    elevation: location.elevation,
+                    name: location.name || '',
+                }),
             });
-            if (resp.ok) {
-                try {
-                    const data = await resp.json();
-                    const loc = data && data.location ? data.location : null;
-                    if (loc && typeof loc === 'object' && loc.timezone && this.settings?.location) {
-                        this.settings.location.timezone = loc.timezone;
-                        this.saveSettings();
-                    }
-                } catch (_) { /* noop */ }
-                this.serverSynced = true;
-                return true;
-            } else {
+            if (!resp.ok) {
                 console.error('Error saving session location: HTTP', resp.status);
                 return false;
             }
+            const loc = (await resp.json().catch(() => null))?.location;
+            if (loc?.timezone && this.settings.location) {
+                this.settings.location.timezone = loc.timezone;
+                this.saveSettings();
+            }
+            return true;
         } catch (err) {
             console.error('Error saving session location:', err);
             return false;
         }
     }
 
-    // Standortdaten setzen und mit Server synchronisieren
-    async setLocation(latitude, longitude, elevation, locationName) {
+    async setLocation(latitude, longitude, elevation, name) {
         this.settings.location = {
-            latitude: parseFloat(latitude),
-            longitude: parseFloat(longitude),
-            elevation: parseFloat(elevation),
-            name: locationName || "Unbekannt",
-            timezone: this.settings.location?.timezone
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            elevation: Number.isFinite(Number(elevation)) ? Number(elevation) : DEFAULT_LOCATION.elevation,
+            name: name || '',
+            timezone: undefined, // the server answers with the zone of the new place
         };
         this.saveSettings();
-
-        // Sofort mit dem Server synchronisieren
-        try {
-            // 1) Session sofort aktualisieren (Cookie-basierte Session)
-            // saveSessionLocation liest die Server-Response aus und setzt this.settings.location.timezone
-            await this.saveSessionLocation(this.settings.location);
-
-            // Legacy precompute trigger - disabled after RabbitMQ migration
-            // RabbitMQ automatically triggers precompute on cache miss
-            this.serverSynced = true;
-        } catch (error) {
-            console.error('Error syncing location with server:', error);
-        }
-
-        // Informiere UI-Komponenten, dass sich die Zeitzone des Standorts geändert haben könnte
-        try {
-            window.dispatchEvent(new CustomEvent('locationTimezoneUpdated', {
-                detail: { location: this.settings.location }
-            }));
-        } catch (_) { /* noop */ }
-
+        await this.saveSessionLocation(this.settings.location);
+        window.dispatchEvent(new CustomEvent('locationTimezoneUpdated', { detail: { location: this.settings.location } }));
         return this.settings.location;
     }
 
-    // Synchronisiere Standorteinstellungen mit dem Server
-    async syncSettingsToServer() {
-        if (this.serverSynced) return true;
-        return await this.saveSessionLocation(this.getLocation());
-    }
-
-    // Initialisiere Einstellungen und synchronisiere mit dem Server
     async initialize() {
-        // Lokale Einstellungen laden
         this.settings = this.loadSettings();
-
-        // Entferne veraltete Werte aus den Einstellungen
-        this.cleanupSettings();
-
-        // Falls eine userId bekannt ist: Settings aus der Datenbank laden und mit lokalen mergen
         await this.loadUserSettingsFromServer();
-
-        if (!this.authenticatedUserId) {
-            // Session-Standort bevorzugen (falls vorhanden) nur für nicht eingeloggte Nutzer
-            await this.fetchSessionLocation();
-        } else {
-            // Für eingeloggte Nutzer: DB-Standort als Quelle verwenden und Session damit befüllen
-            try {
-                const loc = this.getLocation();
-                await this.saveSessionLocation(loc);
-            } catch (e) {
-                console.error('Error initializing session location for authenticated user:', e);
-            }
+        if (this.authenticatedUserId) {
+            await this.saveSessionLocation(this.getLocation());
+        } else if (!(await this.fetchSessionLocation())) {
+            await this.saveSessionLocation(this.getLocation());
         }
-
-        // Persistente Nutzereinstellungen mit aktuellem Standort abgleichen
-        await this.syncSettingsToServer();
-
         return this.settings;
     }
 
-    // Entferne veraltete Einstellungen
-    cleanupSettings() {
-        // Magnitude-Filter werden jetzt im Backend (user_settings.json) gespeichert
-        // und nicht mehr im Frontend localStorage
-        // Entferne alte Magnitude-Werte aus localStorage, falls vorhanden
-        if (this.settings.asteroidMaxMagnitude !== undefined) {
-            delete this.settings.asteroidMaxMagnitude;
+    /** On logout: forget the signed-in user's settings in this browser (S7). */
+    resetLocal() {
+        clearTimeout(this._saveTimer);
+        this.authenticatedUserId = null;
+        this.settings = defaultSettings();
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* noop */ }
+        for (const fn of this._listeners) {
+            try { fn(this.settings); } catch (e) { console.error(e); }
         }
-        if (this.settings.cometMaxMagnitude !== undefined) {
-            delete this.settings.cometMaxMagnitude;
-        }
-
-        // Speichere die bereinigten Einstellungen
-        this.saveSettings();
     }
 }
 
-// Exportiere eine Singleton-Instanz
 export const settingsManager = new SettingsManager();

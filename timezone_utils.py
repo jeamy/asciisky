@@ -1,6 +1,7 @@
 """
 Timezone utilities: resolve IANA timezone from latitude/longitude and return tzinfo
 """
+import threading
 from functools import lru_cache
 from typing import Optional
 
@@ -12,8 +13,13 @@ except Exception:  # pragma: no cover - fallback if not installed
 import pytz
 
 _tf_singleton = None
+# TimezoneFinder reads its polygon files on demand and is not documented as
+# thread-safe; one lock covers both its construction and its lookups.
+_tf_lock = threading.Lock()
+
 
 def _get_tf() -> Optional["TimezoneFinder"]:
+    """Return the process-wide TimezoneFinder; call with ``_tf_lock`` held."""
     global _tf_singleton
     if _tf_singleton is None and TimezoneFinder is not None:
         try:
@@ -29,15 +35,13 @@ def get_timezone_name(lat: float, lon: float) -> str:
     Return IANA timezone name for given coordinates. Fallback to 'UTC' if unknown.
     """
     try:
-        tf = _get_tf()
-        if tf is None:
-            return 'UTC'
-        # Try direct match first
-        tzname = tf.timezone_at(lat=float(lat), lng=float(lon))
-        if tzname:
-            return tzname
-        # Fallback: closest match
-        tzname = tf.closest_timezone_at(lat=float(lat), lng=float(lon))
+        with _tf_lock:
+            tf = _get_tf()
+            if tf is None:
+                return 'UTC'
+            tzname = tf.timezone_at(lat=float(lat), lng=float(lon))
+            if not tzname and hasattr(tf, 'closest_timezone_at'):
+                tzname = tf.closest_timezone_at(lat=float(lat), lng=float(lon))
         if tzname:
             return tzname
     except Exception:

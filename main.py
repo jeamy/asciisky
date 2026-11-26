@@ -15,20 +15,19 @@ from starlette.responses import FileResponse, RedirectResponse
 # Import routers from the new modules
 from api.routes import (
     admin_users,
-    asteroids,
     auth,
     celestial,
-    comets,
     config,
     filters,
-    interpolation_admin,
     messier,
     session,
+    small_bodies,
     user_settings,
     zodiac,
 )
 from api.routes.auth import _get_user_by_id, _session_clear_user
 from db_utils import database_identity, database_target
+import settings
 
 
 @asynccontextmanager
@@ -50,33 +49,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add session middleware
+_production = settings.is_production()
+
+# Session middleware
 SESSION_SECRET = os.environ.get("ASCII_SKY_SESSION_SECRET")
 if not SESSION_SECRET:
-    if os.environ.get("ASCII_SKY_ENV", "development").lower() in {"production", "prod"}:
+    if _production:
         raise RuntimeError("ASCII_SKY_SESSION_SECRET must be set in production")
     # Never fall back to a public, predictable signing key.  Development
     # sessions intentionally expire on process restart when no secret is set.
     SESSION_SECRET = secrets.token_urlsafe(48)
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
+# Production is served over HTTPS (nginx); the session cookie must then never
+# travel over plain HTTP.  ASCII_SKY_HTTPS_ONLY=false allows a plain-HTTP setup.
+_https_only = os.environ.get("ASCII_SKY_HTTPS_ONLY", "true" if _production else "false").lower() == "true"
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=_https_only)
 
-# Development favors immediate iteration; production keeps static assets in the
-# browser cache and revalidates them periodically.
-_development_mode = os.environ.get("ASCII_SKY_ENV", "development").lower() not in {"production", "prod"}
+
 @app.middleware("http")
-async def add_no_cache_headers(request: Request, call_next):
+async def add_static_cache_headers(request: Request, call_next):
+    """Development favors immediate iteration; production revalidates static assets."""
     response = await call_next(request)
-    try:
-        path = request.url.path or ""
-        if path.startswith("/static/") and path.endswith((".js", ".css")):
-            if _development_mode:
-                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-                response.headers["Pragma"] = "no-cache"
-                response.headers["Expires"] = "0"
-            else:
-                response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
-    except Exception:
-        pass
+    path = request.url.path or ""
+    if path.startswith("/static/") and path.endswith((".js", ".css")):
+        if _production:
+            response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
+        else:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
 
 # Mount static files
@@ -85,8 +83,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Include routers
 app.include_router(session.router, prefix="/api", tags=["session"])
 app.include_router(celestial.router, prefix="/api", tags=["celestial"])
-app.include_router(asteroids.router, prefix="/api", tags=["asteroids"])
-app.include_router(comets.router, prefix="/api", tags=["comets"])
+app.include_router(small_bodies.router, prefix="/api", tags=["small-bodies"])
 app.include_router(zodiac.router, prefix="/api", tags=["zodiac"])
 app.include_router(messier.router, prefix="/api", tags=["messier"])
 app.include_router(config.router, prefix="/api", tags=["config"])
@@ -94,7 +91,6 @@ app.include_router(filters.router, prefix="/api", tags=["filters"])
 app.include_router(user_settings.router, prefix="/api", tags=["user_settings"])
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(admin_users.router, prefix="/api", tags=["admin-users"])
-app.include_router(interpolation_admin.router, prefix="/api", tags=["interpolation-admin"])
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def read_root(request: Request):

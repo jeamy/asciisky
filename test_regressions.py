@@ -20,8 +20,6 @@ from api.computation import (
     _serialize_periods,
     _merge_sorted_periods,
     _twilight_boundaries,
-    _localize_naive,
-    _compute_transit_time,
     _body_magnitude,
     _build_body_entry,
     _add_moon_phase,
@@ -29,13 +27,11 @@ from api.computation import (
     compute_sunpath_year,
 )
 from api.helpers import parse_time_param
-from api.on_demand_computation import OnDemandComputationConfig, OnDemandComputationService
 from api.rabbitmq import task_publisher
 from api.rabbitmq.task_publisher import TaskPublisher
 from api.routes import admin_users
 import bright_asteroids
 import comets
-from config.interpolation_config import InterpolationConfigManager, SmartInterpolationConfig
 import db_utils
 import nightly_data_updater
 import precompute_coordinator
@@ -119,7 +115,6 @@ def test_update_functions_mark_unchanged_dataframes_current(tmp_path, monkeypatc
     monkeypatch.setattr(nightly_data_updater, "ensure_data_dirs", lambda: None)
     monkeypatch.setattr(nightly_data_updater, "download_file_from_ftp", lambda *_args: None)
     monkeypatch.setattr(comets, "load_comet_dataframe", lambda use_cache: comet_df)
-    monkeypatch.setattr(db_utils, "get_database_stats", lambda: {"comets_count": 1})
 
     assert nightly_data_updater.update_comet_data() is True
     assert dataframe_file.stat().st_mtime > old_time
@@ -181,7 +176,6 @@ def test_cache_loader_uses_two_argument_contract_and_preserves_empty_result():
         171.0,
         datetime(2026, 1, 1, tzinfo=timezone.utc),
         1,
-        True,
         loader,
     )
 
@@ -222,74 +216,12 @@ def test_moon_magnitude_is_continuous_and_dimmer_at_new_moon():
     assert moon_apparent_magnitude(0.0) == nearly_new
 
 
-def test_interpolation_manager_handles_concurrent_user_updates():
-    manager = InterpolationConfigManager()
-    user_ids = [f"user-{index}" for index in range(100)]
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        list(executor.map(manager.enable_for_user, user_ids))
-
-    config = manager.get_config()
-    assert sorted(config.enabled_user_ids) == sorted(user_ids)
-    config.enabled_user_ids.clear()
-    assert sorted(manager.get_config().enabled_user_ids) == sorted(user_ids)
 
 
-def test_percentage_rollout_uses_stable_digest(monkeypatch):
-    monkeypatch.setenv("ENABLE_SMART_INTERPOLATION", "true")
-    monkeypatch.setenv("INTERPOLATION_ENABLED_PERCENTAGE", "50")
-    first = SmartInterpolationConfig()
-    second = SmartInterpolationConfig()
-    assert first.is_enabled_for_user("example-user") == second.is_enabled_for_user("example-user")
 
 
-def test_on_demand_metrics_are_consistent_under_concurrency():
-    config = OnDemandComputationConfig()
-    config.cache_ttl = 0
-    config.trigger_background_tasks = False
-    service = OnDemandComputationService(config)
-
-    def compute(index):
-        return service._compute_bucket(
-            "asteroids",
-            48.2,
-            16.3,
-            171,
-            datetime(2026, 1, 1, index % 24, tzinfo=timezone.utc),
-            True,
-            lambda *_args: [],
-        )
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(compute, range(100)))
-
-    metrics = service.get_metrics()
-    assert all(result.status.value == "success" for result in results)
-    assert metrics.total_computations == 100
-    assert metrics.successful_computations == 100
 
 
-def test_on_demand_publisher_adds_the_required_task_type(monkeypatch):
-    published = {}
-
-    class Channel:
-        def basic_publish(self, **kwargs):
-            published.update(kwargs)
-            return True
-
-    publisher = TaskPublisher("amqp://test")
-    monkeypatch.setattr(publisher, "_get_connection", lambda: (object(), Channel()))
-    task_id = publisher.publish_on_demand_task(
-        {
-            "object_type": "asteroids",
-            "location": {"latitude": 48.2, "longitude": 16.3, "elevation": 171},
-            "time_bucket": "2026-01-01T00:00:00+00:00",
-        }
-    )
-
-    assert task_id
-    assert '"type": "on_demand"' in published["body"]
-    assert published["routing_key"] == "compute.asteroid"
 
 
 def test_publisher_releases_claim_after_negative_confirm(monkeypatch):
@@ -353,27 +285,6 @@ def test_worker_routes_second_failure_to_dlq_and_releases_claim(monkeypatch):
     assert channel.published[0]["routing_key"] == "computation.dead"
 
 
-def test_cached_on_demand_result_is_a_worker_success():
-    class Result:
-        class Status:
-            value = "cached"
-
-        def __init__(self):
-            self.status = self.Status()
-
-    worker = object.__new__(UnifiedWorker)
-    worker.on_demand_service = type(
-        "Service", (), {"compute_asteroid_bucket": lambda *_args: Result()}
-    )()
-    worker._publish_status = lambda *_args: None
-
-    assert worker._process_on_demand_task(
-        {
-            "object_type": "asteroids",
-            "location": {"latitude": 48.2, "longitude": 16.3, "elevation": 171},
-            "time_bucket": "2026-01-01T00:00:00+00:00",
-        }
-    )
 
 
 def test_dataframe_resources_reload_after_source_change(monkeypatch, tmp_path):
@@ -485,25 +396,12 @@ def test_twilight_boundaries_empty_and_mixed():
     assert civil_end == base + timedelta(hours=6)
 
 
-def test_localize_naive_handles_pytz_and_stdlib():
-    class FakePytzZone:
-        def localize(self, naive):
-            return naive.replace(tzinfo=timezone.utc)
-
-    stdlib_zone = timezone.utc
-    assert _localize_naive(datetime(2026, 1, 1), stdlib_zone).tzinfo is timezone.utc
-    assert _localize_naive(datetime(2026, 1, 1), FakePytzZone()).tzinfo is timezone.utc
 
 
-def test_compute_transit_time_returns_midpoint():
-    tz = timezone.utc
-    local_dt = datetime(2026, 6, 21, tzinfo=tz)
-    assert _compute_transit_time("06:00", "18:00", tz, local_dt) == "12:00"
-    assert _compute_transit_time("22:00", "04:00", tz, local_dt) == "01:00"
 
 
 def test_body_magnitude_for_sun_and_outer_planets():
-    assert _body_magnitude("sun", None, None) == -26.74
+    assert _body_magnitude("sun", None) == -26.74
     assert _body_magnitude("uranus", None, None) == 5.7
     assert _body_magnitude("neptune", None, None) == 7.8
     assert _body_magnitude("unknown_body", None, None) == 0
@@ -542,9 +440,8 @@ def test_add_moon_phase_sets_phase_and_name(monkeypatch):
     class FakePhase:
         degrees = 120.0
 
-    monkeypatch.setattr(computation_module.almanac, "moon_phase", lambda _eph, _t: FakePhase())
     body_entry = {}
-    _add_moon_phase(body_entry, FakeAstrometric(), None)
+    _add_moon_phase(body_entry, FakeAstrometric(), FakePhase.degrees)
     assert body_entry["phase"] == 0.75
     assert body_entry["phase_name"] == "waxing_gibbous"
 

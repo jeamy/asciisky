@@ -19,6 +19,7 @@ from pathlib import Path
 # Pfad anpassen für Imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import settings
 from unified_worker import UnifiedWorker, wait_for_database
 
 logging.basicConfig(
@@ -69,7 +70,7 @@ def check_system_resources():
 def main():
     """Hauptfunktion"""
     worker_id = get_worker_id()
-    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://admin:changeme@localhost:5672/')
+    rabbitmq_url = settings.RABBITMQ_URL
     log_level = os.getenv('WORKER_LOG_LEVEL', 'INFO')
 
     # Logging Level setzen

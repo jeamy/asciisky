@@ -46,7 +46,7 @@ The supported default setup is a **local, single-workstation system**: the web a
 - Responsive design with mobile/tablet support
 - Desktop zoom functionality (1×, 2×, 4×) with vertical pan/scroll (desktop only, disabled on mobile devices)
 - PostgreSQL database backend for efficient data storage and retrieval
-- RabbitMQ message queue with distributed compute workers (precompute and on-demand), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
+- RabbitMQ message queue with distributed compute workers (scheduled precompute and cache-miss tasks), scalable across multiple hosts; see [API Request Flow](doc/ARCHITECTURE_FLOW_API.md)
 - **Distributed duplicate-work protection**: deterministic RabbitMQ message IDs + PostgreSQL advisory locks
   - Message IDs make equivalent tasks identifiable in logs and tooling; standard RabbitMQ queues do not deduplicate on this property
   - Advisory locks serialize equivalent computations across workers that use the same PostgreSQL instance
@@ -71,7 +71,7 @@ The local Docker Compose stack runs these components on one machine:
 - FastAPI web application and astronomy UI
 - PostgreSQL for orbital data, user data, cached results, and advisory locks
 - RabbitMQ for asynchronous task distribution
-- Unified workers for precomputation and on-demand calculations
+- Unified workers for scheduled precomputation and cache-miss tasks
 - A nightly data updater and a precompute coordinator
 
 This setup demonstrates the complete RabbitMQ/PostgreSQL processing path without requiring additional hosts.
@@ -193,21 +193,21 @@ The application runs multiple services. In local development these are defined i
 - **`rabbitmq`** – RabbitMQ 4.1 message broker for task distribution (ports 5672, 15672)
 - **`data_updater`** – Nightly data update service (runs via `nightly_data_updater.py`)
 - **`precompute_coordinator`** – Coordinates creation of precompute tasks and publishes them to RabbitMQ
-- **`precompute_worker`** – Stable production service name for unified workers on the main server; it consumes precompute and on-demand queues.
+- **`precompute_worker`** – Stable production service name for unified workers on the main server; it consumes the precompute, asteroid and comet queues.
 
-**Unified Workers and monitoring (local + worker hosts):**
+**Unified Workers (local + worker hosts):**
 
 - **`unified_worker`** – Unified Worker(s) with hybrid deduplication
-  - Handles all task types: precompute, on-demand asteroids, on-demand comets
-  - Publishes deterministic RabbitMQ message IDs and uses PostgreSQL advisory locks while computing
+  - Handles all task types: scheduled precompute and asteroid/comet buckets requested by an API cache miss
+  - Publishers take a persistent claim per task key (`precompute_task_claims`); workers hold PostgreSQL advisory locks while computing
+  - A message that fails twice goes to the dead-letter queue `computation.dead`
   - Runs as a locally replicated service in `docker-compose.yml` and as scalable workers in `docker-compose.workers.yml`
-- **`worker_monitor`** – Real-time performance dashboard for workers (port configurable via `MONITOR_PORT`)
 
 **Unified Worker Architecture:**
-- Loads shared Skyfield resources once per worker process and handles precompute, on-demand, and RPC tasks
+- Loads shared Skyfield resources once per worker process and handles every task type
 - Supports horizontal scaling across worker hosts connected to the same broker and database
 - Uses PostgreSQL advisory locks to avoid concurrent work for the same computation key
-- Adds deterministic message IDs for traceability; this is not broker-side deduplication
+- Deduplicates publications through persistent task claims in PostgreSQL, not broker-side
 - **RabbitMQ 4.1** – Modern message broker with management UI and advanced features
 
  All services restart automatically unless stopped.
@@ -219,7 +219,6 @@ PRECOMPUTE_WORKERS=4  # Unified workers on the main server
 
 # Worker hosts (unified_worker in docker-compose.workers.yml)
 UNIFIED_WORKERS=8     # Number of unified workers per worker host (handles all task types)
-WORKER_MONITOR=1      # Worker monitoring dashboard
 ```
 
 On worker hosts, `UNIFIED_WORKERS` controls `unified_worker` scaling. If it is not set,
@@ -303,16 +302,19 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # Passed to lock instrumentation; it does 
 
 
 ### Frontend
-- `templates/` - HTML templates
+No build step: plain ES modules, loaded by `templates/index.html`.
+- `templates/index.html` - page shell (app bar, list, sky, details); `templates/admin.html` - user administration
 - `static/js/` - JavaScript modules
-  - `constants.js` - Configuration parameters and centralized API endpoints
-  - `skyRenderer.js` - ASCII sky rendering, dialogs, zoom/pan functionality
-  - `skyManager.js` - Sky rendering initialization and update management
-  - `i18n.js` - Internationalization module with translations
-  - `locationDialog.js` - User location dialog logic
-  - `settings.js` - Frontend settings utilities
-  - `zodiacRenderer.js` - Zodiac rendering utilities
-- `static/css/` - CSS styles
+  - `app.js` - bootstrap and wiring (settings, auth, view, controls, update cycle)
+  - `skyGrid.js` - pure projection and ASCII grid (horizon with field of view, planisphere)
+  - `skyView.js` - persistent sky stage: rendering per frame, Pointer Events (drag, pinch, wheel), hit test
+  - `overlays.js` - SVG layers: grid, constellations, Messier
+  - `skyData.js` - data loading with `AbortController` (the newest update wins)
+  - `sunpathChart.js` - yearly sunrise/sunset chart
+  - `settings.js`, `auth.js`, `i18n.js`, `constants.js`
+  - `locationDialog.js`, `timeInputDialog.js`, `magnitudeFilterDialog.js`, `adminUsers.js` - dialogs (`<dialog>`)
+  - `ui/` - DOM helpers, dialog base, formatting, list and detail panels, help
+- `static/css/` - `tokens.css` (four colour themes as `:root[data-theme]` tokens), `base.css`, `layout.css`, `sky.css`, `components.css` (cascade layers)
 
 ### Documentation
 - `doc/asteroids.md` - Asteroid position and magnitude pipeline (H–G model)
@@ -344,17 +346,16 @@ ASCII_SKY_ADVISORY_LOCK_TTL=300       # Passed to lock instrumentation; it does 
 #### Utility Scripts
 - `scripts/setup-firewall.sh` - Production firewall configuration
 - `scripts/init-postgres.sql` - PostgreSQL schema initialization
-- `test_hybrid_deduplication.py` - Message-ID and advisory-lock smoke tests
+- `test_hybrid_deduplication.py` - Task-claim and advisory-lock smoke tests
 
 ## API Endpoints
 
 All frontend calls use centralized API endpoint constants in `static/js/constants.js`.
 
-- `GET /api/celestial` — real-time snapshot for Sun, Moon, and planets (no cache)
-- `GET /api/celestial/{body_id}` — real-time data for a single celestial body
+- `GET /api/celestial` — real-time snapshot for Sun, Moon, and planets (rise/set/transit cached per local day)
+- `GET /api/celestial/{body_id}` — real-time data for a single celestial body (computes only that body)
 - `GET /api/celestial/sunpath` — yearly sunrise/sunset curve for the current or given location
 - `GET /api/bright_asteroids` — bright asteroids with H–G magnitudes, distances and rise/set/transit times
-- `GET /api/asteroids` — backward-compatible alias for `/api/bright_asteroids`
 - `GET /api/comets` — comets using MPC data with M1/k1 magnitude model and rise/set/transit times; see `doc/comets.md`
 - `GET /api/zodiac` — zodiac and selected constellations for a location and time
 - `GET /api/session/location` — get current session location (if set)
@@ -418,12 +419,15 @@ Notes:
 ### RabbitMQ Configuration
 - `USE_RABBITMQ` - Enable RabbitMQ for async processing (default: true)
 - `RABBITMQ_URL` - RabbitMQ connection URL (default: amqp://admin:password@rabbitmq:5672/)
-- `RABBITMQ_TIMEOUT` - RabbitMQ task timeout in seconds (default: 120)
+
+With `ASCII_SKY_ENV=production` the processes refuse to start while `ASCII_SKY_SESSION_SECRET` is unset or
+`POSTGRES_PASSWORD`/`RABBITMQ_URL` still use the `changeme` default; the production compose files require
+`POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD`. Session cookies are `Secure` in production
+(`ASCII_SKY_HTTPS_ONLY=false` turns that off for a plain-HTTP setup).
 - `RABBITMQ_PREFETCH_COUNT` - Prefetch count per worker (default: 1)
 
 ### Unified Worker Configuration
 - `UNIFIED_WORKERS` - Number of unified workers (handles all task types) (default: 8)
-- `WORKER_MONITOR` - Worker monitoring dashboard instances (default: 1)
 - `PRECOMPUTE_WORKERS` - Number of dedicated `precompute_worker` instances on the main server (default: 4).
   On worker hosts it is used as a fallback if `UNIFIED_WORKERS` is not set.
 

@@ -40,10 +40,12 @@ from timezone_utils import get_tzinfo
 COMETS_FILE = Path(COMET_ELEMENTS_PATH)
 
 
-COMET_CACHE_TTL_SECONDS = int(os.environ.get('COMET_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))  # 31 days
 COMET_CACHE_BUCKET_HOURS = int(os.environ.get('COMET_CACHE_BUCKET_HOURS', '1'))
 COMET_DF_CACHE_TTL_SECONDS = int(os.environ.get('COMET_DF_CACHE_TTL_SECONDS', str(31 * 24 * 3600)))  # 31 days
 MAX_COMETS_DEFAULT = 1000
+# Limit the cached buckets are computed to; the API filters per user on top.
+CACHE_MAX_MAGNITUDE = 20.0
+# Default display limit (V) when a user has no filter of their own
 MAX_APPARENT_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_APPARENT_MAG', '14.0'))
 MAX_ABSOLUTE_MAGNITUDE = float(os.environ.get('ASCII_SKY_COMET_MAX_ABSOLUTE_MAG', '18.0'))
 COMET_EVENTS_MAX = int(os.environ.get('ASCII_SKY_COMET_EVENTS_MAX', '300'))
@@ -696,7 +698,7 @@ def _compute_comet_distances(tgt_xyz, sun_xyz, observer_xyz):
 def _select_visible_comets(apparent_magnitudes, max_comets):
     """Return bright indices and the selected subset sorted by brightness."""
     indices = np.arange(len(apparent_magnitudes))
-    mask = apparent_magnitudes <= 20.0
+    mask = apparent_magnitudes <= CACHE_MAX_MAGNITUDE
     bright_idx = indices[mask]
     if len(bright_idx) == 0:
         return bright_idx, bright_idx

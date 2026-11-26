@@ -10,7 +10,6 @@ import math
 from datetime import datetime, timezone
 
 DEFAULT_BUCKET_HOURS = 6
-DEFAULT_TTL_SECONDS = 6 * 3600  # 6 hours
 
 
 def normalize_location(lat: float, lon: float, elevation: float,
@@ -51,5 +50,7 @@ def time_bucket_utc(dt: datetime | None = None, bucket_hours: int = DEFAULT_BUCK
 
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
     bucket_hour = (dt.hour // bucket_hours) * bucket_hours
     return f"{dt:%Y%m%d}T{bucket_hour:02d}"

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 
-from api.routes.auth import _get_user_by_id, _hash_password, _session_clear_user
+from api.routes.auth import _USERNAME_RE, _get_user_by_id, _hash_password, _session_clear_user
 from db_utils import db_transaction, get_db_connection
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
@@ -90,14 +90,38 @@ def _list_users_sync(
         rows = cursor.fetchall()
         return [_row_to_user(row) for row in rows]
     finally:
-        conn.close()
+        # The connection is shared per thread: end the read transaction, keep it open.
+        conn.rollback()
+
+
+def _check_username(username: str) -> None:
+    if not _USERNAME_RE.fullmatch(username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 3-40 letters, digits, spaces, dots, dashes or underscores",
+        )
+
+
+def _guard_last_admin(cursor, acting_id: int, target_id: int, removes_admin: bool) -> None:
+    """Refuse a change that would leave no active admin or lock out the acting admin.
+
+    ``removes_admin`` is true for a delete, a demotion or a deactivation.  The
+    active admin rows are locked so two concurrent changes cannot both pass.
+    """
+    if not removes_admin:
+        return
+    if target_id == acting_id:
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin access")
+    cursor.execute("SELECT id FROM users WHERE is_admin AND is_active FOR UPDATE")
+    active_admins = {row["id"] for row in cursor.fetchall()}
+    if target_id in active_admins and len(active_admins) <= 1:
+        raise HTTPException(status_code=400, detail="The last active admin cannot be removed")
 
 
 def _create_user_sync(
     email: str, username: str, password: str, is_admin: bool, is_active: bool
 ) -> dict[str, Any]:
-    if len(username) < 3:
-        raise HTTPException(status_code=400, detail="Username too short")
+    _check_username(username)
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="Password too short")
 
@@ -129,9 +153,14 @@ def _create_user_sync(
     return _row_to_user(row)
 
 
-def _update_user_sync(user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+def _update_user_sync(acting_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("username") is not None:
+        data["username"] = data["username"].strip()
+        _check_username(data["username"])
+    removes_admin = data.get("is_admin") is False or data.get("is_active") is False
     with db_transaction() as conn:
         cursor = conn.cursor()
+        _guard_last_admin(cursor, acting_id, user_id, removes_admin)
 
         new_email = data.get("email")
         new_username = data.get("username")
@@ -199,9 +228,10 @@ def _update_user_sync(user_id: int, data: dict[str, Any]) -> dict[str, Any]:
     return _row_to_user(row)
 
 
-def _delete_user_sync(user_id: int) -> int:
+def _delete_user_sync(acting_id: int, user_id: int) -> int:
     with db_transaction() as conn:
         cursor = conn.cursor()
+        _guard_last_admin(cursor, acting_id, user_id, True)
         cursor.execute(
             """
             DELETE FROM users
@@ -248,13 +278,13 @@ async def update_user(
     payload: AdminUserUpdate,
     request: Request,
 ) -> dict[str, dict[str, Any]]:
-    await asyncio.to_thread(_require_admin, request)
+    acting_id = await asyncio.to_thread(_require_admin, request)
 
     data = payload.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    user = await asyncio.to_thread(_update_user_sync, user_id, data)
+    user = await asyncio.to_thread(_update_user_sync, acting_id, user_id, data)
     return {"user": user}
 
 
@@ -265,7 +295,7 @@ async def delete_user(user_id: int, request: Request) -> dict[str, Any]:
     This performs a hard delete from the users table. Related rows in
     user_settings are removed automatically via ON DELETE CASCADE.
     """
-    await asyncio.to_thread(_require_admin, request)
+    acting_id = await asyncio.to_thread(_require_admin, request)
 
-    deleted_id = await asyncio.to_thread(_delete_user_sync, user_id)
+    deleted_id = await asyncio.to_thread(_delete_user_sync, acting_id, user_id)
     return {"deleted": True, "id": deleted_id}

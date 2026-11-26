@@ -1,538 +1,427 @@
-// Internationalisierung (i18n) für ASCII Sky
-export const i18n = {
-    // Standardsprache ist Deutsch
-    'de': {
-        // Allgemeine Texte
-        'loading': 'Lade Himmelsdaten...',
-        // Spezieller Hinweis für die Jahreskurve Sonnenauf-/untergang
-        'loading_sunpath': 'Berechne Sonnenauf- und -untergangsdaten für dieses Jahr … Dies kann beim ersten Aufruf für einen neuen Standort etwas länger dauern (bis zu etwa drei Minuten).',
-        'loading_asteroids': 'Lade Kleinplaneten-Daten...',
-        'error_loading': 'Fehler beim Laden der Himmelsdaten. Bitte Seite neu laden.',
-        'click_info': 'Klicke auf ein Objekt für Details',
-        'app_title': 'ASCII Sky Tracker',
-        'cache_status': 'Cache-Status',
-        'location': 'Standort',
-        'window': 'Zeitfenster',
-        'in_window': 'h',
-        'earliest': 'Früheste',
-        'latest': 'Späteste',
-        'error': 'Fehler',
-        'no_data_for_location': 'Keine Cache-Daten für diesen Standort im aktuellen Zeitfenster.',
-        'snapshots': 'Snapshots',
-        'asteroids': 'Asteroiden',
-        'comets': 'Kometen',
-        'celestial': 'Himmelskörper',
-        'database_stats': 'Datenbank-Statistiken',
-        'db_size': 'DB-Größe',
-        'total_objects': 'Objekte gesamt',
-        'overall_cache': 'Gesamter Cache',
-        'precompute_cache': 'Cache vorberechnen',
-        'start_date': 'Startdatum',
-        'end_date': 'Enddatum',
-        'start_precompute': 'Berechnung starten',
-        'processing': 'Verarbeitung...',
-        'enter_both_dates': 'Bitte geben Sie sowohl Start- als auch Enddatum ein',
-        'task_started': 'Aufgabe gestartet...',
-        'task_completed': 'Aufgabe abgeschlossen!',
-        'task_not_found_server_restart': 'Die Vorberechnungsaufgabe ist nicht mehr aktiv (Server wurde möglicherweise neu gestartet). Sie können bei Bedarf eine neue Vorberechnung starten.',
-        'status': 'Status',
+// Texts of asciisky in German and English.  Both tables have the same keys
+// (checked by test_frontend_i18n_tables_are_symmetric); help texts live only
+// here (D7).
 
-        // Himmelsobjekte
-        'sun': 'Sonne',
-        'moon': 'Mond',
-        'Mercury': 'Merkur',
-        'Venus': 'Venus',
-        'Earth': 'Erde',
-        'Mars': 'Mars',
-        'Jupiter': 'Jupiter',
-        'Saturn': 'Saturn',
-        'Uranus': 'Uranus',
-        'Neptune': 'Neptun',
-        'Pluto': 'Pluto',
-        // Kleingeschriebene Varianten für das Menü
-        'mercury': 'Merkur',
-        'venus': 'Venus',
-        'earth': 'Erde',
-        'mars': 'Mars',
-        'jupiter': 'Jupiter',
-        'saturn': 'Saturn',
-        'uranus': 'Uranus',
-        'neptune': 'Neptun',
-        'pluto': 'Pluto',
-        'asteroid': 'Asteroid',
-        'comet': 'Komet',
-
-        // Himmelsrichtungen
-        'north': 'N',
-        'east': 'O',
-        'south': 'S',
-        'west': 'W',
-
-        // Ansichten
-        'horizon_view': 'Horizontansicht',
-        'planisphere_view': 'Planisphäre',
-
-        // Dialog-Texte
-        'multiple_objects_found': 'Mehrere Objekte',
-        'close': '×',
-
-        // Objektinformationen
-        'altitude': 'Höhe',
-        'azimuth': 'Azimut',
-        'distance': 'Entfernung',
-        'rise_time': 'Aufgang',
-        'set_time': 'Untergang',
-        'transit_time': 'Höchststand',
-        'phase': 'Phase',
-        'magnitude': 'Helligkeit',
-        'day_length': 'Tageslänge',
-        'astronomical_twilight': 'Astronomische Dämmerung',
-        'nautical_twilight': 'Nautische Dämmerung',
-        'civil_twilight': 'Bürgerliche Dämmerung',
-
-        // Mondphasen
-        'new_moon': 'Neumond',
-        'waxing_crescent': 'Zunehmende Sichel',
-        'first_quarter': 'Erstes Viertel',
-        'waxing_gibbous': 'Zunehmender Mond',
-        'full_moon': 'Vollmond',
-        'waning_gibbous': 'Abnehmender Mond',
-        'last_quarter': 'Letztes Viertel',
-        'waning_crescent': 'Abnehmende Sichel',
-
-        // Zeiteinheiten
-        'hour': 'Uhr',
-        'au': 'AE', // Astronomische Einheit
-
-        // Standort-Dialog
-        'location_settings': 'Standort-Einstellungen',
-
-        // Simulierte Zeit
-        'sim_time_controls': 'Simulierte Zeit',
-        'sim_time_use': 'Simulierte Zeit verwenden',
-        'sim_time_hours': 'Stunden',
-        'sim_time_minutes': 'Minuten',
-        'sim_time_reset': 'Zurücksetzen',
-        'sim_time_preview': 'Simuliert:',
-        'custom_time_title': 'Benutzerdefinierte Zeit',
-        'date': 'Datum',
-        'time': 'Zeit',
-        'apply': 'Anwenden',
-        'click_to_set_time': 'Klicken, um eine benutzerdefinierte Zeit einzugeben',
-        'invalid_time_input': 'Bitte geben Sie ein gültiges Datum und eine gültige Zeit ein.',
-        'time_input_error': 'Fehler bei der Zeiteingabe. Bitte versuchen Sie es erneut.',
-
-        // Navigationspfeile
-        'shift_left': 'Horizont nach links verschieben',
-        'shift_right': 'Horizont nach rechts verschieben',
-        'rotate_left': 'Planisphäre gegen Uhrzeigersinn drehen',
-        'rotate_right': 'Planisphäre im Uhrzeigersinn drehen',
-
-        // Filter-Einstellungen
-        'asteroid_magnitude_label': 'Asteroiden max. Magnitude:',
-        'comet_magnitude_label': 'Kometen max. Magnitude:',
-        'apply_filters': 'Anwenden',
-        'search_location': 'Standort suchen...',
-        'search': 'Suchen',
-        'fetching_elevation': 'Höhe wird ermittelt...',
-        'searching': 'Suche',
-        'search_error': 'Fehler bei der Suche',
-        'no_results_found': 'Keine Ergebnisse gefunden',
-        'search_results': 'Suchergebnisse',
-        'location_preview': 'Standortvorschau',
-        'name': 'Name',
-        'coordinates': 'Koordinaten',
-        'elevation_not_available': 'Nicht verfügbar',
-        'fetching': 'Wird geladen...',
-        'current_location': 'Aktueller Standort',
-        'manual_coordinates': 'Manuelle Koordinaten',
-        'latitude': 'Breitengrad',
-        'longitude': 'Längengrad',
-        'elevation': 'Höhe (m)',
-        'location_name': 'Ortsname',
-        'apply': 'Übernehmen',
-        'invalid_coordinates': 'Ungültige Koordinaten',
-
-        // Hilfe-Dialog
-        'help_title': 'Hilfe - ASCII Sky Tracker',
-        'help_controls': 'Steuerung',
-        'help_sky_view': 'Himmelsansicht',
-        'help_object_list': 'Objektliste',
-        'help_simulation': 'Zeitsimulation',
-        'location_button': 'Standort-Button',
-        'help_location': 'Ändert den Beobachtungsstandort (Breiten-/Längengrad und Höhe)',
-        'help_time_controls': 'Zeitsteuerung - Tag zurück, Stunde zurück, Jetzt (Echtzeit), Stunde vor, Tag vor',
-        'help_time_display': 'Zeitanzeige',
-        'help_time_display_desc': 'Klickbar, um ein beliebiges Datum und eine beliebige Uhrzeit für die Simulation einzugeben',
-        'help_language': 'Sprachwechsel zwischen Deutsch und Englisch',
-        'help_object_click': 'Objekt anklicken',
-        'help_object_click_desc': 'Zeigt Details wie Position, Helligkeit und Auf-/Untergangszeiten',
-        'help_navigation': 'Navigation',
-        'help_navigation_desc': 'Pfeile links/rechts verschieben den Horizont um 5° (N, O, S, W sichtbar machen)',
-        'help_view_modes': 'Ansichten: Horizont / Planisphäre',
-        'help_view_modes_desc': 'Über den Tab unter der Himmelsansicht können Sie zwischen Horizontansicht (rechteckig) und Planisphäre (runder Himmelsatlas) umschalten. In der Planisphäre zeigt die gepunktete Kurve den Horizont: Objekte über dem Horizont liegen innerhalb, Objekte darunter außerhalb der Kurve.',
-        'help_zoom_pan': 'Zoom und Pan',
-        'help_zoom_pan_desc': 'Am Desktop können Sie über den Zoom-Button die Ansicht vergrößern. Bei gezoomter Ansicht können Sie mit gedrückter Maustaste die Ansicht nach oben und unten verschieben.',
-        'help_symbols': 'Symbole',
-        'help_symbols_desc': 'Himmelsobjekte werden durch folgende Symbole dargestellt:',
-        'symbol_sun': 'Sonne',
-        'symbol_moon': 'Mond (phasenabhängig)',
-        'symbol_moon_phases': 'Mondphasen: 🌑 Neumond, 🌒 zunehmende Sichel, 🌓 erstes Viertel, 🌔 zunehmend, 🌕 Vollmond, 🌖 abnehmend, 🌗 letztes Viertel, 🌘 abnehmende Sichel',
-        'symbol_mercury': 'Merkur',
-        'symbol_venus': 'Venus',
-        'symbol_mars': 'Mars',
-        'symbol_jupiter': 'Jupiter',
-        'symbol_saturn': 'Saturn',
-        'symbol_asteroid': 'Asteroiden',
-        'symbol_comet': 'Kometen',
-        'help_day_minus': 'Tag zurück (-24 Stunden)',
-        'help_hour_minus': 'Stunde zurück (-1 Stunde)',
-        'help_now': 'Aktuelle Zeit (Echtzeit)',
-        'help_hour_plus': 'Stunde vor (+1 Stunde)',
-        'help_day_plus': 'Tag vor (+24 Stunden)',
-        'help_object_list_desc': 'Klick auf Objekttyp (Sonne, Mond, Planeten, etc.) markiert alle Objekte dieses Typs im Himmel.',
-        'help_simulation_desc': 'Simuliert verschiedene Zeiten, um Himmelsbewegungen zu verfolgen. Die Steuerung ermöglicht präzise Zeitnavigation:',
-        'help_simulation_desc2': 'Diese Zeitnavigation ermöglicht es, Himmelsbewegungen über längere Zeiträume zu verfolgen und astronomische Ereignisse wie Auf- und Untergänge zu beobachten.',
-        'help_location_change': 'Standortwechsel',
-        'help_location_change_desc': 'Beim ersten Wechsel zu einem neuen Standort kann die Berechnung länger dauern, weil die Himmelsdaten für Asteroiden und Kometen für diesen Standort zunächst berechnet und zwischengespeichert werden müssen.',
-        // Sonnenbahn-Jahreskurve
-        'sunpath_curve': 'Sonnenauf-/untergang (Jahreskurve)',
-        'toggle_sunpath': 'Sonnenauf-/untergangskurve ein/ausblenden',
-        'sunpath_title': 'Sonnenauf-/untergang für',
-
-        // Object count display
-        'visible_objects': 'Sichtbare Objekte',
-        'asteroids_up_to_mag': 'Asteroiden bis Mag',
-        'comets_up_to_mag': 'Kometen bis Mag',
-        'no_data': 'Keine Daten verfügbar',
-        'no_visible_objects': 'Keine Objekte über dem Horizont',
-
-        // Magnitude filters
-        'magnitude_filters': 'Helligkeitsfilter',
-        'magnitude_filter_info': 'Bei Änderung der Filter werden die Daten neu berechnet (einige Minuten). Die Objekte erscheinen automatisch, sobald sie verfügbar sind.',
-        'cache_invalidated_message': 'Filter geändert. Neuberechnung läuft (einige Minuten)...',
-        'error_applying_filters': 'Fehler beim Anwenden der Filter',
-
-        // Constellation controls
-        'constellations': 'Sternbilder',
-        'toggle_constellations': 'Sternbilder ein/ausblenden',
-        'show_constellations': 'Sternbilder anzeigen',
-        'hide_constellations': 'Sternbilder ausblenden',
-        'messier': 'Messier-Objekte',
-        'toggle_messier': 'Messier-Objekte ein/ausblenden',
-        'show_messier': 'Messier-Objekte anzeigen',
-        'hide_messier': 'Messier-Objekte ausblenden',
-
-        // Constellation names
-        // Zodiac
-        'Aries': 'Widder',
-        'Taurus': 'Stier',
-        'Gemini': 'Zwillinge',
-        'Cancer': 'Krebs',
-        'Leo': 'Löwe',
-        'Virgo': 'Jungfrau',
-        'Libra': 'Waage',
-        'Scorpius': 'Skorpion',
-        'Sagittarius': 'Schütze',
-        'Capricornus': 'Steinbock',
-        'Aquarius': 'Wassermann',
-        'Pisces': 'Fische',
-        // Additional constellations
-        'Ursa Major': 'Großer Bär',
-        'Ursa Minor': 'Kleiner Bär',
-        'Pegasus': 'Pegasus',
-        'Andromeda': 'Andromeda',
-        'Cassiopeia': 'Kassiopeia',
-        'Orion': 'Orion',
-        'Canis Major': 'Großer Hund',
-        'Perseus': 'Perseus',
-        'Auriga': 'Fuhrmann',
-        'Draco': 'Drachen',
-        'Lyra': 'Leier',
-        'Cygnus': 'Schwan',
-        'Aquila': 'Adler',
-        'Bootes': 'Bärenhüter',
-    },
-
-    // Englisch als Fallback
-    'en': {
-        // General texts
-        'loading': 'Loading celestial data...',
-        // Dedicated hint for yearly sunrise/sunset computation (sunpath overlay)
-        'loading_sunpath': 'Computing yearly sunrise and sunset data for this location… On first use for a new location this may take a while (up to about three minutes).',
-        'loading_asteroids': 'Loading minor planet data...',
-        'error_loading': 'Error loading sky data. Please refresh the page.',
-        'click_info': 'Click on any object for details',
-        'app_title': 'ASCII Sky Tracker',
-        'cache_status': 'Cache Status',
-        'location': 'Location',
-        'window': 'Window',
-        'in_window': 'h',
-        'earliest': 'Earliest',
-        'latest': 'Latest',
-        'error': 'Error',
-        'no_data_for_location': 'No cache data for this location in the current window.',
-        'snapshots': 'snapshots',
-        'overall_cache': 'Total cache',
-        'precompute_cache': 'Precompute Cache',
-        'start_date': 'Start Date',
-        'end_date': 'End Date',
-        'start_precompute': 'Start Precompute',
-        'processing': 'Processing...',
-        'enter_both_dates': 'Please enter both start and end dates',
-        'task_started': 'Task started...',
-        'task_completed': 'Task completed!',
-        'task_not_found_server_restart': 'The precompute task is no longer active (server may have restarted). You can start a new precomputation if needed.',
-        'status': 'Status',
-
-        // Celestial objects
-        'sun': 'Sun',
-        'moon': 'Moon',
-        'Mercury': 'Mercury',
-        'Venus': 'Venus',
-        'Earth': 'Earth',
-        'Mars': 'Mars',
-        'Jupiter': 'Jupiter',
-        'Saturn': 'Saturn',
-        'Uranus': 'Uranus',
-        'Neptune': 'Neptune',
-        'Pluto': 'Pluto',
-        // Lowercase variants for the menu
-        'mercury': 'Mercury',
-        'venus': 'Venus',
-        'earth': 'Earth',
-        'mars': 'Mars',
-        'jupiter': 'Jupiter',
-        'saturn': 'Saturn',
-        'uranus': 'Uranus',
-        'neptune': 'Neptune',
-        'pluto': 'Pluto',
-        'asteroid': 'Asteroid',
-        'comet': 'Comet',
-
-        // Cardinal directions
-        'north': 'N',
-        'east': 'E',
-        'south': 'S',
-        'west': 'W',
-
-        // Views
-        'horizon_view': 'Horizon view',
-        'planisphere_view': 'Planisphere',
-
-        // Dialog texts
-        'multiple_objects_found': 'Multiple Objects',
-        'close': '×',
-
-        // Object information
-        'altitude': 'Altitude',
-        'azimuth': 'Azimuth',
-        'distance': 'Distance',
-        'rise_time': 'Rise',
-        'set_time': 'Set',
-        'transit_time': 'Transit',
-        'phase': 'Phase',
-        'magnitude': 'Magnitude',
-        'day_length': 'Day length',
-        'astronomical_twilight': 'Astronomical twilight',
-        'nautical_twilight': 'Nautical twilight',
-        'civil_twilight': 'Civil twilight',
-
-        // Moon phases
-        'new_moon': 'New Moon',
-        'waxing_crescent': 'Waxing Crescent',
-        'first_quarter': 'First Quarter',
-        'waxing_gibbous': 'Waxing Gibbous',
-        'full_moon': 'Full Moon',
-        'waning_gibbous': 'Waning Gibbous',
-        'last_quarter': 'Last Quarter',
-        'waning_crescent': 'Waning Crescent',
-
-        // Time units
-        'hour': '',
-        'au': 'AU', // Astronomical Unit
-
-        // Location dialog
-        'location_settings': 'Location Settings',
-
-        // Simulated time
-        'sim_time_controls': 'Simulated Time',
-        'sim_time_use': 'Use simulated time',
-        'sim_time_hours': 'Hours',
-        'sim_time_minutes': 'Minutes',
-        'sim_time_reset': 'Reset',
-        'sim_time_preview': 'Simulated:',
-        'custom_time_title': 'Custom Time',
-        'date': 'Date',
-        'time': 'Time',
-        'apply': 'Apply',
-        'click_to_set_time': 'Click to enter a custom time',
-        'invalid_time_input': 'Please enter a valid date and time.',
-        'time_input_error': 'Error processing time input. Please try again.',
-
-        // Navigation arrows
-        'shift_left': 'Shift horizon to the left',
-        'shift_right': 'Shift horizon to the right',
-        'rotate_left': 'Rotate planisphere counterclockwise',
-        'rotate_right': 'Rotate planisphere clockwise',
-
-        // Filter settings
-        'asteroid_magnitude_label': 'Asteroids max. magnitude:',
-        'comet_magnitude_label': 'Comets max. magnitude:',
-        'apply_filters': 'Apply',
-        'search_location': 'Search location...',
-        'search': 'Search',
-        'fetching_elevation': 'Fetching elevation...',
-        'searching': 'Searching',
-        'search_error': 'Search error',
-        'no_results_found': 'No results found',
-        'search_results': 'Search Results',
-        'location_preview': 'Location Preview',
-        'name': 'Name',
-        'coordinates': 'Coordinates',
-        'elevation_not_available': 'Not available',
-        'fetching': 'Loading...',
-        'current_location': 'Current Location',
-        'manual_coordinates': 'Manual Coordinates',
-        'latitude': 'Latitude',
-        'longitude': 'Longitude',
-        'elevation': 'Elevation (m)',
-        'location_name': 'Location Name',
-        'apply': 'Apply',
-        'invalid_coordinates': 'Invalid coordinates',
-        'help_object_list_desc': 'Click on object type (Sun, Moon, Planets, etc.) highlights all objects of this type in the sky.',
-        'help_title': 'Help - ASCII Sky Tracker',
-        'help_controls': 'Controls',
-        'help_sky_view': 'Sky View',
-        'help_object_list': 'Object List',
-        'help_object_click': 'Object Click',
-        'help_object_click_desc': 'Shows details like position, magnitude, and rise/set times',
-        'help_navigation': 'Navigation',
-        'help_navigation_desc': 'Left/right arrows shift the horizon by 5° (make N, E, S, W visible)',
-        'help_view_modes': 'Views: Horizon / Planisphere',
-        'help_view_modes_desc': 'Use the tab below the sky view to switch between Horizon view (rectangular) and Planisphere (circular sky chart). In the Planisphere, the dotted curve shows the horizon: objects above the horizon are inside, objects below are outside the curve.',
-        'help_zoom_pan': 'Zoom and Pan',
-        'help_zoom_pan_desc': 'On desktop, you can use the zoom button to enlarge the view. When zoomed in, you can click and drag to move the view up and down.',
-        'help_symbols': 'Symbols',
-        'help_symbols_desc': 'Celestial objects are represented by the following symbols:',
-        'help_time_controls': 'Time controls - day back, hour back, now (real-time), hour forward, day forward',
-        'help_simulation_desc': 'Simulates different times to track celestial movements. The controls allow precise time navigation:',
-        'help_day_minus': 'Day back (-24 hours)',
-        'help_hour_minus': 'Hour back (-1 hour)',
-        'help_now': 'Now (current time)',
-        'help_hour_plus': 'Hour forward (+1 hour)',
-        'help_day_plus': 'Day forward (+24 hours)',
-        'symbol_sun': 'Sun',
-        'symbol_moon': 'Moon (phase-dependent)',
-        'symbol_moon_phases': 'Moon phases: new moon, waxing crescent, first quarter, waxing gibbous, full moon, waning gibbous, last quarter, waning crescent',
-        'symbol_mercury': 'Mercury',
-        'symbol_venus': 'Venus',
-        'symbol_mars': 'Mars',
-        'symbol_jupiter': 'Jupiter',
-        'symbol_saturn': 'Saturn',
-        'symbol_comet': 'Comets',
-        'help_simulation_desc2': 'This time navigation allows you to track celestial movements over longer periods and observe astronomical events such as risings and settings.',
-        'help_location_change': 'Location Changes',
-        'help_location_change_desc': 'When switching to a new location for the first time, calculations may take longer because asteroid and comet sky data for that location must be computed and cached first.',
-        'help_magnitude_filters': 'Magnitude filters',
-        'help_magnitude_filters_desc': 'Via ⚙️ under "Visible Objects" adjust asteroid/comet magnitude filters (10-20). Changing filters triggers recomputation; objects appear when ready.',
-        'help_messier': 'Messier objects',
-        'help_messier_desc': 'Toggle (✧) for Messier objects (RASC/SEDS catalog), real-time Alt/Az with rise/set/transit; clickable for details.',
-        'help_registration': 'Registration & Accounts',
-        'help_registration_desc1': 'Login/registration is optional convenience; app works fully without login.',
-        'help_registration_desc2': 'When you register, the following data is stored: username, password hash (no plain-text password) and optional user settings such as location, display settings (e.g. horizontal shift), simulated time, brightness filters, color theme and language. Without logging in, these settings are only stored locally in your browser (localStorage), not on the server.',
-        'help_registration_desc3': 'Important: There is no password reset and no support for account recovery. If you forget your password, the account cannot be restored – simply create a new account instead.',
-        'help_github': 'Source Code',
-        'help_github_desc': 'ASCII Sky is Open Source. Find the complete source code on GitHub:',
-        // Sunpath yearly curve
-        'sunpath_curve': 'Sunrise/sunset (year curve)',
-        'toggle_sunpath': 'Toggle sunrise/sunset curve',
-        'sunpath_title': 'Sunrise/sunset for',
-
-        // Object count display
-        'visible_objects': 'Visible Objects',
-        'asteroids_up_to_mag': 'Asteroids up to Mag',
-        'comets_up_to_mag': 'Comets up to Mag',
-        'no_data': 'No data available',
-        'no_visible_objects': 'No objects above horizon',
-
-        // Magnitude filters
-        'magnitude_filters': 'Brightness Filters',
-        'magnitude_filter_info': 'Changing filters will recalculate data (several minutes). Objects appear automatically when available.',
-        'cache_invalidated_message': 'Filters changed. Recalculating (several minutes)...',
-        'error_applying_filters': 'Error applying filters',
-
-        // Constellation controls
-        'constellations': 'Constellations',
-        'toggle_constellations': 'Toggle constellations',
-        'show_constellations': 'Show constellations',
-        'hide_constellations': 'Hide constellations',
-        'messier': 'Messier objects',
-        'toggle_messier': 'Toggle Messier objects',
-        'show_messier': 'Show Messier objects',
-        'hide_messier': 'Hide Messier objects',
-
-        // Constellation names
-        // Zodiac
-        'Aries': 'Aries',
-        'Taurus': 'Taurus',
-        'Gemini': 'Gemini',
-        'Cancer': 'Cancer',
-        'Leo': 'Leo',
-        'Virgo': 'Virgo',
-        'Libra': 'Libra',
-        'Scorpius': 'Scorpius',
-        'Sagittarius': 'Sagittarius',
-        'Capricornus': 'Capricorn',
-        'Aquarius': 'Aquarius',
-        'Pisces': 'Pisces',
-        // Additional constellations
-        'Ursa Major': 'Great Bear',
-        'Ursa Minor': 'Little Bear',
-        'Pegasus': 'Pegasus',
-        'Andromeda': 'Andromeda',
-        'Cassiopeia': 'Cassiopeia',
-        'Orion': 'Orion',
-        'Canis Major': 'Great Dog',
-        'Perseus': 'Perseus',
-        'Auriga': 'Charioteer',
-        'Draco': 'Dragon',
-        'Lyra': 'Lyre',
-        'Cygnus': 'Swan',
-        'Aquila': 'Eagle',
-        'Bootes': 'Herdsman'
-    }
+const CONSTELLATIONS_DE = {
+    Aries: 'Widder', Taurus: 'Stier', Gemini: 'Zwillinge', Cancer: 'Krebs', Leo: 'Löwe',
+    Virgo: 'Jungfrau', Libra: 'Waage', Scorpius: 'Skorpion', Sagittarius: 'Schütze',
+    Capricornus: 'Steinbock', Aquarius: 'Wassermann', Pisces: 'Fische',
+    'Ursa Major': 'Großer Bär', 'Ursa Minor': 'Kleiner Bär', Pegasus: 'Pegasus', Andromeda: 'Andromeda',
+    Cassiopeia: 'Kassiopeia', Orion: 'Orion', 'Canis Major': 'Großer Hund', Perseus: 'Perseus',
+    Auriga: 'Fuhrmann', Draco: 'Drache', Lyra: 'Leier', Cygnus: 'Schwan', Aquila: 'Adler', Bootes: 'Bärenhüter',
 };
 
-// Aktuelle Sprache (Standard: Deutsch)
+const CONSTELLATIONS_EN = {
+    Aries: 'Aries', Taurus: 'Taurus', Gemini: 'Gemini', Cancer: 'Cancer', Leo: 'Leo',
+    Virgo: 'Virgo', Libra: 'Libra', Scorpius: 'Scorpius', Sagittarius: 'Sagittarius',
+    Capricornus: 'Capricorn', Aquarius: 'Aquarius', Pisces: 'Pisces',
+    'Ursa Major': 'Great Bear', 'Ursa Minor': 'Little Bear', Pegasus: 'Pegasus', Andromeda: 'Andromeda',
+    Cassiopeia: 'Cassiopeia', Orion: 'Orion', 'Canis Major': 'Great Dog', Perseus: 'Perseus',
+    Auriga: 'Charioteer', Draco: 'Dragon', Lyra: 'Lyre', Cygnus: 'Swan', Aquila: 'Eagle', Bootes: 'Herdsman',
+};
+
+export const i18n = {
+    de: {
+        app_title: 'ASCII Sky',
+        skip_to_sky: 'Zum Himmel springen',
+        loading: 'Lade Himmelsdaten …',
+        loading_sunpath: 'Berechne Sonnenauf- und -untergänge für das Jahr … Beim ersten Aufruf für einen neuen Standort kann das bis zu drei Minuten dauern.',
+        error_loading: 'Die Anwendung konnte nicht starten. Bitte die Seite neu laden.',
+        data_stale: 'Keine Verbindung zum Server – die Anzeige zeigt die zuletzt geladenen Daten.',
+        retry: 'Erneut versuchen',
+        network_error: 'Netzwerkfehler. Bitte erneut versuchen.',
+        close_label: 'Schließen',
+        apply: 'Übernehmen',
+        cancel: 'Abbrechen',
+        no_data: 'Keine Daten verfügbar',
+
+        // bodies
+        sun: 'Sonne', moon: 'Mond', mercury: 'Merkur', venus: 'Venus', earth: 'Erde', mars: 'Mars',
+        jupiter: 'Jupiter', saturn: 'Saturn', uranus: 'Uranus', neptune: 'Neptun', pluto: 'Pluto',
+        asteroid: 'Asteroid', comet: 'Komet', asteroids: 'Asteroiden', comets: 'Kometen',
+
+        north: 'N', east: 'O', south: 'S', west: 'W',
+
+        // view
+        sky_region: 'Himmelsansicht',
+        sky_help_short: 'Himmelskarte. Ziehen zum Schwenken, Mausrad oder zwei Finger zum Zoomen, Tippen für Details. Pfeiltasten schwenken, Plus und Minus zoomen.',
+        view_mode: 'Ansicht',
+        horizon_view: 'Horizont',
+        planisphere_view: 'Planisphäre',
+        layers: 'Ebenen',
+        constellations: 'Sternbilder',
+        messier: 'Messier-Objekte',
+        grid: 'Koordinatenraster',
+        sunpath_curve: 'Sonnenauf- und -untergang im Jahr',
+        zoom: 'Zoom',
+        zoom_in: 'Näher (kleineres Sichtfeld)',
+        zoom_out: 'Weiter (größeres Sichtfeld)',
+        turn_left: 'Nach links drehen',
+        turn_right: 'Nach rechts drehen',
+
+        // list and details
+        visible_objects: 'Sichtbar',
+        sun_moon_planets: 'Sonne, Mond und Planeten',
+        none_above_horizon: 'Keine über dem Horizont',
+        below_horizon: 'Unter dem Horizont',
+        toggle_list: 'Liste ein- oder ausklappen',
+        multiple_objects_found: 'Mehrere Objekte',
+        altitude: 'Höhe',
+        azimuth: 'Azimut',
+        distance: 'Entfernung',
+        rise_time: 'Aufgang',
+        set_time: 'Untergang',
+        transit_time: 'Höchststand',
+        phase: 'Phase',
+        magnitude: 'Helligkeit',
+        object_type: 'Typ',
+        constellation: 'Sternbild',
+        au: 'AE',
+        clock_suffix: 'Uhr',
+        new_moon: 'Neumond',
+        waxing_crescent: 'Zunehmende Sichel',
+        first_quarter: 'Erstes Viertel',
+        waxing_gibbous: 'Zunehmender Mond',
+        full_moon: 'Vollmond',
+        waning_gibbous: 'Abnehmender Mond',
+        last_quarter: 'Letztes Viertel',
+        waning_crescent: 'Abnehmende Sichel',
+
+        // time
+        sim_time_controls: 'Zeit',
+        sim_badge: 'SIM',
+        click_to_set_time: 'Datum und Uhrzeit wählen',
+        custom_time_title: 'Datum und Uhrzeit',
+        date: 'Datum',
+        time: 'Uhrzeit',
+        time_zone: 'Zeitzone',
+        now: 'Jetzt',
+        invalid_time_input: 'Bitte ein gültiges Datum und eine gültige Uhrzeit eingeben.',
+        help_day_minus: 'Einen Tag zurück',
+        help_hour_minus: 'Eine Stunde zurück',
+        help_hour_plus: 'Eine Stunde vor',
+        help_day_plus: 'Einen Tag vor',
+        help_now: 'Zurück zur aktuellen Zeit',
+
+        // location
+        location_settings: 'Standort ändern',
+        current_location: 'Aktueller Standort',
+        search: 'Suchen',
+        search_location: 'Ort suchen …',
+        searching: 'Suche',
+        search_error: 'Die Suche ist fehlgeschlagen.',
+        no_results_found: 'Keine Ergebnisse gefunden',
+        search_results: 'Suchergebnisse',
+        manual_coordinates: 'Koordinaten',
+        latitude: 'Breitengrad',
+        longitude: 'Längengrad',
+        elevation: 'Höhe (m)',
+        location_name: 'Ortsname',
+        custom_location: 'Eigener Standort',
+        fetch_elevation: 'Höhe ermitteln',
+        fetching_elevation: 'Höhe wird ermittelt …',
+        elevation_not_available: 'Höhe nicht verfügbar – bitte selbst eintragen.',
+        invalid_coordinates: 'Ungültige Koordinaten (Breite −90 bis 90, Länge −180 bis 180).',
+
+        // filters
+        magnitude_filters: 'Helligkeitsfilter',
+        asteroid_magnitude_label: 'Asteroiden bis Magnitude',
+        comet_magnitude_label: 'Kometen bis Magnitude',
+        magnitude_filter_info: 'Größere Werte zeigen auch lichtschwächere Objekte. Die Änderung gilt sofort.',
+        error_applying_filters: 'Die Filter konnten nicht gespeichert werden.',
+
+        // sunpath
+        sunpath_title: 'Sonnenauf- und -untergang',
+        sunpath_error: 'Die Jahreskurve konnte nicht geladen werden.',
+        day_length: 'Tageslänge',
+        astronomical_twilight: 'Astronomische Dämmerung',
+        nautical_twilight: 'Nautische Dämmerung',
+        civil_twilight: 'Bürgerliche Dämmerung',
+
+        // appearance
+        appearance: 'Darstellung',
+        theme: 'Farbthema',
+        language: 'Sprache',
+        theme_green: 'Grün',
+        theme_red: 'Rot',
+        theme_blue: 'Blau',
+        theme_amber: 'Bernstein',
+        theme_hint: 'Rot schont die Dunkeladaption der Augen bei der Beobachtung.',
+
+        // account
+        account: 'Konto',
+        login_register: 'Anmelden / Registrieren',
+        login: 'Anmelden',
+        register: 'Registrieren',
+        logout: 'Abmelden',
+        username: 'Benutzername',
+        username_or_email: 'Benutzername oder E-Mail',
+        password: 'Passwort',
+        signed_in_as: 'Angemeldet als',
+        user_admin: 'Benutzerverwaltung',
+        login_failed: 'Anmeldung fehlgeschlagen. Bitte die Eingaben prüfen.',
+        register_failed: 'Registrierung fehlgeschlagen. Ist der Benutzername schon vergeben?',
+        register_failed_name: 'Der Name ist vergeben oder ungültig (3–40 Zeichen: Buchstaben, Ziffern, Leerzeichen, . _ -).',
+        register_hint: 'Passwort mit mindestens 6 Zeichen. Es gibt keine Passwort-Wiederherstellung.',
+        too_many_attempts: 'Zu viele Versuche. Bitte später erneut versuchen.',
+
+        // help
+        help_title: 'Hilfe',
+        help_sky_view: 'Himmelsansicht',
+        help_sky_view_desc: 'Der Himmel über deinem Standort als ASCII-Karte, für die angezeigte Zeit. Objekte unter dem Horizont erscheinen in der unteren Hälfte bzw. außerhalb des Horizontkreises.',
+        help_horizon_desc: 'Rundumblick mit dem Horizont als Linie in der Mitte. Das Sichtfeld (360°, 180°, 120°, 90°) wählt, wie viel Azimut zu sehen ist; am Telefon beginnt die Ansicht mit 120°.',
+        help_planisphere_desc: 'Runde Himmelskarte mit dem Zenit in der Mitte; der gepunktete Kreis ist der Horizont. Zoom 1× bis 3×, im Zoom lässt sich die Karte verschieben.',
+        help_gestures: 'Gesten',
+        help_gestures_desc: 'Ziehen schwenkt den Horizont bzw. dreht die Planisphäre; Mausrad oder zwei Finger zoomen.',
+        help_select: 'Auswählen',
+        help_select_desc: 'Ein Klick oder Tippen auf ein Symbol zeigt Höhe, Azimut, Helligkeit sowie Auf- und Untergang. Liegen mehrere Objekte an der Stelle, erscheint eine Auswahl.',
+        help_symbols: 'Symbole',
+        symbol_several: 'mehrere Kleinkörper in einer Zelle',
+        symbol_selected: 'ausgewähltes Objekt',
+        symbol_overlays: 'Sternbilder und Messier-Objekte (Ebenen)',
+        help_moon_phases: 'In der Liste zeigt der Mond seine Phase:',
+        help_toolbar: 'Werkzeugleiste',
+        help_layer_constellations: 'Sternbilder mit Verbindungslinien',
+        help_layer_messier: 'Messier-Katalog (Nebel, Sternhaufen, Galaxien)',
+        help_layer_sunpath: 'Sonnenauf- und -untergang sowie Dämmerung über das ganze Jahr',
+        help_layer_grid: 'Höhenlinien bzw. Koordinatennetz',
+        help_zoom_buttons: 'Sichtfeld bzw. Zoom ändern',
+        help_time: 'Zeit',
+        help_time_desc: 'Die Zeitleiste verschiebt die angezeigte Zeit; ein Klick auf Datum und Uhrzeit öffnet die Eingabe. „SIM“ zeigt, dass nicht die aktuelle Zeit angezeigt wird.',
+        help_day_step: 'einen Tag zurück bzw. vor',
+        help_hour_step: 'eine Stunde zurück bzw. vor',
+        help_keyboard: 'Tastatur',
+        help_key_turn: 'schwenken bzw. drehen',
+        help_key_zoom: 'zoomen',
+        help_key_view: 'Horizont bzw. Planisphäre',
+        help_key_escape: 'Auswahl aufheben, Dialog schließen',
+        help_list: 'Objektliste',
+        help_list_desc: 'Sonne, Mond und Planeten stehen immer in der Liste (unter dem Horizont abgeblendet), Asteroiden und Kometen, sobald sie über dem Horizont sind. Ein Klick wählt das Objekt aus und schwenkt die Ansicht dorthin.',
+        help_filters_desc: 'Über ⚙ in der Liste wird festgelegt, bis zu welcher Helligkeit (Magnitude 10 bis 20) Asteroiden und Kometen erscheinen.',
+        help_location: 'Standort',
+        help_location_desc: 'Ein Klick auf den Ortsnamen öffnet die Suche oder die Eingabe von Koordinaten. Beim ersten Besuch eines neuen Standorts werden Asteroiden und Kometen erst berechnet; sie erscheinen nach kurzer Zeit.',
+        help_account: 'Konto',
+        help_account_desc1: 'Ein Konto ist freiwillig; die Anwendung funktioniert vollständig ohne Anmeldung.',
+        help_account_desc2: 'Gespeichert werden Benutzername, ein Passwort-Hash und die Einstellungen (Standort, Ansicht, simulierte Zeit, Filter, Farbthema, Sprache). Ohne Konto bleiben die Einstellungen nur in diesem Browser.',
+        help_account_desc3: 'Es gibt keine Passwort-Wiederherstellung. Wer das Passwort vergisst, legt einfach ein neues Konto an.',
+        help_source: 'Quellcode',
+        help_source_desc: 'ASCII Sky ist Open Source:',
+
+        ...CONSTELLATIONS_DE,
+    },
+
+    en: {
+        app_title: 'ASCII Sky',
+        skip_to_sky: 'Skip to the sky',
+        loading: 'Loading sky data …',
+        loading_sunpath: 'Computing the year\'s sunrises and sunsets … The first request for a new location can take up to three minutes.',
+        error_loading: 'The application could not start. Please reload the page.',
+        data_stale: 'No connection to the server – showing the last data loaded.',
+        retry: 'Retry',
+        network_error: 'Network error. Please try again.',
+        close_label: 'Close',
+        apply: 'Apply',
+        cancel: 'Cancel',
+        no_data: 'No data available',
+
+        sun: 'Sun', moon: 'Moon', mercury: 'Mercury', venus: 'Venus', earth: 'Earth', mars: 'Mars',
+        jupiter: 'Jupiter', saturn: 'Saturn', uranus: 'Uranus', neptune: 'Neptune', pluto: 'Pluto',
+        asteroid: 'Asteroid', comet: 'Comet', asteroids: 'Asteroids', comets: 'Comets',
+
+        north: 'N', east: 'E', south: 'S', west: 'W',
+
+        sky_region: 'Sky view',
+        sky_help_short: 'Sky map. Drag to pan, mouse wheel or two fingers to zoom, tap for details. Arrow keys pan, plus and minus zoom.',
+        view_mode: 'View',
+        horizon_view: 'Horizon',
+        planisphere_view: 'Planisphere',
+        layers: 'Layers',
+        constellations: 'Constellations',
+        messier: 'Messier objects',
+        grid: 'Coordinate grid',
+        sunpath_curve: 'Sunrise and sunset over the year',
+        zoom: 'Zoom',
+        zoom_in: 'Closer (smaller field of view)',
+        zoom_out: 'Wider (larger field of view)',
+        turn_left: 'Turn left',
+        turn_right: 'Turn right',
+
+        visible_objects: 'Visible',
+        sun_moon_planets: 'Sun, Moon and planets',
+        none_above_horizon: 'None above the horizon',
+        below_horizon: 'Below the horizon',
+        toggle_list: 'Expand or collapse the list',
+        multiple_objects_found: 'Several objects',
+        altitude: 'Altitude',
+        azimuth: 'Azimuth',
+        distance: 'Distance',
+        rise_time: 'Rise',
+        set_time: 'Set',
+        transit_time: 'Transit',
+        phase: 'Phase',
+        magnitude: 'Magnitude',
+        object_type: 'Type',
+        constellation: 'Constellation',
+        au: 'AU',
+        clock_suffix: '',
+        new_moon: 'New Moon',
+        waxing_crescent: 'Waxing Crescent',
+        first_quarter: 'First Quarter',
+        waxing_gibbous: 'Waxing Gibbous',
+        full_moon: 'Full Moon',
+        waning_gibbous: 'Waning Gibbous',
+        last_quarter: 'Last Quarter',
+        waning_crescent: 'Waning Crescent',
+
+        sim_time_controls: 'Time',
+        sim_badge: 'SIM',
+        click_to_set_time: 'Choose date and time',
+        custom_time_title: 'Date and time',
+        date: 'Date',
+        time: 'Time',
+        time_zone: 'Time zone',
+        now: 'Now',
+        invalid_time_input: 'Please enter a valid date and time.',
+        help_day_minus: 'One day back',
+        help_hour_minus: 'One hour back',
+        help_hour_plus: 'One hour forward',
+        help_day_plus: 'One day forward',
+        help_now: 'Back to the current time',
+
+        location_settings: 'Change location',
+        current_location: 'Current location',
+        search: 'Search',
+        search_location: 'Search for a place …',
+        searching: 'Searching',
+        search_error: 'The search failed.',
+        no_results_found: 'No results found',
+        search_results: 'Search results',
+        manual_coordinates: 'Coordinates',
+        latitude: 'Latitude',
+        longitude: 'Longitude',
+        elevation: 'Elevation (m)',
+        location_name: 'Place name',
+        custom_location: 'Custom location',
+        fetch_elevation: 'Look up elevation',
+        fetching_elevation: 'Looking up elevation …',
+        elevation_not_available: 'Elevation not available – please enter it yourself.',
+        invalid_coordinates: 'Invalid coordinates (latitude −90 to 90, longitude −180 to 180).',
+
+        magnitude_filters: 'Brightness filters',
+        asteroid_magnitude_label: 'Asteroids up to magnitude',
+        comet_magnitude_label: 'Comets up to magnitude',
+        magnitude_filter_info: 'Larger values also show fainter objects. The change applies at once.',
+        error_applying_filters: 'The filters could not be saved.',
+
+        sunpath_title: 'Sunrise and sunset',
+        sunpath_error: 'The year curve could not be loaded.',
+        day_length: 'Day length',
+        astronomical_twilight: 'Astronomical twilight',
+        nautical_twilight: 'Nautical twilight',
+        civil_twilight: 'Civil twilight',
+
+        appearance: 'Appearance',
+        theme: 'Colour theme',
+        language: 'Language',
+        theme_green: 'Green',
+        theme_red: 'Red',
+        theme_blue: 'Blue',
+        theme_amber: 'Amber',
+        theme_hint: 'Red preserves your eyes\' dark adaptation while observing.',
+
+        account: 'Account',
+        login_register: 'Sign in / Register',
+        login: 'Sign in',
+        register: 'Register',
+        logout: 'Sign out',
+        username: 'User name',
+        username_or_email: 'User name or e-mail',
+        password: 'Password',
+        signed_in_as: 'Signed in as',
+        user_admin: 'User management',
+        login_failed: 'Sign-in failed. Please check your input.',
+        register_failed: 'Registration failed. Is the user name taken?',
+        register_failed_name: 'The name is taken or not allowed (3–40 characters: letters, digits, spaces, . _ -).',
+        register_hint: 'Password of at least 6 characters. There is no password recovery.',
+        too_many_attempts: 'Too many attempts. Please try again later.',
+
+        help_title: 'Help',
+        help_sky_view: 'Sky view',
+        help_sky_view_desc: 'The sky above your location as an ASCII map, for the time shown. Objects below the horizon appear in the lower half or outside the horizon circle.',
+        help_horizon_desc: 'All-round view with the horizon as the line in the middle. The field of view (360°, 180°, 120°, 90°) sets how much azimuth is shown; on phones the view starts at 120°.',
+        help_planisphere_desc: 'Round sky chart with the zenith in the centre; the dotted circle is the horizon. Zoom 1× to 3×; when zoomed the chart can be moved.',
+        help_gestures: 'Gestures',
+        help_gestures_desc: 'Dragging pans the horizon or turns the planisphere; mouse wheel or two fingers zoom.',
+        help_select: 'Selecting',
+        help_select_desc: 'A click or tap on a symbol shows altitude, azimuth, magnitude and rise and set times. If several objects share the spot, a choice appears.',
+        help_symbols: 'Symbols',
+        symbol_several: 'several minor bodies in one cell',
+        symbol_selected: 'selected object',
+        symbol_overlays: 'constellations and Messier objects (layers)',
+        help_moon_phases: 'In the list the Moon shows its phase:',
+        help_toolbar: 'Toolbar',
+        help_layer_constellations: 'Constellations with their lines',
+        help_layer_messier: 'Messier catalogue (nebulae, clusters, galaxies)',
+        help_layer_sunpath: 'Sunrise, sunset and twilight over the whole year',
+        help_layer_grid: 'Altitude lines or coordinate grid',
+        help_zoom_buttons: 'Change field of view or zoom',
+        help_time: 'Time',
+        help_time_desc: 'The time bar moves the time shown; a click on date and time opens the input. "SIM" means the current time is not shown.',
+        help_day_step: 'one day back or forward',
+        help_hour_step: 'one hour back or forward',
+        help_keyboard: 'Keyboard',
+        help_key_turn: 'pan or turn',
+        help_key_zoom: 'zoom',
+        help_key_view: 'horizon or planisphere',
+        help_key_escape: 'clear the selection, close a dialog',
+        help_list: 'Object list',
+        help_list_desc: 'Sun, Moon and planets are always listed (dimmed below the horizon), asteroids and comets once they are above the horizon. A click selects the object and turns the view towards it.',
+        help_filters_desc: 'The ⚙ button in the list sets down to which brightness (magnitude 10 to 20) asteroids and comets appear.',
+        help_location: 'Location',
+        help_location_desc: 'A click on the place name opens the search or the coordinate input. On the first visit of a new location, asteroids and comets are computed first; they appear after a short while.',
+        help_account: 'Account',
+        help_account_desc1: 'An account is optional; the application works fully without signing in.',
+        help_account_desc2: 'Stored are the user name, a password hash and the settings (location, view, simulated time, filters, colour theme, language). Without an account the settings stay in this browser only.',
+        help_account_desc3: 'There is no password recovery. If you forget your password, simply create a new account.',
+        help_source: 'Source code',
+        help_source_desc: 'ASCII Sky is open source:',
+
+        ...CONSTELLATIONS_EN,
+    },
+};
+
 let currentLanguage = 'de';
 
-// Funktion zum Abrufen eines übersetzten Textes
+/** Whether ``key`` has a text (in the current language or English). */
+export function hasKey(key) {
+    return i18n[currentLanguage]?.[key] !== undefined || i18n.en[key] !== undefined;
+}
+
+/** Text of ``key``; an empty text is a valid text (L27). */
 export function t(key) {
-    // Versuche, den Text in der aktuellen Sprache zu finden
-    if (i18n[currentLanguage] && i18n[currentLanguage][key]) {
-        return i18n[currentLanguage][key];
-    }
-
-    // Fallback auf Englisch
-    if (i18n['en'] && i18n['en'][key]) {
-        return i18n['en'][key];
-    }
-
-    // Wenn keine Übersetzung gefunden wurde, gib den Schlüssel zurück
-    return key;
+    const own = i18n[currentLanguage]?.[key];
+    if (own !== undefined) return own;
+    const en = i18n.en[key];
+    return en !== undefined ? en : key;
 }
 
-// Funktion zum Ändern der Sprache
 export function setLanguage(lang) {
-    if (i18n[lang]) {
-        currentLanguage = lang;
-        return true;
-    }
-    return false;
+    if (!i18n[lang]) return false;
+    currentLanguage = lang;
+    return true;
 }
 
-// Funktion zum Abrufen der aktuellen Sprache
 export function getCurrentLanguage() {
     return currentLanguage;
+}
+
+/** Fill elements marked with data-i18n (text), data-i18n-title and data-i18n-aria. */
+export function applyStaticTexts(root = document) {
+    for (const node of root.querySelectorAll('[data-i18n]')) node.textContent = t(node.dataset.i18n);
+    for (const node of root.querySelectorAll('[data-i18n-title]')) {
+        const text = t(node.dataset.i18nTitle);
+        node.title = text;
+        if (node.tagName === 'BUTTON' && !node.hasAttribute('data-i18n')) node.setAttribute('aria-label', text);
+    }
+    for (const node of root.querySelectorAll('[data-i18n-aria]')) node.setAttribute('aria-label', t(node.dataset.i18nAria));
 }

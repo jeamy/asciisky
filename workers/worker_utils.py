@@ -5,7 +5,6 @@ Worker Utilities - Gemeinsame Funktionen für alle Worker
 Zentrale Sammlung von wiederverwendbaren Funktionen für:
 - Database Readiness Checks
 - Lock Management
-- RabbitMQ Status Publishing
 - Time Bucket Handling
 - Error Handling
 """
@@ -82,10 +81,9 @@ def position_time_bucket(dt: datetime, bucket_hours: int = 1) -> str:
 def precompute_task_key(task: dict[str, Any]) -> str:
     """Return the canonical persistent claim/message key for a precompute task.
 
-    On-demand tasks carry ``object_type`` instead of ``kind``; falling back to
-    it keeps on-demand and precompute tasks for the same object/location/
-    bucket in the same claim namespace so they deduplicate against each
-    other instead of racing.
+    Legacy on-demand messages still in a queue carry ``object_type`` instead
+    of ``kind``; the fallback lets the worker release their claim before it
+    dead-letters them.
     """
     from cache_utils import normalize_location, time_bucket_utc
 
@@ -141,7 +139,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         arguments={'x-max-priority': 10}
     )
 
-    # On-Demand Queues (Classic mit Priorität + TTL)
+    # Queues for tasks the API publishes on a cache miss (classic, priority + TTL)
     channel.queue_declare(
         queue='asteroid.compute',
         durable=True,
@@ -162,13 +160,7 @@ def declare_computation_queues(channel: pika.channel.Channel) -> None:
         }
     )
 
-    # Status Queue
-    channel.queue_declare(
-        queue='computation.status',
-        durable=True
-    )
-
-    # Exchange für On-Demand Computation
+    # Exchange the API publishes to
     channel.exchange_declare(
         exchange='computation.direct',
         exchange_type='direct',
@@ -282,12 +274,3 @@ class SharedSkyfieldResources:
         """Return shared resources and refresh dataframes after a file update."""
         self._reload_dataframes()
         return self.loader, self.ts, self.eph, self.asteroid_df, self.comet_df
-
-    def get_memory_usage(self) -> float:
-        """Gibt Memory-Usage der shared Resources zurück"""
-        try:
-            import psutil
-            process = psutil.Process()
-            return process.memory_info().rss / 1024 / 1024
-        except Exception:
-            return 0.0

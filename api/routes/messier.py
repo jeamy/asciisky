@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
 import os
 import re
 import threading
@@ -14,13 +15,14 @@ from fastapi import APIRouter, HTTPException, Request
 from skyfield import almanac
 from skyfield.api import Star, wgs84
 
-from api.computation import eph, ts
+from api.computation import _local_midnight, eph, ts
 from api.helpers import get_location_params, parse_time_param
 from cache_utils import location_key, normalize_location
 from data_paths import DATA_DIR
 from timezone_utils import get_tzinfo
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 CATALOG_URL = os.environ.get(
     "MESSIER_CATALOG_URL",
@@ -328,45 +330,27 @@ def _store_cached_response(cache_key: str, payload: dict) -> None:
         _cleanup_response_cache(now_mono)
 
 
-def _compute_daily_events(observer, location, star, tz, dt_utc: datetime) -> tuple[str | None, str | None, str | None]:
-    rise_time = None
-    set_time = None
-    transit_time = None
-
-    local_dt = dt_utc.astimezone(tz)
-    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    utc_midnight = local_midnight.astimezone(timezone.utc)
-    start_time = ts.from_datetime(utc_midnight)
-    end_time = ts.from_datetime(utc_midnight + timedelta(days=2))
-
+def _compute_daily_events(location, star, tz, dt_utc: datetime) -> tuple[str | None, str | None, str | None]:
+    """First rise, first set and upper transit within the local day (ISO strings)."""
+    day = dt_utc.astimezone(tz).date()
+    start_time = ts.from_datetime(_local_midnight(day, tz))
+    end_time = ts.from_datetime(_local_midnight(day + timedelta(days=1), tz))
+    rise_time = set_time = transit_time = None
     try:
-        f = almanac.risings_and_settings(eph, star, location)
-        times, events = almanac.find_discrete(start_time, end_time, f)
+        times, events = almanac.find_discrete(start_time, end_time, almanac.risings_and_settings(eph, star, location))
         for ti, ev in zip(times, events):
-            ev_local = ti.utc_datetime().astimezone(tz)
-            if ev_local.date() != local_dt.date():
-                continue
             if ev == 1 and rise_time is None:
-                rise_time = ev_local.isoformat()
+                rise_time = ti.utc_datetime().astimezone(tz).isoformat()
             elif ev == 0 and set_time is None:
-                set_time = ev_local.isoformat()
+                set_time = ti.utc_datetime().astimezone(tz).isoformat()
 
-        transit_f = almanac.meridian_transits(eph, star, location)
-        t_times, t_events = almanac.find_discrete(start_time, end_time, transit_f)
-        best_transit = None
-        best_alt = float("-inf")
-        for ti, _ev in zip(t_times, t_events):
-            ev_local = ti.utc_datetime().astimezone(tz)
-            if ev_local.date() != local_dt.date():
-                continue
-            alt_deg = observer.at(ti).observe(star).apparent().altaz()[0].degrees
-            if alt_deg > best_alt:
-                best_alt = alt_deg
-                best_transit = ev_local
-        if best_transit:
-            transit_time = best_transit.isoformat()
+        t_times, t_events = almanac.find_discrete(start_time, end_time, almanac.meridian_transits(eph, star, location))
+        for ti, ev in zip(t_times, t_events):
+            if ev == 1:  # upper transit
+                transit_time = ti.utc_datetime().astimezone(tz).isoformat()
+                break
     except Exception:
-        pass
+        logger.debug("Daily event search failed", exc_info=True)
 
     return rise_time, set_time, transit_time
 
@@ -413,7 +397,7 @@ def _compute_messier_payload(
                 "symbol": "✦",
             }
             if details:
-                rise_time, set_time, transit_time = _compute_daily_events(observer, location, star, tz, dt_utc)
+                rise_time, set_time, transit_time = _compute_daily_events(location, star, tz, dt_utc)
                 payload.update(rise_time=rise_time, set_time=set_time, transit_time=transit_time)
             results.append(payload)
         except Exception:

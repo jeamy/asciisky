@@ -263,7 +263,6 @@ def update_asteroid_data():
         from skyfield.data import mpc
 
         import bright_asteroids
-        from db_utils import get_database_stats
 
         # Download latest data
         ensure_data_dirs()
@@ -322,9 +321,7 @@ def update_asteroid_data():
         else:
             logger.info("✓ Asteroid dataset unchanged; keeping computed position cache")
 
-        # Verify
-        stats = get_database_stats()
-        logger.info(f"✓ Database now contains {stats['asteroids_count']} asteroids")
+        logger.info(f"✓ Asteroid dataset holds {len(df)} asteroids")
         return True
 
     except Exception as e:
@@ -338,7 +335,6 @@ def update_comet_data():
     logger.info("Updating comet data...")
     try:
         import comets
-        from db_utils import get_database_stats
 
         ensure_data_dirs()
         comet_file = Path(COMET_ELEMENTS_PATH)
@@ -382,9 +378,7 @@ def update_comet_data():
             else:
                 logger.info("✓ Comet dataset unchanged; keeping computed position cache")
 
-            # Verify
-            stats = get_database_stats()
-            logger.info(f"✓ Database now contains {stats['comets_count']} comets")
+            logger.info(f"✓ Comet dataset holds {len(df)} comets")
             return True
         else:
             logger.error("✗ Failed to load comet data")

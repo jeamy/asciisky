@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import os
-import pickle
 import threading
 import time
 from contextlib import contextmanager
@@ -32,6 +31,8 @@ POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', '5432'))
 POSTGRES_DB = os.environ.get('POSTGRES_DB', 'asciisky')
 POSTGRES_USER = os.environ.get('POSTGRES_USER', 'asciisky')
 POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'changeme')
+if os.environ.get("ASCII_SKY_ENV", "development").lower() in {"production", "prod"} and POSTGRES_PASSWORD == 'changeme':
+    raise RuntimeError("POSTGRES_PASSWORD still uses the default; set it in production")
 
 
 def database_target() -> str:
@@ -89,14 +90,27 @@ def db_transaction():
         raise e
 
 
-def close_db_connection():
-    """Close thread-local PostgreSQL connection."""
-    if hasattr(_thread_local, 'connection') and _thread_local.connection is not None:
-        try:
-            _thread_local.connection.close()
-        except Exception:
-            pass
-        _thread_local.connection = None
+def _json_default(value):
+    """Serialize numpy scalars and datetimes that computations may return."""
+    if hasattr(value, 'item'):
+        return value.item()
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _encode_cache(data) -> bytes:
+    """Encode a cache payload as JSON (never pickle: a row must not run code when read)."""
+    return json.dumps(data, default=_json_default, separators=(',', ':')).encode('utf-8')
+
+
+def _decode_cache(raw) -> Any | None:
+    """Decode a JSON cache payload; rows in the former pickle format count as a miss."""
+    try:
+        return json.loads(bytes(raw).decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        logger.info("Ignoring a cache row in the former binary format; it will be recomputed")
+        return None
 
 # ===== Asteroid Functions =====
 
@@ -134,7 +148,7 @@ def _store_positions(
     """Store one immutable position bucket for a supported minor-body type."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = pickle.dumps(position_data)
+        serialized_data = _encode_cache(position_data)
 
         cursor.execute("""
             INSERT INTO cached_positions (
@@ -172,7 +186,8 @@ def _get_positions(object_type: str, location_key: str, time_bucket: str) -> lis
 
         row = cursor.fetchone()
         if row and row['position_data']:
-            return pickle.loads(bytes(row['position_data']))
+            data = _decode_cache(row['position_data'])
+            return data if isinstance(data, list) else None
         return None
     except Exception:
         conn.rollback()
@@ -209,7 +224,7 @@ def store_sunpath_year(location_key: str, year_bucket: str,
     """
     with db_transaction() as conn:
         cursor = conn.cursor()
-        serialized_data = pickle.dumps(sunpath_data)
+        serialized_data = _encode_cache(sunpath_data)
 
         cursor.execute("""
             INSERT INTO cached_positions (
@@ -262,7 +277,9 @@ def get_sunpath_year(location_key: str, year_bucket: str,
             if age > max_age_seconds:
                 return None
 
-        data = pickle.loads(bytes(row['position_data']))
+        data = _decode_cache(row['position_data'])
+        if data is None:
+            return None
 
         # Optional schema/version guard: invalidate old cached sunpath data when
         # the computation logic changes and SUNPATH_VERSION is bumped.
@@ -405,41 +422,6 @@ def release_precompute_task(task_key: str) -> None:
             DELETE FROM precompute_task_claims WHERE task_key = %s
         """, (task_key,))
 
-def get_database_stats() -> dict:
-    """Get database statistics (asteroid/comet DataFrame availability from filesystem)."""
-    from data_paths import DATA_DIR
-
-    asteroid_file = os.path.join(DATA_DIR, 'asteroid_dataframe.pkl')
-    comet_file = os.path.join(DATA_DIR, 'comet_dataframe.pkl')
-
-    asteroid_count = 0
-    comet_count = 0
-
-    if os.path.exists(asteroid_file):
-        try:
-            file_age = time.time() - os.path.getmtime(asteroid_file)
-            if file_age <= 49 * 3600:
-                with open(asteroid_file, 'rb') as f:
-                    df = pickle.loads(f.read())
-                asteroid_count = len(df) if df is not None else 0
-        except Exception:
-            pass
-
-    if os.path.exists(comet_file):
-        try:
-            file_age = time.time() - os.path.getmtime(comet_file)
-            if file_age <= 49 * 3600:
-                with open(comet_file, 'rb') as f:
-                    df = pickle.loads(f.read())
-                comet_count = len(df) if df is not None else 0
-        except Exception:
-            pass
-
-    return {
-        'asteroids_count': asteroid_count,
-        'comets_count': comet_count
-    }
-
 # ===== User Settings Functions =====
 
 def get_user_settings(user_id: int) -> dict[str, Any] | None:
@@ -495,10 +477,14 @@ def get_all_user_locations() -> list[dict[str, Any]]:
             SELECT
                 (settings->'location'->>'latitude')::double precision AS latitude,
                 (settings->'location'->>'longitude')::double precision AS longitude,
-                (settings->'location'->>'elevation')::double precision AS elevation,
+                CASE WHEN jsonb_typeof(settings->'location'->'elevation') = 'number'
+                     THEN (settings->'location'->>'elevation')::double precision END AS elevation,
                 settings->'location'->>'name' AS name
             FROM user_settings
-            WHERE settings ? 'location'
+            -- Only rows whose coordinates are JSON numbers: one malformed row
+            -- must not make the cast fail for every user's location.
+            WHERE jsonb_typeof(settings->'location'->'latitude') = 'number'
+              AND jsonb_typeof(settings->'location'->'longitude') = 'number'
             """
         )
 

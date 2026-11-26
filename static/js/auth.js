@@ -1,324 +1,149 @@
+// Sign-in, registration and sign-out.  Names go in as text (S2); signing out
+// forgets this browser's copy of the user's settings (S7).
 import { API_ENDPOINTS } from './constants.js';
+import { t } from './i18n.js';
 import { settingsManager } from './settings.js';
+import { el } from './ui/dom.js';
+import { AppDialog, statusLine } from './ui/dialog.js';
 
 let currentUser = null;
+let dialog = null;
+let onChange = null;
 
-function loadCSSFile(url) {
+export function getCurrentUser() {
+    return currentUser;
+}
+
+export async function refreshAuthState() {
     try {
-        const links = document.getElementsByTagName('link');
-        for (let i = 0; i < links.length; i++) {
-            if (links[i].href.includes(url)) {
-                return;
-            }
-        }
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.type = 'text/css';
-        link.href = url;
-        document.head.appendChild(link);
-    } catch (_) { /* noop */ }
-}
-
-function updateAuthButton() {
-    const btn = document.getElementById('auth-btn');
-    if (!btn) return;
-    if (currentUser && currentUser.username) {
-        btn.textContent = '👤';
-        btn.title = `Account: ${currentUser.username}`;
-    } else {
-        btn.textContent = '👤';
-        btn.title = 'Login / Registrieren';
-    }
-}
-
-function isCurrentUserAdmin() {
-    return !!(currentUser && currentUser.is_admin);
-}
-
-async function refreshAuthState() {
-    try {
-        const resp = await fetch(`${API_ENDPOINTS.AUTH_ME}`, {
-            credentials: 'same-origin'
-        });
-        if (!resp.ok) {
-            currentUser = null;
-        } else {
-            const data = await resp.json();
-            if (data && data.authenticated && data.user) {
-                currentUser = data.user;
-            } else {
-                currentUser = null;
-            }
-        }
+        const resp = await fetch(API_ENDPOINTS.AUTH_ME, { credentials: 'same-origin' });
+        const data = resp.ok ? await resp.json() : null;
+        currentUser = data?.authenticated && data.user ? data.user : null;
     } catch (_) {
         currentUser = null;
     }
-    updateAuthButton();
+    onChange?.(currentUser);
+    return currentUser;
 }
 
-function closeAuthDialog() {
-    const overlay = document.querySelector('.auth-dialog-overlay');
-    if (overlay) overlay.remove();
+async function post(url, body) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (_) { /* empty body */ }
+    return { ok: resp.ok, status: resp.status, data };
 }
 
-async function performLogout() {
-    try {
-        const resp = await fetch(API_ENDPOINTS.AUTH_LOGOUT, {
-            method: 'POST',
-            credentials: 'same-origin'
-        });
-        if (resp.ok) {
+function field(id, label, type, autocomplete) {
+    const input = el('input', { id, type, autocomplete, required: true });
+    return { input, nodes: [el('label', { for: id }, label), input] };
+}
+
+function renderSignedIn() {
+    const status = statusLine();
+    const logout = el('button', { type: 'button', class: 'btn btn-primary' }, t('logout'));
+    logout.addEventListener('click', async () => {
+        try {
+            const r = await post(API_ENDPOINTS.AUTH_LOGOUT);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
             currentUser = null;
-            updateAuthButton();
-            closeAuthDialog();
-            try {
-                if (settingsManager) {
-                    settingsManager.authenticatedUserId = null;
-                }
-            } catch (_) { /* noop */ }
+            settingsManager.resetLocal();
+            dialog.close();
+            window.location.reload();
+        } catch (error) {
+            console.error('Logout failed:', error);
+            status.textContent = t('network_error');
         }
-    } catch (e) {
-        console.error('Logout failed:', e);
-    }
+    });
+    const actions = [logout];
+    if (currentUser.is_admin) actions.push(el('a', { class: 'btn', href: '/admin' }, t('user_admin')));
+    dialog.setBody(
+        el('p', {}, t('signed_in_as'), ' ', el('strong', {}, currentUser.username)),
+        el('div', { class: 'form-actions' }, actions),
+        status);
 }
 
-function showError(message) {
-    const el = document.getElementById('auth-error');
-    if (!el) return;
-    el.textContent = message || '';
-}
+function renderSignedOut(tab = 'login') {
+    const status = statusLine();
+    const tabs = el('div', { class: 'segmented', role: 'tablist' },
+        ['login', 'register'].map((name) => el('button', {
+            type: 'button', role: 'tab', class: 'seg-btn', 'aria-selected': String(name === tab),
+            onclick: () => renderSignedOut(name),
+        }, t(name === 'login' ? 'login' : 'register'))));
 
-async function performLogin() {
-    const idInput = document.getElementById('auth-login-identifier');
-    const pwInput = document.getElementById('auth-login-password');
-    if (!idInput || !pwInput) return;
-    const identifier = idInput.value.trim();
-    const password = pwInput.value;
-    if (!identifier || !password) {
-        showError('Bitte Benutzername/E-Mail und Passwort eingeben.');
-        return;
-    }
-    showError('');
-    try {
-        const resp = await fetch(API_ENDPOINTS.AUTH_LOGIN, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ identifier, password })
-        });
-        if (!resp.ok) {
-            showError('Login fehlgeschlagen. Bitte prüfen Sie Ihre Eingaben.');
-            return;
-        }
-        const data = await resp.json();
-        if (data && data.user) {
-            currentUser = data.user;
-            updateAuthButton();
-            closeAuthDialog();
+    let form;
+    if (tab === 'login') {
+        const id = field('auth-identifier', t('username_or_email'), 'text', 'username');
+        const pw = field('auth-password', t('password'), 'password', 'current-password');
+        form = el('form', { class: 'form-grid' }, id.nodes, pw.nodes,
+            el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn-primary' }, t('login'))),
+            status);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            status.textContent = '';
             try {
-                if (settingsManager && typeof settingsManager.loadUserSettingsFromServer === 'function') {
-                    await settingsManager.loadUserSettingsFromServer();
-                }
-            } catch (e) {
-                console.error('Error refreshing settings after login:', e);
-            }
-            try {
+                const r = await post(API_ENDPOINTS.AUTH_LOGIN, { identifier: id.input.value.trim(), password: pw.input.value });
+                if (r.status === 429) { status.textContent = t('too_many_attempts'); return; }
+                if (!r.ok || !r.data?.user) { status.textContent = t('login_failed'); return; }
+                // The account's settings replace whatever this browser had.
+                settingsManager.resetLocal();
                 window.location.reload();
-            } catch (_) { /* noop */ }
-        }
-    } catch (e) {
-        console.error('Login failed:', e);
-        showError('Login fehlgeschlagen (Netzwerkfehler).');
-    }
-}
-
-async function performRegister() {
-    const userInput = document.getElementById('auth-register-username');
-    const pwInput = document.getElementById('auth-register-password');
-    if (!userInput || !pwInput) return;
-    const username = userInput.value.trim();
-    const password = pwInput.value;
-    if (!username || !password) {
-        showError('Bitte Benutzername und Passwort eingeben.');
-        return;
-    }
-    // Generiere eine gültige, eindeutige Dummy-E-Mail-Adresse, da das Backend ein E-Mail-Feld erwartet
-    const randomPart = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-    const email = `user+${randomPart}@example.com`;
-    showError('');
-    try {
-        const resp = await fetch(API_ENDPOINTS.AUTH_REGISTER, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ email, username, password })
-        });
-        if (!resp.ok) {
-            showError('Registrierung fehlgeschlagen. E-Mail oder Benutzername bereits vergeben?');
-            return;
-        }
-        const data = await resp.json();
-        if (data && data.user) {
-            currentUser = data.user;
-            updateAuthButton();
-            closeAuthDialog();
-            try {
-                if (settingsManager) {
-                    try {
-                        if (typeof data.user.id === 'number') {
-                            settingsManager.authenticatedUserId = data.user.id;
-                        }
-                    } catch (_) { /* noop */ }
-                    if (typeof settingsManager.saveUserSettingsToServer === 'function') {
-                        await settingsManager.saveUserSettingsToServer();
-                    }
-                }
-            } catch (e) {
-                console.error('Error refreshing settings after registration:', e);
+            } catch (error) {
+                console.error('Login failed:', error);
+                status.textContent = t('network_error');
             }
-            try {
-                window.location.reload();
-            } catch (_) { /* noop */ }
-        }
-    } catch (e) {
-        console.error('Registration failed:', e);
-        showError('Registrierung fehlgeschlagen (Netzwerkfehler).');
-    }
-}
-
-function openAuthDialog() {
-    closeAuthDialog();
-    loadCSSFile('./static/css/dialogStyles.css');
-
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay auth-dialog-overlay';
-
-    const loggedIn = !!(currentUser && currentUser.username);
-
-    if (loggedIn) {
-        overlay.innerHTML = `
-            <div class="location-dialog auth-dialog">
-                <button class="dialog-close" type="button">×</button>
-                <h3 class="auth-dialog-title">Account</h3>
-                <p>Angemeldet als <strong>${currentUser.username}</strong></p>
-                <div id="auth-error" class="auth-error"></div>
-                <button id="auth-logout-btn" type="button" class="sim-time-btn auth-logout-btn">Logout</button>
-                ${isCurrentUserAdmin() ? '<a id="admin-open-btn" href="/admin" class="sim-time-btn auth-primary-btn">Benutzerverwaltung</a>' : ''}
-            </div>
-        `;
+        });
+        setTimeout(() => id.input.focus(), 0);
     } else {
-        overlay.innerHTML = `
-            <div class="location-dialog auth-dialog">
-                <button class="dialog-close" type="button">×</button>
-                <h3 class="auth-dialog-title">Login / Registrieren</h3>
-                <div class="auth-tabs">
-                    <button type="button" id="auth-tab-login" class="sim-time-btn auth-tab-btn">Login</button>
-                    <button type="button" id="auth-tab-register" class="sim-time-btn auth-tab-btn">Registrieren</button>
-                </div>
-                <div id="auth-error" class="auth-error"></div>
-                <div id="auth-login-panel" class="auth-panel active">
-                    <label class="auth-field-label">
-                        Benutzername<br>
-                        <input id="auth-login-identifier" type="text" class="auth-field-input">
-                    </label>
-                    <label class="auth-field-label">
-                        Passwort<br>
-                        <input id="auth-login-password" type="password" class="auth-field-input">
-                    </label>
-                    <button id="auth-login-submit" type="button" class="sim-time-btn auth-primary-btn">Login</button>
-                </div>
-                <div id="auth-register-panel" class="auth-panel hidden">
-                    <label class="auth-field-label">
-                        Benutzername<br>
-                        <input id="auth-register-username" type="text" class="auth-field-input">
-                    </label>
-                    <label class="auth-field-label">
-                        Passwort<br>
-                        <input id="auth-register-password" type="password" class="auth-field-input">
-                    </label>
-                    <button id="auth-register-submit" type="button" class="sim-time-btn auth-primary-btn">Registrieren</button>
-                </div>
-            </div>
-        `;
-    }
-
-    document.body.appendChild(overlay);
-
-    const closeBtn = overlay.querySelector('.dialog-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => closeAuthDialog());
-    }
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            closeAuthDialog();
-        }
-    });
-
-    if (loggedIn) {
-        const logoutBtn = document.getElementById('auth-logout-btn');
-        if (logoutBtn) logoutBtn.addEventListener('click', () => { performLogout(); });
-        return;
-    }
-
-    const tabLogin = document.getElementById('auth-tab-login');
-    const tabRegister = document.getElementById('auth-tab-register');
-    const panelLogin = document.getElementById('auth-login-panel');
-    const panelRegister = document.getElementById('auth-register-panel');
-
-    if (tabLogin && tabRegister) {
-        tabLogin.classList.add('active');
-        tabRegister.classList.remove('active');
-    }
-
-    if (tabLogin && tabRegister && panelLogin && panelRegister) {
-        tabLogin.addEventListener('click', () => {
-            panelLogin.classList.add('active');
-            panelLogin.classList.remove('hidden');
-            panelRegister.classList.remove('active');
-            panelRegister.classList.add('hidden');
-            tabLogin.classList.add('active');
-            tabRegister.classList.remove('active');
-            showError('');
-        });
-        tabRegister.addEventListener('click', () => {
-            panelLogin.classList.remove('active');
-            panelLogin.classList.add('hidden');
-            panelRegister.classList.add('active');
-            panelRegister.classList.remove('hidden');
-            tabRegister.classList.add('active');
-            tabLogin.classList.remove('active');
-            showError('');
-        });
-    }
-
-    const loginBtn = document.getElementById('auth-login-submit');
-    if (loginBtn) loginBtn.addEventListener('click', () => { performLogin(); });
-
-    const regBtn = document.getElementById('auth-register-submit');
-    if (regBtn) regBtn.addEventListener('click', () => { performRegister(); });
-
-    // Initial focus: Benutzername/E-Mail im Login-Panel
-    try {
-        const identifierInput = document.getElementById('auth-login-identifier');
-        if (identifierInput && typeof identifierInput.focus === 'function') {
-            identifierInput.focus();
-            if (typeof identifierInput.select === 'function') {
-                identifierInput.select();
+        const user = field('auth-username', t('username'), 'text', 'username');
+        user.input.setAttribute('minlength', '3');
+        user.input.setAttribute('maxlength', '40');
+        const pw = field('auth-new-password', t('password'), 'password', 'new-password');
+        pw.input.setAttribute('minlength', '6');
+        form = el('form', { class: 'form-grid' }, user.nodes, pw.nodes,
+            el('p', { class: 'dialog-hint form-wide' }, t('register_hint')),
+            el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn-primary' }, t('register'))),
+            status);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            status.textContent = '';
+            // The API wants an e-mail address; registration here asks only for a name.
+            const email = `user+${Date.now().toString(36)}${Math.random().toString(36).slice(2)}@example.com`;
+            try {
+                const r = await post(API_ENDPOINTS.AUTH_REGISTER, { email, username: user.input.value.trim(), password: pw.input.value });
+                if (r.status === 429) { status.textContent = t('too_many_attempts'); return; }
+                if (!r.ok || !r.data?.user) {
+                    status.textContent = typeof r.data?.detail === 'string' && r.status === 400 ? t('register_failed_name') : t('register_failed');
+                    return;
+                }
+                // The new account starts with this browser's current settings.
+                settingsManager.authenticatedUserId = r.data.user.id;
+                await settingsManager.saveUserSettingsToServer();
+                window.location.reload();
+            } catch (error) {
+                console.error('Registration failed:', error);
+                status.textContent = t('network_error');
             }
-        }
-    } catch (_) { /* noop */ }
+        });
+        setTimeout(() => user.input.focus(), 0);
+    }
+    dialog.setBody(tabs, form);
 }
 
-function setupAuthButton() {
-    const btn = document.getElementById('auth-btn');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-        openAuthDialog();
-    });
+export function openAuthDialog() {
+    if (!dialog) dialog = new AppDialog('auth-dialog');
+    dialog.setTitle(currentUser ? t('account') : t('login_register'));
+    if (currentUser) renderSignedIn();
+    else renderSignedOut();
+    dialog.open();
 }
 
-export async function initAuthUI() {
-    await refreshAuthState();
-    setupAuthButton();
+/** @param {(user|null) => void} changed  called whenever the signed-in user is known */
+export async function initAuth(changed) {
+    onChange = changed;
+    return refreshAuthState();
 }

@@ -74,21 +74,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-asciisky}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
       # RabbitMQ - NUR neue Architektur!
-      - USE_RABBITMQ=true
-      - USE_RABBITMQ_ASTEROIDS=true
-      - USE_RABBITMQ_COMETS=true
       - RABBITMQ_PERCENTAGE=100
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@rabbitmq:5672/
-      - RABBITMQ_TIMEOUT=120
       - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-60}
       - RABBITMQ_PREFETCH_COUNT=${RABBITMQ_PREFETCH_COUNT:-2}
-      # Smart Interpolation
-      - ENABLE_SMART_INTERPOLATION=${ENABLE_SMART_INTERPOLATION:-true}
-      - INTERPOLATION_STRATEGY=${INTERPOLATION_STRATEGY:-smart_interpolation}
-      - ENABLE_ON_DEMAND_COMPUTATION=${ENABLE_ON_DEMAND_COMPUTATION:-true}
-      - INTERPOLATION_ENABLED_PERCENTAGE=${INTERPOLATION_ENABLED_PERCENTAGE:-100.0}
-      - ENABLE_INTERPOLATION_BACKGROUND_TASKS=${ENABLE_INTERPOLATION_BACKGROUND_TASKS:-true}
-      - INTERPOLATION_CACHE_COMPUTED=${INTERPOLATION_CACHE_COMPUTED:-true}
       # Worker Configuration
       - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
     depends_on:
@@ -162,7 +151,7 @@ services:
   # ===== Unified Worker (für lokales Testing) =====
   # Ersetzt: precompute_worker + asteroid_worker + comet_worker
   # Verarbeitet alle Task-Typen in einem Worker
-  # HYBRID DEDUPLICATION: RabbitMQ Message Deduplication + PostgreSQL Advisory Locks
+  # Deduplication: persistent task claims in PostgreSQL (precompute_task_claims)
   unified_worker:
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     image: asciisky-web:latest
@@ -212,33 +201,6 @@ services:
     deploy:
       replicas: 2  # Nur 2 Worker für lokales Testing
   
-  # ===== Worker Monitor =====
-  # Real-time Performance Dashboard
-  # worker_monitor:
-  #   image: asciisky-web:latest
-  #   build: .
-  #   pull_policy: never
-  #   command: ["python", "workers/monitor_dashboard.py"]
-  #   extra_hosts:
-  #     - "${RABBITMQ_MAIN}:${RABBITMQ_MAIN_IP}"
-  #   volumes:
-  #     - ./cache:/app/cache
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #     - TZ=Europe/Berlin
-  #     - RABBITMQ_URL=amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-changeme}@${RABBITMQ_MAIN}:5672/
-  #     - MONITOR_HOST=0.0.0.0
-  #     - MONITOR_PORT=${MONITOR_PORT:-8080}
-  #     - WORKER_LOG_LEVEL=${WORKER_LOG_LEVEL:-INFO}
-  #   ports:
-  #     - "127.0.0.1:${MONITOR_PORT:-8080}:8080"  # Dashboard Port
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://127.0.0.1:${MONITOR_PORT:-8080}/api/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 30s
 
 volumes:
   postgres18_data:
