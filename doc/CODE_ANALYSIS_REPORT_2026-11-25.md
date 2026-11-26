@@ -275,8 +275,12 @@ oder im Echtzeitmodus veraltete Antworten liefern; ein Cache-Fehlschlag (leere L
 ohnehin nicht gecacht werden. Der Gewinn stünde in keinem Verhältnis dazu. Das neue Frontend lädt mit dem
 Standardverhalten des Browsers, ohne `no-store`.
 
-**Darstellung:** Bei 360° zeichnen Horizont und Planisphäre zeichengenau dasselbe Raster wie
-vorher (Referenz `test_fixtures/sky_grid_reference.json`, Test `test_sky_grid_matches_previous_renderer`).
+**Darstellung:** Bei 360° zeichnet der Horizont zeichengenau dasselbe Raster wie vorher, die
+Projektion der Planisphäre ist für das alte 80 × 80-Raster ebenso unverändert (Referenz
+`test_fixtures/sky_grid_reference.json`, Test `test_sky_grid_matches_previous_renderer`). In der App
+füllt die Planisphäre jetzt die ganze Fläche: gleiche Schrift wie der Horizont, so viele Zellen wie
+passen, der Horizontkreis so groß wie möglich. Unter 360° zoomt der Horizont auch die Höhe (gleicher
+Maßstab in beiden Richtungen, senkrecht verschiebbar).
 Die vier Farbthemen sind `:root[data-theme]`-Token mit Kontrast ≥ 4,5 : 1 (Test); Rot bleibt
 durchgehend rot. `user-scalable=no` ist entfernt, `theme-color` wird mitgesetzt.
 

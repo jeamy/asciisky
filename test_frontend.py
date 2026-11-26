@@ -80,6 +80,44 @@ def test_sky_grid_window_hides_bodies_outside_the_field_of_view():
 
 
 @needs_node
+def test_zoomed_horizon_zooms_altitude_too():
+    """Below 360° a degree is as many px high as wide, and the rows show a band of altitude."""
+    out = run_node(f"""
+        const {{ SkyGeometry, buildSkyGrid }} = await import('{(JS / "skyGrid.js").as_uri()}');
+        const wide = new SkyGeometry({{ mode: 'horizon', cols: 80, rows: 40, fovDeg: 360, centerAz: 180, aspect: 2 }});
+        const geo = new SkyGeometry({{ mode: 'horizon', cols: 62, rows: 40, fovDeg: 60, centerAz: 180, aspect: 2 }});
+        const span = (alt) => geo.projectExact(alt, 180).row;
+        const bodies = [
+            {{ name: 'saturn', altitude: 5, azimuth: 185 }},
+            {{ name: 'jupiter', altitude: 70, azimuth: 185 }},
+        ];
+        const low = buildSkyGrid(geo, bodies).lines.join('');
+        const up = new SkyGeometry({{ mode: 'horizon', cols: 62, rows: 40, fovDeg: 60, centerAz: 180, aspect: 2, centerAlt: 70 }});
+        const high = buildSkyGrid(up, bodies, {{ labels: {{ north: 'N', east: 'E', south: 'S', west: 'W' }} }}).lines;
+        console.log(JSON.stringify({{
+            rowsPer10: span(0) - span(10),
+            wideRowsPer10: wide.projectExact(0, 180).row - wide.projectExact(10, 180).row,
+            colsPer10: geo.projectExact(0, 190).col - geo.projectExact(0, 180).col,
+            horizonRow: geo.horizonRow,
+            low, high: high.join(''), lastRow: high[high.length - 1], upHorizon: up.horizonRow,
+            maxAlt: Math.max(...up.altLines()),
+        }}));
+    """)
+    d = json.loads(out)
+    # 10° = 10 columns; a cell is twice as tall as wide, so 5 rows (at 360°: about 2).
+    assert abs(d["colsPer10"] - 10) < 1e-9
+    assert abs(d["rowsPer10"] - 5) < 1e-9
+    assert d["wideRowsPer10"] < 2.5
+    # Default: the horizon near the bottom, not in the middle.
+    assert 30 <= d["horizonRow"] < 40
+    assert "♄" in d["low"] and "♃" not in d["low"]
+    # Looking up: Jupiter shows, Saturn left the view, the direction stays on the bottom edge.
+    assert "♃" in d["high"] and "♄" not in d["high"]
+    assert d["upHorizon"] >= 40 and "S" in d["lastRow"]
+    assert d["maxAlt"] <= 90
+
+
+@needs_node
 def test_frontend_i18n_tables_are_symmetric():
     out = run_node(f"""
         const {{ i18n, t, setLanguage }} = await import('{(JS / "i18n.js").as_uri()}');

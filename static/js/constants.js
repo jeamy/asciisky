@@ -76,8 +76,6 @@ export const CONFIG = {
     // Horizon grid at 360 degrees and the planisphere's size, in cells.
     SKY_COLS: 80,
     SKY_ROWS: 40,
-    PLANISPHERE_SIZE: 80,
-    PLANISPHERE_SCALE: 0.7,
     PLANISPHERE_ROTATION: 180, // 180 = south up
     // Fields of view of the horizon view (degrees of azimuth).
     FOV_LEVELS: [360, 180, 120, 90],

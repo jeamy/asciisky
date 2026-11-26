@@ -53,6 +53,7 @@ export function openHelp() {
         ])),
         section('help_keyboard', items([
             ['← →', 'help_key_turn'],
+            ['↑ ↓', 'help_key_tilt'],
             ['+ −', 'help_key_zoom'],
             ['H / P', 'help_key_view'],
             ['[ ]', 'help_hour_step'],

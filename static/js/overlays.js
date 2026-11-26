@@ -41,8 +41,7 @@ export function drawGrid(svg, geo, m, { showGrid = true } = {}) {
         }
         ring(0, 'horizon-ring');
     } else if (showGrid) {
-        for (let alt = -75; alt <= 75; alt += 15) {
-            if (alt === 0) continue; // the ASCII horizon is the line
+        for (const alt of geo.altLines()) { // the ASCII horizon is the line at 0
             const y = cellY(geo.projectExact(alt, geo.centerAz).row, m);
             parts.push(svgEl('line', { x1: 0, y1: y, x2: m.width, y2: y, class: 'grid-line' }));
         }

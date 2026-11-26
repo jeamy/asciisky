@@ -8,18 +8,22 @@ const PLANET_GLYPHS = new Set(['☿', '♀', '♂', '♃', '♄', '♅', '♆'])
 /**
  * Grid geometry and projection for one render.
  *
- * Horizon view: ``fovDeg`` degrees of azimuth centred on ``centerAz`` fill the
- * columns between the two horizon corners; the full altitude range -90..+90
- * fills the rows with the horizon in the middle.  At 360 degrees the mapping is
- * the classic one: column 1 is azimuth ``centerAz - 180``.
+ * Horizon view at 360 degrees, the classic mapping: column 1 is azimuth
+ * ``centerAz - 180``, the full altitude range -90..+90 fills the rows with the
+ * horizon in the middle.  Below 360 degrees (zoomed), ``fovDeg`` degrees of
+ * azimuth centred on ``centerAz`` fill the columns and the altitude is zoomed
+ * alike: one degree is as many px high as wide (``aspect``), so shapes stay
+ * true.  The rows then show a band of altitude around ``centerAlt``; without
+ * one the horizon sits near the bottom.
  *
- * Planisphere: a square grid of ``size`` cells, zenith in the centre, the
- * horizon circle at ``scale`` of the half size; ``aspect`` is cell height over
- * cell width so the circle stays round on screen.
+ * Planisphere: zenith in the centre, the horizon circle at ``radius`` columns
+ * (default: ``scale`` of the half size, as the old square grid had it);
+ * ``aspect`` is cell height over cell width so the circle stays round on
+ * screen.  Below the horizon the radius grows on to twice the horizon's.
  */
 export class SkyGeometry {
     constructor({ mode = 'horizon', cols = 80, rows = 40, fovDeg = 360, centerAz = 180,
-        rotation = 0, staticRotation = 180, aspect = 1.5, scale = 0.7 } = {}) {
+        rotation = 0, staticRotation = 180, aspect = 1.5, scale = 0.7, centerAlt = null, radius = null } = {}) {
         this.mode = mode;
         this.cols = cols;
         this.rows = rows;
@@ -30,6 +34,43 @@ export class SkyGeometry {
         this.aspect = aspect > 0 ? aspect : 1.5;
         this.scale = scale;
         this.horizonRow = Math.floor(rows / 2);
+        if (mode === 'planisphere') {
+            const maxRadius = Math.max(1, Math.min(Math.floor(rows / 2), Math.floor(cols / 2)) - 2);
+            // The fitted radius (view) keeps everything below the horizon in the
+            // grid only as far as it fits: what falls outside is not drawn.
+            this.fitted = Number.isFinite(radius) && radius > 0;
+            this.horizonRadius = this.fitted ? radius : maxRadius * scale;
+            this.labelRadius = this.fitted ? radius + 1 : maxRadius + 1;
+        }
+        this.zoomed = mode === 'horizon' && fovDeg < 360;
+        if (this.zoomed) {
+            this.degPerCol = fovDeg / Math.max(1, cols - 2);
+            this.degPerRow = Math.min(this.degPerCol * this.aspect, 180 / Math.max(1, rows - 1));
+            this.halfSpan = (this.degPerRow * (rows - 1)) / 2;
+            // Default: the horizon a little above the bottom edge.
+            const fallback = 0.7 * this.halfSpan;
+            this.centerAlt = this.clampAlt(Number.isFinite(centerAlt) ? centerAlt : fallback);
+            this.altTop = this.centerAlt + this.halfSpan;
+            // May lie outside the grid when the view looks up or down.
+            this.horizonRow = Math.round(this.altTop / this.degPerRow);
+        }
+    }
+
+    /** A centre altitude that keeps the zoomed view within -90..+90. */
+    clampAlt(alt) {
+        return Math.max(-90 + this.halfSpan, Math.min(90 - this.halfSpan, alt));
+    }
+
+    /** Altitudes of the grid lines (and, zoomed, of the altitude labels); 0 is the horizon. */
+    altLines() {
+        if (!this.zoomed) return [-75, -60, -45, -30, -15, 15, 30, 45, 60, 75];
+        const span = this.degPerRow * (this.rows - 1);
+        const step = span > 120 ? 30 : span > 60 ? 15 : span > 25 ? 10 : 5;
+        const lines = [];
+        for (let alt = -90; alt <= 90; alt += step) {
+            if (alt !== 0 && alt <= this.altTop && alt >= this.altTop - span) lines.push(alt);
+        }
+        return lines;
     }
 
     get startAz() {
@@ -56,40 +97,39 @@ export class SkyGeometry {
     _horizon(altitude, azimuth) {
         const h = this.horizonRow;
         const alt = Number.isFinite(altitude) ? Math.max(-90, Math.min(90, altitude)) : 0;
+        if (this.zoomed) return this._horizonZoomed(alt, azimuth);
         const row = alt >= 0
             ? h - (alt / 90) * h
             : h + (-alt / 90) * (this.rows - h - 1);
         const inner = this.cols - 2;
-        let col;
-        let inside = true;
-        if (this.fovDeg >= 360) {
-            col = (wrap360(azimuth - this.startAz) / 360) * inner + 1;
-        } else {
-            // Signed offset from the view centre, so overlays can draw lines
-            // that leave the window instead of jumping across it.
-            const rel = wrap360(azimuth - this.centerAz + 180) - 180;
-            col = (rel / this.fovDeg + 0.5) * inner + 1;
-            inside = Math.abs(rel) <= this.fovDeg / 2;
-        }
+        const col = (wrap360(azimuth - this.startAz) / 360) * inner + 1;
+        return { row, col, inside: true };
+    }
+
+    _horizonZoomed(alt, azimuth) {
+        // Signed offsets from the view centre, so overlays can draw lines that
+        // leave the window instead of jumping across it.
+        const rel = wrap360(azimuth - this.centerAz + 180) - 180;
+        const col = (rel / this.fovDeg + 0.5) * (this.cols - 2) + 1;
+        const row = (this.altTop - alt) / this.degPerRow;
+        const inside = Math.abs(rel) <= this.fovDeg / 2 && row > -0.5 && row < this.rows - 0.5;
         return { row, col, inside };
     }
 
     _planisphere(altitude, azimuth) {
         const centerRow = Math.floor(this.rows / 2);
         const centerCol = Math.floor(this.cols / 2);
-        const maxRadius = Math.max(1, Math.min(centerRow, centerCol) - 2);
-        const baseRadius = maxRadius * this.scale;
+        const baseRadius = this.horizonRadius;
         const alt = Number.isFinite(altitude) ? Math.max(-90, Math.min(90, altitude)) : 0;
         const r = alt >= 0
             ? ((90 - alt) / 90) * baseRadius
             : baseRadius + (-alt / 90) * baseRadius;
         const az = wrap360((Number.isFinite(azimuth) ? azimuth : 0) + this.staticRotation + this.rotation);
         const theta = az * Math.PI / 180;
-        return {
-            col: centerCol + r * Math.sin(theta),
-            row: centerRow - (r * Math.cos(theta)) / this.aspect,
-            inside: true,
-        };
+        const col = centerCol + r * Math.sin(theta);
+        const row = centerRow - (r * Math.cos(theta)) / this.aspect;
+        const inside = !this.fitted || (col > -0.5 && col < this.cols - 0.5 && row > -0.5 && row < this.rows - 0.5);
+        return { col, row, inside };
     }
 
     /** Distance from a cell to a body's cell, in cells; horizontal wrap at 360 degrees. */
@@ -182,9 +222,14 @@ export function buildSkyGrid(geo, bodies, opts = {}) {
 
 function drawHorizonFrame(sky, geo, labels) {
     const { cols, rows, horizonRow } = geo;
-    for (let c = 1; c < cols - 1; c++) sky[horizonRow][c] = ASCII_ART.HORIZON;
-    sky[horizonRow][0] = ASCII_ART.HORIZON_START;
-    sky[horizonRow][cols - 1] = ASCII_ART.HORIZON_END;
+    const horizonShown = horizonRow >= 0 && horizonRow < rows;
+    if (horizonShown) {
+        for (let c = 1; c < cols - 1; c++) sky[horizonRow][c] = ASCII_ART.HORIZON;
+        sky[horizonRow][0] = ASCII_ART.HORIZON_START;
+        sky[horizonRow][cols - 1] = ASCII_ART.HORIZON_END;
+    }
+    // Looking up (or down), the directions stay on the edge nearest the horizon.
+    const dirRow = horizonShown ? horizonRow : (horizonRow < 0 ? 0 : rows - 1);
 
     const dirs = [
         { label: labels.north, az: 0 }, { label: labels.east, az: 90 },
@@ -202,12 +247,14 @@ function drawHorizonFrame(sky, geo, labels) {
         }
     } else {
         for (const d of dirs) {
-            const p = geo.project(0, d.az);
-            if (p.inside && p.col > 0 && p.col < cols - 1) sky[horizonRow][p.col] = d.label;
+            const rel = wrap360(d.az - geo.centerAz + 180) - 180;
+            const col = Math.round((rel / geo.fovDeg + 0.5) * (cols - 2) + 1);
+            if (Math.abs(rel) <= geo.fovDeg / 2 && col > 0 && col < cols - 1) sky[dirRow][col] = d.label;
         }
     }
 
-    for (const alt of [90, 60, 30, -30, -60, -90]) {
+    const altLabels = geo.zoomed ? geo.altLines() : [90, 60, 30, -30, -60, -90];
+    for (const alt of altLabels) {
         const row = Math.round(geo.projectExact(alt, geo.centerAz).row);
         if (row < 0 || row >= rows || row === horizonRow) continue;
         const text = `${alt > 0 ? '+' : '-'}${Math.abs(alt)}`;
@@ -219,7 +266,7 @@ function drawPlanisphereFrame(sky, geo, labels) {
     const { cols, rows } = geo;
     const centerRow = Math.floor(rows / 2);
     const centerCol = Math.floor(cols / 2);
-    const maxRadius = Math.max(1, Math.min(centerRow, centerCol) - 2);
+    const outer = geo.labelRadius;
     const dirs = [
         { label: labels.north, az: 0 }, { label: labels.east, az: 90 },
         { label: labels.south, az: 180 }, { label: labels.west, az: 270 },
@@ -228,9 +275,11 @@ function drawPlanisphereFrame(sky, geo, labels) {
         const p = geo.projectExact(0, d.az);
         const dx = p.col - centerCol;
         const dy = p.row - centerRow;
-        const len = Math.hypot(dx, dy) || 1;
-        const row = Math.max(0, Math.min(rows - 1, Math.round(centerRow + (dy / len) * (maxRadius + 1))));
-        const outCol = Math.round(centerCol + (dx / len) * (maxRadius + 1));
+        // Fitted: ``outer`` columns out on screen (dy counts rows, each ``aspect`` columns tall).
+        // The reference grid keeps the old placement, ``outer`` cells out.
+        const k = outer / ((geo.fitted ? Math.hypot(dx, dy * geo.aspect) : Math.hypot(dx, dy)) || 1);
+        const row = Math.max(0, Math.min(rows - 1, Math.round(centerRow + dy * k)));
+        const outCol = Math.round(centerCol + dx * k);
         const start = Math.max(0, Math.min(cols - d.label.length, outCol - Math.floor(d.label.length / 2)));
         for (let i = 0; i < d.label.length && start + i < cols; i++) sky[row][start + i] = d.label[i];
     }

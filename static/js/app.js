@@ -358,6 +358,8 @@ function onKey(e) {
     const actions = {
         ArrowLeft: () => view.turn(-turnStep()),
         ArrowRight: () => view.turn(turnStep()),
+        ArrowUp: () => view.tilt(turnStep()),
+        ArrowDown: () => view.tilt(-turnStep()),
         '+': () => view.stepZoom(1),
         '=': () => view.stepZoom(1),
         '-': () => view.stepZoom(-1),

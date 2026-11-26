@@ -10,7 +10,6 @@ const FOVS = CONFIG.FOV_LEVELS;               // [360, 180, 120, 90]
 const ZOOMS = CONFIG.PLANISPHERE_ZOOM_LEVELS; // [1, 1.5, 2, 3]
 const HORIZON_ROWS = CONFIG.SKY_ROWS;
 const HORIZON_COLS = CONFIG.SKY_COLS;
-const PLANI_COLS = CONFIG.PLANISPHERE_SIZE;
 const TAP_SLOP_PX = 6;
 const PINCH_STEP = 1.3;
 // Glyphs drawn as fixed one-cell boxes, so a symbol from a fallback font can
@@ -30,6 +29,7 @@ export class SkyView {
         this.opts = opts;
         this.view = {
             mode: 'horizon', centerAz: 180, fov: 360, rotation: 0, zoom: 1, panX: 0, panY: 0,
+            centerAlt: null, // zoomed horizon: altitude of the view centre (null = horizon near the bottom)
         };
         this.layers = { constellations: false, messier: false, grid: true };
         this.bodies = [];
@@ -89,7 +89,8 @@ export class SkyView {
         } else {
             const i = clamp(FOVS.indexOf(v.fov) + dir, 0, FOVS.length - 1);
             if (FOVS[i] === v.fov) return;
-            this.setView({ fov: FOVS[i] });
+            // Back at 360 degrees the whole sky shows: forget the altitude.
+            this.setView({ fov: FOVS[i], ...(FOVS[i] === 360 ? { centerAlt: null } : {}) });
         }
         this._commit();
     }
@@ -99,6 +100,13 @@ export class SkyView {
         if (this.view.mode === 'planisphere') this.setView({ rotation: this.view.rotation + deg });
         else this.setView({ centerAz: this.view.centerAz + deg });
         this._commit();
+    }
+
+    /** Look up (+) or down (-) by ``deg`` degrees; only a zoomed horizon view has room. */
+    tilt(deg) {
+        const geo = this._geo;
+        if (this.view.mode !== 'horizon' || !geo?.zoomed) return;
+        this.setView({ centerAlt: geo.clampAlt(geo.centerAlt + deg) });
     }
 
     scheduleRender() {
@@ -149,19 +157,22 @@ export class SkyView {
         const H = Math.max(1, this.host.clientHeight);
         const { w: rw, h: rh } = this._glyphRatio();
         const v = this.view;
-        if (v.mode === 'planisphere') {
-            const cols = PLANI_COLS;
-            const rows = Math.round(cols * rw / rh);
-            const font = Math.min(CONFIG.MAX_FONT_PX, W / (cols * rw), H / (rows * rh));
-            return { font, cols, rows, aspect: rh / rw };
-        }
         let font = Math.min(CONFIG.MAX_FONT_PX, W / (HORIZON_COLS * rw), H / (HORIZON_ROWS * rh));
-        let cols = HORIZON_COLS;
-        if (v.fov < 360) {
-            // A part of the horizon: readable glyphs, as many columns as fit.
+        if (v.mode === 'planisphere' || v.fov < 360) {
+            // Readable glyphs, as many cells as fit.  The planisphere uses the
+            // horizon's font and fills the whole area.
             font = Math.max(CONFIG.MIN_FONT_PX, font);
-            cols = clamp(Math.floor(W / (font * rw)), 24, 160);
         }
+        if (v.mode === 'planisphere') {
+            const cols = clamp(Math.floor(W / (font * rw)), 24, 240);
+            const rows = clamp(Math.floor(H / (font * rh)), 12, 120);
+            const aspect = rh / rw;
+            // The horizon circle as large as fits, with room for N/E/S/W outside.
+            const radius = Math.max(4, Math.min(Math.floor(cols / 2), Math.floor(rows / 2) * aspect) - 2.5);
+            return { font, cols, rows, aspect, radius };
+        }
+        let cols = HORIZON_COLS;
+        if (v.fov < 360) cols = clamp(Math.floor(W / (font * rw)), 24, 160);
         const rows = clamp(Math.floor(H / (font * rh)), 21, HORIZON_ROWS);
         return { font, cols, rows, aspect: rh / rw };
     }
@@ -180,7 +191,8 @@ export class SkyView {
             rotation: v.rotation,
             staticRotation: CONFIG.PLANISPHERE_ROTATION,
             aspect: lay.aspect,
-            scale: CONFIG.PLANISPHERE_SCALE,
+            centerAlt: v.centerAlt,
+            radius: lay.radius,
         });
         const built = buildSkyGrid(geo, this.bodies, {
             selectedName: this.selectedName,
@@ -319,7 +331,15 @@ export class SkyView {
             g.samples.push({ t: performance.now(), v: delta });
         } else {
             const deg = -dx * this._degPerPx();
-            this.setView({ centerAz: v.centerAz + deg });
+            const patch = { centerAz: v.centerAz + deg };
+            const geo = this._geo;
+            if (geo?.zoomed && this._metrics) {
+                // Grab the sky: dragging down brings higher altitudes into view.
+                // Start from the clamped value, so a drag past the zenith does not stick.
+                patch.centerAlt = geo.clampAlt(geo.centerAlt + (dy * geo.degPerRow) / this._metrics.ch);
+                geo.centerAlt = patch.centerAlt;
+            }
+            this.setView(patch);
             g.samples.push({ t: performance.now(), v: deg });
         }
         if (g.samples.length > 6) g.samples.shift();
