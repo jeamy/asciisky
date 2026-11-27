@@ -71,7 +71,11 @@ export class SunpathChart {
         this.status = statusLine();
         this.chart = el('div', { class: 'sunpath-chart' });
         this.tip = el('div', { class: 'sunpath-tip', hidden: true });
-        this.wrap = el('div', { class: 'sunpath-wrap' }, this.chart, this.tip);
+        // Touch: the values go into a box above the chart, where the finger
+        // and the hand do not cover them; it keeps the last day touched.
+        this.dock = el('div', { class: 'sunpath-dock', 'aria-live': 'polite' });
+        this.dock.hidden = !matchMedia('(pointer: coarse)').matches;
+        this.wrap = el('div', { class: 'sunpath-wrap' }, this.dock, this.chart, this.tip);
         this.dialog.setBody(this.status, this.wrap);
         this._loading = null;
         this.data = null;
@@ -85,6 +89,7 @@ export class SunpathChart {
         this.dialog.open();
         if (this._loading?.key === key) return; // already on its way
         this.chart.replaceChildren();
+        this.dock.replaceChildren(el('p', { class: 'sunpath-hint' }, t('sunpath_touch_hint')));
         const cached = cache.get(key);
         if (cached) {
             this.data = cached;
@@ -230,6 +235,14 @@ export class SunpathChart {
             [t('nautical_twilight'), intervalsText(pt.nautical_twilight_periods, pt.nautical_twilight_start, pt.nautical_twilight_end)],
             [t('civil_twilight'), intervalsText(pt.civil_twilight_periods, pt.civil_twilight_start, pt.civil_twilight_end)],
         ];
+        if (evt.pointerType === 'touch' || evt.pointerType === 'pen') {
+            this.tip.hidden = true;
+            this.dock.hidden = false;
+            // The twilight rows (the last three) can hold several intervals: full width.
+            this.dock.replaceChildren(el('dl', {}, rows.map(([k, v], i) => el('div', { class: i >= rows.length - 3 ? 'wide' : null },
+                el('dt', {}, k), el('dd', {}, v)))));
+            return;
+        }
         this.tip.replaceChildren(el('dl', {}, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
         this.tip.hidden = false;
         const frame = this.wrap.getBoundingClientRect();

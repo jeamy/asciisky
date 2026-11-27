@@ -133,6 +133,7 @@ export const i18n = {
         // sunpath
         sunpath_title: 'Sonnenauf- und -untergang',
         sunpath_error: 'Die Jahreskurve konnte nicht geladen werden.',
+        sunpath_touch_hint: 'Tippe auf das Diagramm oder ziehe darüber, um die Zeiten eines Tages zu sehen.',
         day_length: 'Tageslänge',
         astronomical_twilight: 'Astronomische Dämmerung',
         nautical_twilight: 'Nautische Dämmerung',
@@ -316,6 +317,7 @@ export const i18n = {
 
         sunpath_title: 'Sunrise and sunset',
         sunpath_error: 'The year curve could not be loaded.',
+        sunpath_touch_hint: 'Tap the chart or drag across it to see the times of a day.',
         day_length: 'Day length',
         astronomical_twilight: 'Astronomical twilight',
         nautical_twilight: 'Nautical twilight',

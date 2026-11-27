@@ -224,6 +224,20 @@
     .sunpath-tip dl { display: grid; grid-template-columns: auto auto; gap: 2px 10px; margin: 0; }
     .sunpath-tip dt { color: var(--fg-dim); }
     .sunpath-tip dd { margin: 0; }
+    .sunpath-dock {
+        min-height: 7.5em;
+        margin-bottom: 8px;
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg);
+        font: 12px var(--font-mono);
+    }
+    .sunpath-dock dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 84px), 1fr)); gap: 4px 12px; margin: 0; }
+    .sunpath-dock .wide { grid-column: 1 / -1; }
+    .sunpath-dock dt { color: var(--fg-dim); font-size: 11px; }
+    .sunpath-dock dd { margin: 0; }
+    .sunpath-hint { margin: 0; color: var(--fg-dim); }
 
     /* admin page */
     .admin-main { padding: 16px; overflow: auto; }
